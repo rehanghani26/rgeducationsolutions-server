@@ -39,11 +39,11 @@ const StudentSchema = new mongoose.Schema(
       trim: true,
     },
     classId: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
       ref: "Class",
     },
     sectionId: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
       ref: "Section",
     },
     dob: {

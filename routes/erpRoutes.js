@@ -3,7 +3,8 @@ import multer from 'multer';
 import {
   getClasses, getSections, getSubjects,
   getBooks, createBook, getLibraryIssues, issueBook,
-  getTransport, getNotifications, getSettings, updateSettings, uploadProfileImage
+  getTransport, getNotifications, getSettings, updateSettings, uploadProfileImage,
+  seedDummies
 } from '../controllers/erpController.js';
 import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/rbac.js';
@@ -25,6 +26,7 @@ const upload = multer({
 router.get('/classes', protect, getClasses);
 router.get('/sections', protect, getSections);
 router.get('/subjects', protect, getSubjects);
+router.get('/seed-dummies', protect, seedDummies);
 
 // Library Routes
 router.get('/library/books', protect, getBooks);

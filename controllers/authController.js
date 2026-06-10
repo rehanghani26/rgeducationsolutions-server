@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import Setting from '../models/Setting.js';
 import { generateTokens, protect } from '../middleware/auth.js';
 import { checkFallback } from '../config/db.js';
 import { FallbackDb } from '../services/dbFallback.js';
@@ -24,7 +25,7 @@ export const login = async (req, res) => {
       }
       
       // In fallback mode, accept simple plaintext passwords matching the username for debugging simplicity
-      const isMatch = password === username || password === 'admin' || password === 'password';
+      const isMatch = password === user.password || password === username || password === 'admin' || password === 'password';
       if (!isMatch) {
         return res.status(401).json({ success: false, message: 'Invalid credentials' });
       }
@@ -211,4 +212,163 @@ export const getMe = async (req, res) => {
       twoFactorEnabled: req.user.twoFactorEnabled || false
     }
   });
+};
+
+export const signup = async (req, res) => {
+  const {
+    name, username, email, password,
+    schoolName, schoolCode, schoolType, establishedYear, academicYear,
+    contactEmail, schoolPhone, alternatePhone, websiteUrl,
+    addressLine1, addressLine2, city, state, country, postalCode,
+    schoolMotto, principalName
+  } = req.body;
+
+  if (!name || !username || !email || !password || !schoolName) {
+    return res.status(400).json({ success: false, message: 'Please provide all required fields' });
+  }
+
+  try {
+    let user = null;
+
+    if (checkFallback()) {
+      // Look up in fallback memory DB
+      const existingUser = FallbackDb.findOne('users', { username: username.toLowerCase() }) ||
+                           FallbackDb.findOne('users', { email: email.toLowerCase() });
+      
+      if (existingUser) {
+        return res.status(400).json({ success: false, message: 'Username or email already exists' });
+      }
+
+      user = FallbackDb.create('users', {
+        username: username.toLowerCase(),
+        email: email.toLowerCase(),
+        password, // stored as plaintext or simple representation in fallback
+        role: 'super-admin',
+        name,
+        isActive: true
+      });
+
+      // Update fallback settings
+      FallbackDb.updateSettings({
+        schoolName,
+        schoolCode: schoolCode || '',
+        schoolType: schoolType || 'secondary',
+        establishedYear: Number(establishedYear) || new Date().getFullYear(),
+        academicYear: academicYear || '2026-2027',
+        contactEmail: contactEmail || email,
+        schoolPhone: schoolPhone || '',
+        alternatePhone: alternatePhone || '',
+        websiteUrl: websiteUrl || '',
+        addressLine1: addressLine1 || '',
+        addressLine2: addressLine2 || '',
+        city: city || '',
+        state: state || '',
+        country: country || '',
+        postalCode: postalCode || '',
+        schoolMotto: schoolMotto || '',
+        principalName: principalName || ''
+      });
+    } else {
+      // Look up in real MongoDB
+      const existingUser = await User.findOne({
+        $or: [
+          { username: username.toLowerCase() },
+          { email: email.toLowerCase() }
+        ]
+      });
+
+      if (existingUser) {
+        return res.status(400).json({ success: false, message: 'Username or email already exists' });
+      }
+
+      user = await User.create({
+        name,
+        username: username.toLowerCase(),
+        email: email.toLowerCase(),
+        password,
+        role: 'super-admin',
+        isActive: true
+      });
+
+      // Create or update Setting in MongoDB
+      await Setting.findOneAndUpdate(
+        {},
+        {
+          schoolName,
+          schoolCode: schoolCode || '',
+          schoolType: schoolType || 'secondary',
+          establishedYear: Number(establishedYear) || new Date().getFullYear(),
+          academicYear: academicYear || '2026-2027',
+          contactEmail: contactEmail || email,
+          schoolPhone: schoolPhone || '',
+          alternatePhone: alternatePhone || '',
+          websiteUrl: websiteUrl || '',
+          addressLine1: addressLine1 || '',
+          addressLine2: addressLine2 || '',
+          city: city || '',
+          state: state || '',
+          country: country || '',
+          postalCode: postalCode || '',
+          schoolMotto: schoolMotto || '',
+          principalName: principalName || ''
+        },
+        { new: true, upsert: true }
+      );
+    }
+
+    // Generate tokens
+    const { accessToken, refreshToken } = generateTokens(user);
+
+    const loginEntry = {
+      ip: req.ip || req.headers['x-forwarded-for'],
+      userAgent: req.headers['user-agent'],
+      timestamp: new Date(),
+    };
+
+    // Save refresh token and login history
+    if (checkFallback()) {
+      const history = [...(user.loginHistory || []), loginEntry].slice(-20);
+      FallbackDb.update('users', user.id, { refreshToken, lastLogin: loginEntry.timestamp, loginHistory: history });
+    } else {
+      user.refreshToken = refreshToken;
+      user.lastLogin = loginEntry.timestamp;
+      user.loginHistory = [...(user.loginHistory || []), loginEntry].slice(-20);
+      await user.save();
+    }
+
+    await logActivity({
+      userId: user.id || user._id,
+      action: 'SIGNUP',
+      module: 'auth',
+      details: `Super Admin ${user.name} signed up and registered school ${schoolName}`,
+      ipAddress: loginEntry.ip,
+      userAgent: loginEntry.userAgent,
+    });
+
+    // Set cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Registration successful',
+      accessToken,
+      user: {
+        id: user.id || user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        permissions: user.permissions || [],
+        name: user.name,
+        isActive: user.isActive
+      }
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    return res.status(500).json({ success: false, message: 'Server error during registration' });
+  }
 };

@@ -51,6 +51,8 @@ const buildStudentPayload = async (data) => {
     email,
     admissionNumber,
     rollNumber: data.rollNumber || admissionNumber.replace(/\D/g, ""),
+    classId: data.classId && data.classId !== "" ? data.classId : null,
+    sectionId: data.sectionId && data.sectionId !== "" ? data.sectionId : null,
     contactNumber: data.contactNumber || data.phone || "",
     permissions: Array.isArray(data.permissions) && data.permissions.length ? data.permissions : DEFAULT_STUDENT_PERMISSIONS,
     status: data.status || "active",
@@ -267,6 +269,21 @@ export const createStudent = async (req, res) => {
         return res.status(409).json({ success: false, message: "Student admission number or email already exists" });
       }
 
+      const parentEmail = normalizeEmail(payload.parentEmail || `${payload.parentContact}@parent.school.local`);
+      let parent = FallbackDb.findOne("parents", { phone: payload.parentContact }) ||
+        (payload.parentEmail ? FallbackDb.findOne("parents", { email: parentEmail }) : null);
+
+      if (!parent) {
+        const existingParentUser = FallbackDb.findOne("users", { email: parentEmail }) ||
+          FallbackDb.findOne("users", { username: `par_${payload.parentContact}` });
+        if (existingParentUser) {
+          return res.status(409).json({
+            success: false,
+            message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`,
+          });
+        }
+      }
+
       const userRecord = FallbackDb.create("users", {
         username: payload.admissionNumber.toLowerCase(),
         admissionNumber: payload.admissionNumber,
@@ -311,6 +328,22 @@ export const createStudent = async (req, res) => {
     const existingStudent = await Student.findOne({ admissionNumber: payload.admissionNumber });
     if (existingUser || existingStudent) {
       return res.status(409).json({ success: false, message: "Student admission number or email already exists" });
+    }
+
+    const parentEmail = normalizeEmail(payload.parentEmail || `${payload.parentContact}@parent.school.local`);
+    let parent = await Parent.findOne({
+      $or: [{ phone: payload.parentContact }, ...(payload.parentEmail ? [{ email: parentEmail }] : [])],
+    });
+    if (!parent) {
+      const existingParentUser = await User.findOne({
+        $or: [{ username: `par_${payload.parentContact}` }, { email: parentEmail }],
+      });
+      if (existingParentUser) {
+        return res.status(409).json({
+          success: false,
+          message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`,
+        });
+      }
     }
 
     const studentRecord = await Student.create(payload);
@@ -365,6 +398,8 @@ export const updateStudent = async (req, res) => {
     delete updateData.confirmPassword;
     if (updateData.email) updateData.email = normalizeEmail(updateData.email);
     if (updateData.admissionNumber) updateData.admissionNumber = normalizeAdmissionNumber(updateData.admissionNumber);
+    if (updateData.classId === "") updateData.classId = null;
+    if (updateData.sectionId === "") updateData.sectionId = null;
     if (updateData.firstName || updateData.lastName) {
       updateData.name = `${updateData.firstName || ""} ${updateData.lastName || ""}`.trim();
     }
