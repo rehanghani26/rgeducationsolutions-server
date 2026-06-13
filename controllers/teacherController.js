@@ -500,3 +500,149 @@ export const exportTeachers = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+export const getAllLeaves = async (req, res) => {
+  try {
+    let leavesList = [];
+    if (checkFallback()) {
+      const teachers = FallbackDb.find('teachers') || [];
+      teachers.forEach(t => {
+        (t.leaves || []).forEach(l => {
+          leavesList.push({
+            ...l,
+            teacherId: t.id,
+            teacherName: t.name,
+            employeeId: t.employeeId,
+            designation: t.designation,
+            department: t.department
+          });
+        });
+      });
+    } else {
+      const teachers = await Teacher.find();
+      teachers.forEach(t => {
+        (t.leaves || []).forEach(l => {
+          leavesList.push({
+            _id: l._id,
+            id: l._id,
+            date: l.date,
+            reason: l.reason,
+            status: l.status,
+            teacherId: t._id,
+            teacherName: t.name,
+            employeeId: t.employeeId,
+            designation: t.designation,
+            department: t.department
+          });
+        });
+      });
+    }
+    leavesList.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return res.json({ success: true, leaves: leavesList });
+  } catch (error) {
+    console.error('getAllLeaves error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export const requestLeave = async (req, res) => {
+  try {
+    const { date, reason } = req.body;
+    if (!date || !reason) {
+      return res.status(400).json({ success: false, message: 'Date and reason are required' });
+    }
+
+    if (checkFallback()) {
+      const teacher = FallbackDb.findOne('teachers', { user: req.user.id }) || FallbackDb.findById('teachers', req.user.profileId);
+      if (!teacher) {
+        return res.status(404).json({ success: false, message: 'Teacher record not found' });
+      }
+      const newLeave = {
+        id: Math.random().toString(36).substring(2, 9),
+        _id: Math.random().toString(36).substring(2, 9),
+        date: new Date(date).toISOString(),
+        reason,
+        status: 'pending'
+      };
+      const leaves = [...(teacher.leaves || []), newLeave];
+      FallbackDb.update('teachers', teacher.id, { leaves });
+      return res.status(201).json({ success: true, message: 'Leave requested successfully', leaves });
+    } else {
+      let teacher = await Teacher.findOne({ user: req.user._id });
+      if (!teacher && req.user.profileId) {
+        teacher = await Teacher.findById(req.user.profileId);
+      }
+      if (!teacher) {
+        return res.status(404).json({ success: false, message: 'Teacher record not found' });
+      }
+      teacher.leaves.push({ date: new Date(date), reason, status: 'pending' });
+      await teacher.save();
+      return res.status(201).json({ success: true, message: 'Leave requested successfully', leaves: teacher.leaves });
+    }
+  } catch (error) {
+    console.error('requestLeave error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export const reviewLeave = async (req, res) => {
+  try {
+    const { teacherId, leaveId } = req.params;
+    const { status } = req.body;
+
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+
+    if (checkFallback()) {
+      const teacher = FallbackDb.findById('teachers', teacherId);
+      if (!teacher) {
+        return res.status(404).json({ success: false, message: 'Teacher record not found' });
+      }
+      const leaves = (teacher.leaves || []).map(l => {
+        if (l.id === leaveId || l._id === leaveId) {
+          return { ...l, status };
+        }
+        return l;
+      });
+      FallbackDb.update('teachers', teacherId, { leaves });
+      return res.json({ success: true, message: `Leave ${status} successfully`, leaves });
+    } else {
+      const teacher = await Teacher.findById(teacherId);
+      if (!teacher) {
+        return res.status(404).json({ success: false, message: 'Teacher record not found' });
+      }
+      const leave = teacher.leaves.id(leaveId);
+      if (!leave) {
+        return res.status(404).json({ success: false, message: 'Leave record not found' });
+      }
+      leave.status = status;
+      await teacher.save();
+      return res.json({ success: true, message: `Leave ${status} successfully`, leaves: teacher.leaves });
+    }
+  } catch (error) {
+    console.error('reviewLeave error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export const getMyLeaves = async (req, res) => {
+  try {
+    let teacher = null;
+    if (checkFallback()) {
+      teacher = FallbackDb.findOne('teachers', { user: req.user.id }) || FallbackDb.findById('teachers', req.user.profileId);
+    } else {
+      teacher = await Teacher.findOne({ user: req.user._id });
+      if (!teacher && req.user.profileId) {
+        teacher = await Teacher.findById(req.user.profileId);
+      }
+    }
+    if (!teacher) {
+      return res.status(404).json({ success: false, message: 'Teacher record not found' });
+    }
+    return res.json({ success: true, leaves: teacher.leaves || [] });
+  } catch (error) {
+    console.error('getMyLeaves error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};

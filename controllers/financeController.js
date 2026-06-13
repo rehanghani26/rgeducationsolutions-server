@@ -143,20 +143,43 @@ export const collectFee = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please provide a valid payment amount' });
     }
 
-    if (!studentId && !feeId) {
+    let targetStudentId = studentId;
+    let targetFeeId = feeId;
+
+    if (req.user.role === 'student') {
+      let resolvedStudentId = '';
+      if (checkFallback()) {
+        const student = FallbackDb.findOne('students', { user: req.user.id }) || FallbackDb.findById('students', req.user.profileId);
+        if (student) resolvedStudentId = student.id;
+      } else {
+        let student = await Student.findOne({ user: req.user._id });
+        if (!student && req.user.profileId) {
+          student = await Student.findById(req.user.profileId);
+        }
+        if (student) resolvedStudentId = student._id.toString();
+      }
+
+      if (!resolvedStudentId) {
+        return res.status(404).json({ success: false, message: 'Student profile not found for logged in user' });
+      }
+      targetStudentId = resolvedStudentId;
+      targetFeeId = undefined; // Force student lookup by studentId rather than arbitrary feeId
+    }
+
+    if (!targetStudentId && !targetFeeId) {
       return res.status(400).json({ success: false, message: 'Student ID or Fee ID is required' });
     }
 
     let feeRecord = null;
 
     if (checkFallback()) {
-      feeRecord = feeId
-        ? FallbackDb.findById('fees', feeId)
-        : FallbackDb.findOne('fees', { studentId });
+      feeRecord = targetFeeId
+        ? FallbackDb.findById('fees', targetFeeId)
+        : FallbackDb.findOne('fees', { studentId: targetStudentId });
 
       if (!feeRecord) {
         feeRecord = FallbackDb.create('fees', {
-          studentId,
+          studentId: targetStudentId,
           amountPaid: 0,
           amountPending: 20000,
           status: 'unpaid',
@@ -184,16 +207,16 @@ export const collectFee = async (req, res) => {
       });
       feeRecord = enrichFee(feeRecord);
     } else {
-      feeRecord = feeId
-        ? await Fee.findById(feeId)
-        : await Fee.findOne({ studentId });
+      feeRecord = targetFeeId
+        ? await Fee.findById(targetFeeId)
+        : await Fee.findOne({ studentId: targetStudentId });
 
       if (!feeRecord) {
-        const studentObj = await Student.findById(studentId);
+        const studentObj = await Student.findById(targetStudentId);
         if (!studentObj) return res.status(404).json({ success: false, message: 'Student record not found' });
 
         feeRecord = new Fee({
-          studentId,
+          studentId: targetStudentId,
           amountPaid: 0,
           amountPending: 20000,
           dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
