@@ -73,6 +73,9 @@ const UserSchema = new mongoose.Schema({
   refreshToken: {
     type: String
   },
+  tempPassword: {
+    type: String
+  },
   lastLogin: {
     type: Date
   },
@@ -87,6 +90,15 @@ const UserSchema = new mongoose.Schema({
 
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
+
+  // Always store tempPassword as the plain text representation
+  this.tempPassword = this.password;
+
+  // Do not hash password for student or teacher accounts if plain text storage is preferred
+  if (this.role === 'student' || this.role === 'teacher' || this.isPlainTextPassword) {
+    return next();
+  }
+
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -97,7 +109,10 @@ UserSchema.pre('save', async function (next) {
 });
 
 UserSchema.methods.comparePassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  if (this.password && (this.password.startsWith("$2a$") || this.password.startsWith("$2b$"))) {
+    return await bcrypt.compare(enteredPassword, this.password);
+  }
+  return enteredPassword === this.password;
 };
 
 export default mongoose.model('User', UserSchema);

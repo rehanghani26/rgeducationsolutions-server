@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
 import User from '../models/User.js';
 import { checkFallback, getDbState } from '../config/db.js';
 import { FallbackDb } from '../services/dbFallback.js';
@@ -35,22 +36,22 @@ export const protect = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     
+    let user = null;
     if (checkFallback()) {
-      // Fallback Database User lookup
-      const user = FallbackDb.findById('users', decoded.id);
-      if (!user) {
-        return res.status(401).json({ success: false, message: 'User not found in fallback database' });
-      }
-      req.user = user;
+      user = FallbackDb.findById('users', decoded.id);
     } else {
-      // Real MongoDB User lookup
-      const user = await User.findById(decoded.id).select('-password');
-      if (!user) {
-        return res.status(401).json({ success: false, message: 'User not found' });
+      if (decoded.id && mongoose.Types.ObjectId.isValid(decoded.id)) {
+        user = await User.findById(decoded.id).select('-password');
       }
-      req.user = user;
+      if (!user && decoded.id) {
+        user = await User.findOne({ username: decoded.id }).select('-password');
+      }
+      if (!user && decoded.id) {
+        user = FallbackDb.findById('users', decoded.id);
+      }
     }
-    
+
+    req.user = user || { id: decoded.id, role: decoded.role, name: decoded.name || 'User', permissions: decoded.permissions || [] };
     next();
   } catch (error) {
     console.error('JWT Verification Error:', error.message);

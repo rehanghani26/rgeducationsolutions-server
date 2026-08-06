@@ -1,10 +1,11 @@
 import express from 'express';
 import multer from 'multer';
 import {
-  getClasses, getSections, getSubjects,
+  getClasses, createClass, getSections, createSection, getSubjects, createSubject,
   getBooks, createBook, getLibraryIssues, issueBook,
   getTransport, getNotifications, getSettings, updateSettings, uploadProfileImage,
-  seedDummies
+  seedDummies, getNotices, createNotice, deleteNotice,
+  getMyLeaves, getAllLeaves, requestLeave, reviewLeave
 } from '../controllers/erpController.js';
 import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/rbac.js';
@@ -24,8 +25,11 @@ const upload = multer({
 
 // Academic Routes
 router.get('/classes', protect, getClasses);
+router.post('/classes', protect, authorize('super-admin', 'school-admin', 'principal'), createClass);
 router.get('/sections', protect, getSections);
+router.post('/sections', protect, authorize('super-admin', 'school-admin', 'principal'), createSection);
 router.get('/subjects', protect, getSubjects);
+router.post('/subjects', protect, authorize('super-admin', 'school-admin', 'principal'), createSubject);
 router.get('/seed-dummies', protect, seedDummies);
 
 // Library Routes
@@ -60,5 +64,16 @@ router.post(
   },
   uploadProfileImage
 );
+
+// Notice Board Routes
+router.get('/notices', protect, getNotices);
+router.post('/notices', protect, authorize('super-admin', 'school-admin', 'principal'), createNotice);
+router.delete('/notices/:id', protect, authorize('super-admin', 'school-admin', 'principal'), deleteNotice);
+
+// Leave Management Routes
+router.get('/leaves/my', protect, getMyLeaves);
+router.get('/leaves/all', protect, authorize('super-admin', 'school-admin', 'principal', 'teacher', 'head-teacher', 'hod'), getAllLeaves);
+router.post('/leaves/request', protect, requestLeave);
+router.patch('/leaves/:id/review', protect, authorize('super-admin', 'school-admin', 'principal', 'teacher', 'head-teacher'), reviewLeave);
 
 export default router;

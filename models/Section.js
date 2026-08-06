@@ -13,6 +13,17 @@ const SectionSchema = new mongoose.Schema({
   classTeacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Teacher'
+  },
+  room: {
+    type: String
+  },
+  capacity: {
+    type: Number,
+    default: 35
+  },
+  enrolled: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true

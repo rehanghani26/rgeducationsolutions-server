@@ -13,6 +13,10 @@ const ClassSchema = new mongoose.Schema({
   },
   room: {
     type: String
+  },
+  capacity: {
+    type: Number,
+    default: 40
   }
 }, {
   timestamps: true

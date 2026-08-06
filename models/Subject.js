@@ -18,6 +18,9 @@ const SubjectSchema = new mongoose.Schema({
   credits: {
     type: Number,
     default: 3
+  },
+  teacher: {
+    type: String
   }
 }, {
   timestamps: true

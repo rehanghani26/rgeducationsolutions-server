@@ -18,16 +18,18 @@ const StudentSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    rollNumber: {
-      type: String,
-      required: true,
-    },
+    // Auto-generated globally unique: STD-2026-0001
     admissionNumber: {
       type: String,
       required: true,
       unique: true,
       uppercase: true,
       trim: true,
+    },
+    // Auto-assigned per class+section starting from 1
+    rollNumber: {
+      type: Number,
+      default: null,
     },
     email: {
       type: String,
@@ -38,13 +40,44 @@ const StudentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    // Class info stored as both string name and string ID
+    class: {
+      type: String,
+      default: null,
+    },
+    className: {
+      type: String,
+      default: null,
+    },
     classId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Class",
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    // Section info stored as both string name and string ID
+    section: {
+      type: String,
+      default: null,
+    },
+    sectionName: {
+      type: String,
+      default: null,
     },
     sectionId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Section",
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    // Academic year e.g. "2025-26"
+    academicYear: {
+      type: String,
+      default: () => {
+        const now = new Date();
+        const yr = now.getFullYear();
+        const month = now.getMonth(); // 0-indexed
+        // Academic year starts April, so April 2026 = 2026-27
+        return month >= 3
+          ? `${yr}-${String(yr + 1).slice(-2)}`
+          : `${yr - 1}-${String(yr).slice(-2)}`;
+      },
     },
     dob: {
       type: Date,
@@ -129,5 +162,18 @@ const StudentSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Compound index: roll number is unique within class+section+academicYear
+StudentSchema.index(
+  { classId: 1, sectionId: 1, rollNumber: 1, academicYear: 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: { rollNumber: { $ne: null } },
+  }
+);
+
+// Index admission number for fast lookup
+StudentSchema.index({ admissionNumber: 1 }, { unique: true });
 
 export default mongoose.model("Student", StudentSchema);

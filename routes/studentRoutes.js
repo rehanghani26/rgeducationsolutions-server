@@ -10,7 +10,9 @@ import {
   deleteStudent,
   bulkDeleteStudents,
   bulkPromoteStudents,
+  bulkImportStudents,
   exportStudents,
+  getStudentCredentials,
 } from '../controllers/studentController.js';
 import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/rbac.js';
@@ -19,8 +21,10 @@ const router = express.Router();
 
 router.get('/export/csv', protect, authorize('super-admin', 'school-admin', 'principal'), exportStudents);
 router.get('/', protect, getStudents);
+router.get('/:id/credentials', protect, authorize('super-admin'), getStudentCredentials);
 router.get('/:id/activity', protect, getStudentActivity);
 router.get('/:id', protect, getStudentById);
+router.post('/bulk-import', protect, authorize('super-admin', 'school-admin', 'principal'), bulkImportStudents);
 router.post('/bulk-delete', protect, authorize('super-admin', 'school-admin'), bulkDeleteStudents);
 router.post('/bulk-promote', protect, authorize('super-admin', 'school-admin', 'principal'), bulkPromoteStudents);
 router.post('/', protect, authorize('super-admin', 'school-admin', 'principal'), createStudent);

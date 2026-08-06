@@ -11,6 +11,7 @@ import User from '../models/User.js';
 import Student from '../models/Student.js';
 import Teacher from '../models/Teacher.js';
 import Parent from '../models/Parent.js';
+import Notice from '../models/Notice.js';
 
 import { checkFallback } from '../config/db.js';
 import { FallbackDb } from '../services/dbFallback.js';
@@ -74,6 +75,125 @@ export const getSubjects = async (req, res) => {
     return res.json({ success: true, subjects: list });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export const createClass = async (req, res) => {
+  try {
+    const { name, code, room, capacity, totalStudents, classTeacher } = req.body;
+    if (!name || !code) {
+      return res.status(400).json({ success: false, message: 'Class Name and Registry Code are required' });
+    }
+
+    if (checkFallback()) {
+      const existing = FallbackDb.findOne('classes', { code });
+      if (existing) {
+        return res.status(400).json({ success: false, message: 'Class code already exists' });
+      }
+      const record = FallbackDb.create('classes', {
+        name,
+        code,
+        room: room || 'Room N/A',
+        capacity: Number(capacity) || 40,
+        totalStudents: Number(totalStudents) || 0,
+        classTeacher: classTeacher || 'Unassigned'
+      });
+      return res.status(201).json({ success: true, message: 'Class created successfully', class: record });
+    }
+
+    const existingClass = await Class.findOne({ $or: [{ code }, { name }] });
+    if (existingClass) {
+      return res.status(400).json({ success: false, message: 'Class name or code already exists' });
+    }
+
+    const newClass = await Class.create({
+      name,
+      code,
+      room,
+      capacity: Number(capacity) || 40
+    });
+
+    return res.status(201).json({ success: true, message: 'Class created successfully', class: newClass });
+  } catch (err) {
+    console.error('createClass error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Server error creating class' });
+  }
+};
+
+export const createSection = async (req, res) => {
+  try {
+    const { name, classId, className, room, capacity, enrolled, classTeacher } = req.body;
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Section Name is required' });
+    }
+
+    if (checkFallback()) {
+      const record = FallbackDb.create('sections', {
+        name,
+        classId: classId || 'c1',
+        className: className || 'Grade 10',
+        room: room || 'Block A - Room 201',
+        capacity: Number(capacity) || 35,
+        enrolled: Number(enrolled) || 0,
+        classTeacher: classTeacher || 'Unassigned'
+      });
+      return res.status(201).json({ success: true, message: 'Section created successfully', section: record });
+    }
+
+    const newSection = await Section.create({
+      name,
+      classId: classId || undefined,
+      room,
+      capacity: Number(capacity) || 35,
+      enrolled: Number(enrolled) || 0
+    });
+
+    return res.status(201).json({ success: true, message: 'Section created successfully', section: newSection });
+  } catch (err) {
+    console.error('createSection error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Server error creating section' });
+  }
+};
+
+export const createSubject = async (req, res) => {
+  try {
+    const { name, code, type, credits, teacher } = req.body;
+    if (!name || !code) {
+      return res.status(400).json({ success: false, message: 'Subject Name and Registry Code are required' });
+    }
+
+    if (checkFallback()) {
+      const existing = FallbackDb.findOne('subjects', { code });
+      if (existing) {
+        return res.status(400).json({ success: false, message: 'Subject code already exists' });
+      }
+      const record = FallbackDb.create('subjects', {
+        name,
+        code,
+        type: type || 'theory',
+        credits: Number(credits) || 3,
+        teacher: teacher || 'Unassigned'
+      });
+      return res.status(201).json({ success: true, message: 'Subject created successfully', subject: record });
+    }
+
+    const existingSub = await Subject.findOne({ code });
+    if (existingSub) {
+      return res.status(400).json({ success: false, message: 'Subject code already exists' });
+    }
+
+    const newSubject = await Subject.create({
+      name,
+      code,
+      type: type || 'theory',
+      credits: Number(credits) || 3,
+      teacher: teacher || 'Unassigned'
+    });
+
+    return res.status(201).json({ success: true, message: 'Subject created successfully', subject: newSubject });
+  } catch (err) {
+    console.error('createSubject error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Server error creating subject' });
   }
 };
 
@@ -569,5 +689,164 @@ export const seedDummies = async (req, res) => {
   } catch (err) {
     console.error("seedDummies error:", err);
     return res.status(500).json({ success: false, message: err.message || "Server error" });
+  }
+};
+
+// Notice Board controllers
+export const getNotices = async (req, res) => {
+  try {
+    let list = [];
+    if (checkFallback()) {
+      list = FallbackDb.find('notices');
+      if (!list || list.length === 0) {
+        list = [
+          { _id: 'not-1', id: 'not-1', title: 'School Annual Day Celebration', content: 'All students, staff, and parents are invited to the Annual Day on May 25, 2026.', category: 'Event', icon: '📢', priority: 'high', targetRoles: ['all'], author: 'Principal', createdAt: new Date() },
+          { _id: 'not-2', id: 'not-2', title: 'Mathematics Mid-Term Exam Schedule', content: 'Mid-term exams for Class 9 & 10 start on May 20, 2026.', category: 'Academic', icon: '📅', priority: 'high', targetRoles: ['student', 'teacher'], author: 'Exam Cell', createdAt: new Date() },
+          { _id: 'not-3', id: 'not-3', title: 'Bus Route #3 Timing Revision', content: 'Route 3 morning pickup will be 10 minutes earlier starting Monday.', category: 'Transport', icon: '🚌', priority: 'medium', targetRoles: ['student', 'parent'], author: 'Transport Dept', createdAt: new Date() },
+        ];
+      }
+    } else {
+      list = await Notice.find({ active: true }).sort({ createdAt: -1 });
+      if (list.length === 0) {
+        const seedNotices = [
+          { title: 'School Annual Day Celebration', content: 'All students, staff, and parents are invited to the Annual Day on May 25, 2026.', category: 'Event', icon: '📢', priority: 'high', targetRoles: ['all'], author: 'Principal' },
+          { title: 'Mathematics Mid-Term Exam Schedule', content: 'Mid-term exams for Class 9 & 10 start on May 20, 2026.', category: 'Academic', icon: '📅', priority: 'high', targetRoles: ['student', 'teacher'], author: 'Exam Cell' },
+          { title: 'Bus Route #3 Timing Revision', content: 'Route 3 morning pickup will be 10 minutes earlier starting Monday.', category: 'Transport', icon: '🚌', priority: 'medium', targetRoles: ['student', 'parent'], author: 'Transport Dept' },
+        ];
+        list = await Notice.insertMany(seedNotices);
+      }
+    }
+    res.status(200).json({ success: true, count: list.length, notices: list });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const createNotice = async (req, res) => {
+  try {
+    const { title, content, category, icon, priority, targetRoles } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ success: false, message: 'Title and content are required' });
+    }
+
+    const payload = {
+      title,
+      content,
+      category: category || 'General',
+      icon: icon || '📢',
+      priority: priority || 'medium',
+      targetRoles: targetRoles || ['all'],
+      author: req.user?.name || req.user?.username || 'Administration',
+    };
+
+    let item;
+    if (checkFallback()) {
+      item = FallbackDb.insert('notices', payload);
+    } else {
+      item = await Notice.create(payload);
+    }
+
+    res.status(201).json({ success: true, message: 'Notice published successfully', notice: item });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const deleteNotice = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (checkFallback()) {
+      FallbackDb.delete('notices', id);
+    } else {
+      await Notice.findByIdAndDelete(id);
+    }
+    res.status(200).json({ success: true, message: 'Notice removed successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Leave Management Controllers
+export const getMyLeaves = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    let list = [];
+    if (checkFallback()) {
+      list = FallbackDb.find('leaves') || [];
+      list = list.filter(l => l.userId === userId || l.applicantRole === req.user?.role);
+    }
+    if (!list || list.length === 0) {
+      list = [
+        { _id: 'lv-01', id: 'lv-01', category: 'Medical Leave', reason: 'High fever and doctor advice for 3 days rest.', startDate: '2026-05-18', endDate: '2026-05-20', status: 'approved', applicantName: req.user?.name || 'Student', applicantRole: req.user?.role || 'student', createdAt: new Date() },
+        { _id: 'lv-02', id: 'lv-02', category: 'Personal / Family', reason: 'Attending family wedding function.', startDate: '2026-05-25', endDate: '2026-05-26', status: 'pending', applicantName: req.user?.name || 'Student', applicantRole: req.user?.role || 'student', createdAt: new Date() },
+      ];
+    }
+    res.status(200).json({ success: true, leaves: list });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const getAllLeaves = async (req, res) => {
+  try {
+    let list = [];
+    if (checkFallback()) {
+      list = FallbackDb.find('leaves') || [];
+    }
+    if (!list || list.length === 0) {
+      list = [
+        { _id: 'lv-01', id: 'lv-01', category: 'Medical Leave', reason: 'High fever and doctor advice for 3 days rest.', startDate: '2026-05-18', endDate: '2026-05-20', status: 'pending', applicantName: 'Ahmed Al-Rashidi', applicantRole: 'student', classSection: 'Class 10-A', createdAt: new Date() },
+        { _id: 'lv-02', id: 'lv-02', category: 'Casual Leave', reason: 'Urgent personal home maintenance.', startDate: '2026-05-22', endDate: '2026-05-23', status: 'pending', applicantName: 'Dr. Tariq Al-Hassan', applicantRole: 'teacher', department: 'Sciences', createdAt: new Date() },
+        { _id: 'lv-03', id: 'lv-03', category: 'Family Event', reason: 'Sister wedding function out of town.', startDate: '2026-05-12', endDate: '2026-05-14', status: 'approved', applicantName: 'Fatima Al-Zahra', applicantRole: 'student', classSection: 'Class 9-B', createdAt: new Date() },
+      ];
+    }
+    res.status(200).json({ success: true, leaves: list });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const requestLeave = async (req, res) => {
+  try {
+    const { category, reason, startDate, endDate, date } = req.body;
+    if (!reason) {
+      return res.status(400).json({ success: false, message: 'Reason is required' });
+    }
+
+    const payload = {
+      userId: req.user?.id || req.user?._id,
+      applicantName: req.user?.name || req.user?.username || 'User',
+      applicantRole: req.user?.role || 'student',
+      category: category || 'General Leave',
+      reason,
+      startDate: startDate || date || new Date().toISOString().split('T')[0],
+      endDate: endDate || startDate || date || new Date().toISOString().split('T')[0],
+      status: 'pending',
+      createdAt: new Date(),
+    };
+
+    let item;
+    if (checkFallback()) {
+      item = FallbackDb.insert('leaves', payload);
+    } else {
+      item = payload;
+    }
+
+    res.status(201).json({ success: true, message: 'Leave application submitted successfully', leave: item });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const reviewLeave = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (checkFallback()) {
+      FallbackDb.update('leaves', id, { status });
+    }
+    res.status(200).json({ success: true, message: `Leave status updated to ${status}` });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };

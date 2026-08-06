@@ -369,18 +369,43 @@ export const getCharts = async (req, res) => {
 
       if (recentGrades.length === 0) {
         recentGrades = [
-          { name: 'Potions', obtained: 85, total: 100 },
-          { name: 'DADA', obtained: 92, total: 100 },
-          { name: 'Charms', obtained: 78, total: 100 }
+          { name: "Mathematics", obtained: 92, total: 100 },
+          { name: "Science", obtained: 88, total: 100 },
+          { name: "English Lit", obtained: 95, total: 100 },
+          { name: "Physics", obtained: 84, total: 100 },
+          { name: "Islamic Studies", obtained: 98, total: 100 },
+          { name: "Computer Sci", obtained: 90, total: 100 },
         ];
       }
 
       const attendanceWeekly = [
-        { name: 'Mon', rate: 100 },
-        { name: 'Tue', rate: 100 },
-        { name: 'Wed', rate: 100 },
-        { name: 'Thu', rate: 100 },
-        { name: 'Fri', rate: 100 }
+        { name: "Mon", rate: 100 },
+        { name: "Tue", rate: 100 },
+        { name: "Wed", rate: 95 },
+        { name: "Thu", rate: 100 },
+        { name: "Fri", rate: 100 },
+      ];
+
+      const monthlyAttendance = [
+        { month: "Jan", rate: 96 },
+        { month: "Feb", rate: 94 },
+        { month: "Mar", rate: 98 },
+        { month: "Apr", rate: 95 },
+        { month: "May", rate: 97 },
+        { month: "Jun", rate: 96 },
+      ];
+
+      const termComparison = [
+        { term: "Term 1 (Fall)", score: 86, avg: 80 },
+        { term: "Term 2 (Mid)", score: 89, avg: 82 },
+        { term: "Term 3 (Final)", score: 94, avg: 84 },
+      ];
+
+      const libraryReading = [
+        { category: "Science & Tech", books: 6 },
+        { category: "Literature", books: 4 },
+        { category: "History", books: 3 },
+        { category: "General", books: 2 },
       ];
 
       return res.json({
@@ -389,8 +414,11 @@ export const getCharts = async (req, res) => {
           recentGrades,
           timetable,
           upcomingExams: upcomingExamsList,
-          attendanceWeekly
-        }
+          attendanceWeekly,
+          monthlyAttendance,
+          termComparison,
+          libraryReading,
+        },
       });
 
     } else if (['teacher', 'head-teacher', 'hod', 'coordinator'].includes(role)) {
@@ -510,5 +538,177 @@ export const getCharts = async (req, res) => {
   } catch (error) {
     console.error('Error fetching dashboard charts:', error);
     return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export const getStudentsAnalytics = async (req, res) => {
+  try {
+    let totalStudents = 0;
+    let activeStudents = 0;
+    let inactiveStudents = 0;
+    let newAdmissionsCount = 0;
+    let genderStats = { Male: 0, Female: 0, Other: 0 };
+    let classDistribution = [];
+    let recentlyAdmittedStudents = [];
+    let enrollmentGrowth = [];
+    let attendanceByClass = [];
+    let dailyAttendanceAvg = "N/A";
+    let activeLeavesCount = 0;
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    if (checkFallback()) {
+      const students = FallbackDb.find("students") || [];
+      totalStudents = students.length;
+      activeStudents = students.filter(s => s.status === "active" || s.status === "Active" || !s.status).length;
+      inactiveStudents = totalStudents - activeStudents;
+
+      // Gender distribution
+      students.forEach(s => {
+        const g = (s.gender || "Male").toLowerCase();
+        if (g.startsWith("f")) genderStats.Female++;
+        else if (g.startsWith("m")) genderStats.Male++;
+        else genderStats.Other++;
+      });
+
+      // Class distribution map
+      const classMap = {};
+      students.forEach(s => {
+        const clsName = s.class || s.className || "Unassigned";
+        if (clsName && clsName !== "null" && clsName !== "undefined") {
+          classMap[clsName] = (classMap[clsName] || 0) + 1;
+        }
+      });
+      classDistribution = Object.entries(classMap).map(([name, count]) => ({ name, count }));
+
+      // Recently admitted
+      recentlyAdmittedStudents = students.slice(-6).reverse().map(s => ({
+        id: s.id || s._id,
+        name: s.name || `${s.firstName || 'Student'} ${s.lastName || ''}`.trim(),
+        admissionNumber: s.admissionNumber || "N/A",
+        class: s.class || s.className || "N/A",
+        section: s.section || s.sectionName || "N/A",
+        createdAt: s.createdAt || new Date().toISOString(),
+        gender: s.gender || "Male",
+      }));
+
+      // Dynamic Growth trend (past 6 months)
+      const now = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+        const monthName = d.toLocaleString('en-US', { month: 'short' });
+        const enrolled = students.filter(s => new Date(s.createdAt || Date.now()) <= d).length;
+        enrollmentGrowth.push({ month: monthName, enrolled });
+      }
+
+      newAdmissionsCount = students.filter(s => new Date(s.createdAt || Date.now()) >= thirtyDaysAgo).length;
+
+    } else {
+      totalStudents = await Student.countDocuments();
+      activeStudents = await Student.countDocuments({ status: "active" });
+      inactiveStudents = totalStudents - activeStudents;
+
+      // Gender distribution
+      const maleCount = await Student.countDocuments({ gender: /^male$/i });
+      const femaleCount = await Student.countDocuments({ gender: /^female$/i });
+      const otherCount = Math.max(0, totalStudents - (maleCount + femaleCount));
+      genderStats = { Male: maleCount, Female: femaleCount, Other: otherCount };
+
+      // Recently admitted
+      const recentDocs = await Student.find()
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .populate("classId")
+        .populate("sectionId");
+
+      recentlyAdmittedStudents = recentDocs.map(s => {
+        const rawCls = s.classId?.name || s.class || s.className;
+        const rawSec = s.sectionId?.name || s.section || s.sectionName;
+        return {
+          id: s._id,
+          name: s.name || `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Student',
+          admissionNumber: s.admissionNumber || "N/A",
+          class: rawCls && rawCls !== "null" && rawCls !== "undefined" ? rawCls : "N/A",
+          section: rawSec && rawSec !== "null" && rawSec !== "undefined" ? rawSec : "N/A",
+          createdAt: s.createdAt,
+          gender: s.gender || "Male",
+        };
+      });
+
+      // Class distribution aggregation
+      const allStudents = await Student.find().populate("classId", "name").select("class className classId");
+      const classMap = {};
+      allStudents.forEach(s => {
+        const clsName = s.classId?.name || s.class || s.className || "Unassigned";
+        if (clsName && clsName !== "null" && clsName !== "undefined") {
+          classMap[clsName] = (classMap[clsName] || 0) + 1;
+        }
+      });
+      classDistribution = Object.entries(classMap).map(([name, count]) => ({ name, count }));
+
+      // New admissions in last 30 days
+      newAdmissionsCount = await Student.countDocuments({ createdAt: { $gte: thirtyDaysAgo } });
+
+      // Dynamic Growth trend over past 6 months based on actual createdAt
+      const now = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+        const monthName = endOfMonth.toLocaleString('en-US', { month: 'short' });
+        const enrolled = await Student.countDocuments({ createdAt: { $lte: endOfMonth } });
+        enrollmentGrowth.push({ month: monthName, enrolled });
+      }
+
+      // Real Attendance Calculations if attendance records exist
+      const attendanceLogs = await Attendance.find({ type: "student" }).limit(100);
+      if (attendanceLogs.length > 0) {
+        let totalRecords = 0;
+        let presentRecords = 0;
+        const classAttMap = {};
+
+        attendanceLogs.forEach(att => {
+          const clsName = att.classId?.name || "General";
+          if (!classAttMap[clsName]) classAttMap[clsName] = { present: 0, total: 0 };
+
+          (att.records || []).forEach(r => {
+            totalRecords++;
+            classAttMap[clsName].total++;
+            if (r.status === "present") {
+              presentRecords++;
+              classAttMap[clsName].present++;
+            }
+          });
+        });
+
+        if (totalRecords > 0) {
+          const avg = ((presentRecords / totalRecords) * 100).toFixed(1);
+          dailyAttendanceAvg = `${avg}%`;
+        }
+
+        attendanceByClass = Object.entries(classAttMap).map(([cls, data]) => ({
+          class: cls,
+          rate: data.total > 0 ? Math.round((data.present / data.total) * 100) : 0,
+        }));
+      }
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        totalStudents,
+        activeStudents,
+        inactiveStudents,
+        newAdmissionsCount,
+        genderStats,
+        classDistribution,
+        recentlyAdmittedStudents,
+        enrollmentGrowth,
+        attendanceByClass,
+        dailyAttendanceAvg,
+        activeLeavesCount,
+      },
+    });
+  } catch (error) {
+    console.error("getStudentsAnalytics error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
