@@ -7,7 +7,17 @@
       "role": "super-admin",
       "name": "Albus Dumbledore",
       "profileId": "staff1",
-      "isActive": true
+      "isActive": true,
+      "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InUxIiwicm9sZSI6InN1cGVyLWFkbWluIiwicGVybWlzc2lvbnMiOltdLCJpYXQiOjE3ODg1MzU5MzQsImV4cCI6MTc4OTE0MDczNH0.BFQWjLpbn2Eccbx36Pep-sqLBl-DkKuI2D7jjArRugg",
+      "lastLogin": "2026-09-04T15:32:14.827Z",
+      "loginHistory": [
+        {
+          "ip": "::1",
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+          "timestamp": "2026-09-04T15:32:14.827Z"
+        }
+      ],
+      "updatedAt": "2026-09-04T15:32:14.827Z"
     },
     {
       "id": "u2",
@@ -596,5 +606,115 @@
     "contactEmail": "info@hogwarts.edu",
     "currencySymbol": "$",
     "enableSmsAlerts": false
-  }
+  },
+  "auditLogs": [
+    {
+      "id": "t4qru75",
+      "_id": "wnn49h8",
+      "createdAt": "2026-08-09T18:54:55.891Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "CREATE",
+      "module": "periods",
+      "details": "POST /api/v1/periods",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 8,
+        "body": {
+          "scheduleType": "regular",
+          "name": "Regular Day Schedule",
+          "schoolStartTime": "07:00",
+          "schoolEndTime": "14:00",
+          "periods": [
+            {
+              "_id": "p-1786301664781-0.555584496887171",
+              "type": "prayer",
+              "customLabel": "",
+              "startTime": "07:00",
+              "endTime": "07:30"
+            },
+            {
+              "_id": "p-1786301664781-0.6530858935682441",
+              "type": "class",
+              "customLabel": "",
+              "startTime": "07:31",
+              "endTime": "08:30"
+            },
+            {
+              "_id": "p-1786301664781-0.9186360251030664",
+              "type": "class",
+              "customLabel": "",
+              "startTime": "08:30",
+              "endTime": "09:30"
+            },
+            {
+              "_id": "p-1786301664781-0.5516016751605547",
+              "type": "class",
+              "customLabel": "",
+              "startTime": "09:30",
+              "endTime": "10:30"
+            },
+            {
+              "_id": "p-1786301664781-0.14011563214694323",
+              "type": "lunch",
+              "customLabel": "",
+              "startTime": "10:30",
+              "endTime": "11:30"
+            },
+            {
+              "_id": "p-1786301664781-0.305828878069066",
+              "type": "class",
+              "customLabel": "",
+              "startTime": "11:30",
+              "endTime": "12:30"
+            },
+            {
+              "_id": "p-1786301664781-0.5247408624440357",
+              "type": "class",
+              "customLabel": "",
+              "startTime": "12:30",
+              "endTime": "13:30"
+            },
+            {
+              "_id": "p-1786301664781-0.7880925958346001",
+              "type": "activities",
+              "customLabel": "",
+              "startTime": "13:30",
+              "endTime": "14:00"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-08-09T18:54:55.891Z"
+    },
+    {
+      "id": "cfw6k1b",
+      "_id": "8h6aava",
+      "createdAt": "2026-09-04T15:32:14.830Z",
+      "userId": "u1",
+      "action": "LOGIN",
+      "module": "auth",
+      "details": "User Albus Dumbledore logged in",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+      "timestamp": "2026-09-04T15:32:14.830Z"
+    },
+    {
+      "id": "kpokdmh",
+      "_id": "906rv0v",
+      "createdAt": "2026-09-04T15:32:14.890Z",
+      "userId": "u1",
+      "action": "READ",
+      "module": "auth",
+      "details": "GET /api/v1/auth/me",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-04T15:32:14.890Z"
+    }
+  ]
 }

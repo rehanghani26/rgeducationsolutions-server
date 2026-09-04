@@ -1276,3 +1276,343 @@ export const bulkImportStudents = async (req, res) => {
   }
 };
 
+// ─── PROMOTE / DEMOTE STUDENTS (Bulk Whole School, Class-wise, or Individual) ───
+const CLASS_ORDER = [
+  "Nursery", "LKG", "UKG",
+  "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6",
+  "Class 7", "Class 8", "Class 9", "Class 10", "Class 11", "Class 12"
+];
+
+const getNextClass = (currentClass) => {
+  if (!currentClass) return "Class 1";
+  const normalized = String(currentClass).split(' - ')[0].trim();
+  const idx = CLASS_ORDER.findIndex((c) => c.toLowerCase() === normalized.toLowerCase());
+  if (idx === -1) return "Class 1";
+  if (idx === CLASS_ORDER.length - 1) return "Passout";
+  return CLASS_ORDER[idx + 1];
+};
+
+const getPrevClass = (currentClass, status) => {
+  if (status === "Passout" || currentClass === "Passout") return "Class 12";
+  if (!currentClass) return "Nursery";
+  const normalized = String(currentClass).split(' - ')[0].trim();
+  const idx = CLASS_ORDER.findIndex((c) => c.toLowerCase() === normalized.toLowerCase());
+  if (idx <= 0) return CLASS_ORDER[0];
+  return CLASS_ORDER[idx - 1];
+};
+
+export const promoteStudents = async (req, res) => {
+  try {
+    const {
+      mode = 'whole_school', // 'whole_school', 'class_wise', 'individual'
+      action = 'promote',   // 'promote', 'demote'
+      sourceClass = '',
+      studentIds = [],
+      targetSession = '',
+    } = req.body;
+
+    const isPromote = action === 'promote';
+    let updatedCount = 0;
+    const updateLogs = [];
+
+    if (checkFallback()) {
+      let allStudents = FallbackDb.find('students') || [];
+
+      allStudents = allStudents.map((s) => {
+        let shouldUpdate = false;
+        if (mode === 'whole_school') {
+          shouldUpdate = true;
+        } else if (mode === 'class_wise') {
+          const sClass = String(s.className || s.class || '').split(' - ')[0].trim();
+          shouldUpdate = sClass.toLowerCase() === String(sourceClass).split(' - ')[0].trim().toLowerCase();
+        } else if (mode === 'individual') {
+          shouldUpdate = studentIds.includes(String(s.id)) || studentIds.includes(String(s._id));
+        }
+
+        if (shouldUpdate) {
+          const currentCls = s.className || s.class || 'Class 1';
+          const newCls = isPromote ? getNextClass(currentCls) : getPrevClass(currentCls, s.status);
+          const isPassout = newCls === 'Passout';
+
+          updatedCount++;
+          updateLogs.push({ studentId: s.id || s._id, name: s.name, from: currentCls, to: newCls });
+
+          return {
+            ...s,
+            className: newCls,
+            class: newCls,
+            status: isPassout ? 'Passout' : (isPromote && s.status === 'Passout' ? 'Passout' : 'active'),
+            academicYear: targetSession || s.academicYear,
+            promotionHistory: [
+              ...(s.promotionHistory || []),
+              {
+                fromClass: currentCls,
+                toClass: newCls,
+                action: isPassout ? 'passout' : action,
+                sessionName: targetSession,
+                promotedAt: new Date().toISOString(),
+                promotedBy: req.user?.name || 'admin',
+              },
+            ],
+          };
+        }
+        return s;
+      });
+
+      FallbackDb.updateAll('students', allStudents);
+
+      await logActivity({
+        userId: req.user?._id || req.user?.id,
+        action: isPromote ? "PROMOTE" : "DEMOTE",
+        module: "students",
+        details: `${isPromote ? 'Promoted' : 'Demoted'} ${updatedCount} students (${mode})`,
+        ipAddress: req.ip,
+      });
+
+      return res.json({
+        success: true,
+        updatedCount,
+        message: `Successfully ${isPromote ? 'promoted' : 'demoted'} ${updatedCount} student(s)!`,
+        logs: updateLogs,
+      });
+    }
+
+    // MongoDB Mode
+    let query = {};
+    if (mode === 'class_wise') {
+      const clsName = String(sourceClass).split(' - ')[0].trim();
+      query = {
+        $or: [
+          { className: { $regex: new RegExp(`^${clsName}`, 'i') } },
+          { class: { $regex: new RegExp(`^${clsName}`, 'i') } },
+        ],
+      };
+    } else if (mode === 'individual') {
+      query = { _id: { $in: studentIds } };
+    }
+
+    const students = await Student.find(query);
+
+    for (const student of students) {
+      const currentCls = student.className || student.class || 'Class 1';
+      const newCls = isPromote ? getNextClass(currentCls) : getPrevClass(currentCls, student.status);
+      const isPassout = newCls === 'Passout';
+
+      student.className = newCls;
+      student.class = newCls;
+      student.status = isPassout ? 'Passout' : (isPromote && student.status === 'Passout' ? 'Passout' : 'active');
+      if (targetSession) student.academicYear = targetSession;
+
+      student.promotionHistory = student.promotionHistory || [];
+      student.promotionHistory.push({
+        fromClass: currentCls,
+        toClass: newCls,
+        action: isPassout ? 'passout' : action,
+        sessionName: targetSession,
+        promotedAt: new Date(),
+        promotedBy: req.user?.name || 'admin',
+      });
+
+      await student.save();
+      updatedCount++;
+      updateLogs.push({ studentId: student._id, name: student.name, from: currentCls, to: newCls });
+    }
+
+    await logActivity({
+      userId: req.user?._id || req.user?.id,
+      action: isPromote ? "PROMOTE" : "DEMOTE",
+      module: "students",
+      details: `${isPromote ? 'Promoted' : 'Demoted'} ${updatedCount} students (${mode})`,
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      updatedCount,
+      message: `Successfully ${isPromote ? 'promoted' : 'demoted'} ${updatedCount} student(s)!`,
+      logs: updateLogs,
+    });
+  } catch (error) {
+    console.error("promoteStudents error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Promotion operation failed" });
+  }
+};
+
+// ─── ROLLBACK PROMOTION (Within 24 Hours) ───
+export const rollbackPromotion = async (req, res) => {
+  try {
+    const { maxHours = 24 } = req.body;
+    const cutoffTime = new Date(Date.now() - maxHours * 60 * 60 * 1000);
+    let revertedCount = 0;
+    const revertLogs = [];
+
+    if (checkFallback()) {
+      let allStudents = FallbackDb.find('students') || [];
+
+      allStudents = allStudents.map((s) => {
+        const history = s.promotionHistory || [];
+        if (!history.length) return s;
+
+        const lastEntry = history[history.length - 1];
+        const entryTime = new Date(lastEntry.promotedAt);
+
+        if (entryTime >= cutoffTime && lastEntry.action !== 'rolled_back') {
+          revertedCount++;
+          const prevClass = lastEntry.fromClass || 'Class 1';
+
+          revertLogs.push({
+            studentId: s.id || s._id,
+            name: s.name,
+            from: s.className || s.class,
+            revertedTo: prevClass,
+          });
+
+          return {
+            ...s,
+            className: prevClass,
+            class: prevClass,
+            status: 'active',
+            promotionHistory: [
+              ...history.slice(0, -1),
+              {
+                ...lastEntry,
+                action: 'rolled_back',
+                rolledBackAt: new Date().toISOString(),
+                rolledBackBy: req.user?.name || 'admin',
+              },
+            ],
+          };
+        }
+        return s;
+      });
+
+      if (revertedCount > 0) {
+        FallbackDb.updateAll('students', allStudents);
+      }
+
+      await logActivity({
+        userId: req.user?._id || req.user?.id,
+        action: "ROLLBACK_PROMOTION",
+        module: "students",
+        details: `Rolled back promotion for ${revertedCount} students within ${maxHours}h window`,
+        ipAddress: req.ip,
+      });
+
+      return res.json({
+        success: true,
+        revertedCount,
+        message: revertedCount > 0
+          ? `Successfully rolled back promotion for ${revertedCount} student(s) to previous state!`
+          : `No student promotions found within the last ${maxHours} hours to rollback.`,
+        logs: revertLogs,
+      });
+    }
+
+    // MongoDB Mode
+    const students = await Student.find({
+      'promotionHistory.promotedAt': { $gte: cutoffTime },
+    });
+
+    for (const student of students) {
+      const history = student.promotionHistory || [];
+      if (!history.length) continue;
+
+      const lastEntry = history[history.length - 1];
+      const entryTime = new Date(lastEntry.promotedAt);
+
+      if (entryTime >= cutoffTime && lastEntry.action !== 'rolled_back') {
+        revertedCount++;
+        const prevClass = lastEntry.fromClass || 'Class 1';
+
+        student.className = prevClass;
+        student.class = prevClass;
+        student.status = 'active';
+
+        lastEntry.action = 'rolled_back';
+        lastEntry.rolledBackAt = new Date();
+        lastEntry.rolledBackBy = req.user?.name || 'admin';
+
+        await student.save();
+        revertLogs.push({
+          studentId: student._id,
+          name: student.name,
+          from: student.className,
+          revertedTo: prevClass,
+        });
+      }
+    }
+
+    await logActivity({
+      userId: req.user?._id || req.user?.id,
+      action: "ROLLBACK_PROMOTION",
+      module: "students",
+      details: `Rolled back promotion for ${revertedCount} students within ${maxHours}h window`,
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      revertedCount,
+      message: revertedCount > 0
+        ? `Successfully rolled back promotion for ${revertedCount} student(s) to previous state!`
+        : `No student promotions found within the last ${maxHours} hours to rollback.`,
+      logs: revertLogs,
+    });
+  } catch (error) {
+    console.error("rollbackPromotion error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Rollback operation failed" });
+  }
+};
+
+// ─── CHECK IF RECENT PROMOTION EXISTS (Within 24 Hours) ───
+export const getPromotionStatus = async (req, res) => {
+  try {
+    const maxHours = 24;
+    const cutoffMs = Date.now() - maxHours * 60 * 60 * 1000;
+    const cutoffTime = new Date(cutoffMs);
+    let activePromotionsCount = 0;
+
+    if (checkFallback()) {
+      const allStudents = FallbackDb.find('students') || [];
+      allStudents.forEach((s) => {
+        const history = s.promotionHistory || [];
+        history.forEach((entry) => {
+          const rawDate = entry.promotedAt || entry.createdAt;
+          const entryMs = rawDate ? new Date(rawDate).getTime() : 0;
+          if (!isNaN(entryMs) && entryMs >= cutoffMs && entry.action !== 'rolled_back' && entry.action !== 'demote') {
+            activePromotionsCount++;
+          }
+        });
+      });
+
+      return res.json({
+        success: true,
+        canRollback: activePromotionsCount > 0,
+        activePromotionsCount,
+      });
+    }
+
+    // MongoDB Mode
+    const activePromotionsCountMongo = await Student.countDocuments({
+      'promotionHistory': {
+        $elemMatch: {
+          promotedAt: { $gte: cutoffTime },
+          action: { $nin: ['rolled_back', 'demote'] },
+        },
+      },
+    });
+
+    return res.json({
+      success: true,
+      canRollback: activePromotionsCountMongo > 0,
+      activePromotionsCount: activePromotionsCountMongo,
+    });
+  } catch (error) {
+    console.error("getPromotionStatus error:", error);
+    return res.status(500).json({ success: false, canRollback: false });
+  }
+};
+
+
+
+

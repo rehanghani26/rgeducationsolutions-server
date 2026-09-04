@@ -76,6 +76,10 @@ const initialDb = {
     { id: 'exp2', title: 'Science Lab Glassware', amount: 9500, category: 'Academic Supplies', date: '2026-05-15', refInvoice: 'INV-LB-990' },
     { id: 'exp3', title: 'Staff Salaried Payroll', amount: 620000, category: 'Payroll', date: '2026-06-01', refInvoice: 'PAY-2026-06' }
   ],
+  academicSessions: [
+    { _id: 'sess-1', sessionName: '2025-2026', startDate: '2025-04-01', endDate: '2026-03-31', isCurrent: false, status: 'completed' },
+    { _id: 'sess-2', sessionName: '2026-2027', startDate: '2026-04-01', endDate: '2027-03-31', isCurrent: true, status: 'active' },
+  ],
   library: [
     { id: 'lib1', bookId: 'b1', studentId: 's1', issueDate: '2026-05-25', dueDate: '2026-06-08', returnDate: null, fine: 0 },
     { id: 'lib2', bookId: 'b2', studentId: 's2', issueDate: '2026-05-10', dueDate: '2026-05-24', returnDate: '2026-05-24', fine: 0 },
@@ -98,6 +102,9 @@ const initialDb = {
     { id: 'p1', user: 'u7', name: 'James Potter', phone: '9876543211', email: 'parent@school.com', children: ['s1'], status: 'active' }
   ],
   auditLogs: [],
+  classTimetables: [],
+  onlineClasses: [],
+  homework: [],
   settings: {
     companyLogo: '',
     schoolName: 'Hogwarts Academy of Excellence',

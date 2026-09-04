@@ -12,31 +12,41 @@ const AttendanceSchema = new mongoose.Schema({
     default: 'student'
   },
   classId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Class'
+    type: mongoose.Schema.Types.Mixed,
   },
-  records: [{
-    memberId: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: true,
-      refPath: 'memberModel'
-    },
-    memberModel: {
-      type: String,
-      required: true,
-      enum: ['Student', 'Teacher', 'User']
-    },
-    status: {
-      type: String,
-      enum: ['present', 'absent', 'late', 'half-day'],
-      default: 'present'
-    }
-  }]
+  sectionId: {
+    type: mongoose.Schema.Types.Mixed,
+  },
+  className: {
+    type: String,
+  },
+  sectionName: {
+    type: String,
+  },
+  classSection: {
+    type: String,
+  },
+  takenBy: {
+    userId: String,
+    name: String,
+  },
+  total: Number,
+  present: Number,
+  absent: Number,
+  late: Number,
+  students: [{
+    studentId: String,
+    name: String,
+    rollNo: mongoose.Schema.Types.Mixed,
+    status: String,
+    remarks: String,
+  }],
 }, {
-  timestamps: true
+  timestamps: true,
+  strict: false
 });
 
 // Avoid having duplicate attendance logs for same class on the same day
-AttendanceSchema.index({ date: 1, classId: 1 }, { unique: true });
+AttendanceSchema.index({ date: 1, classId: 1, sectionId: 1 }, { sparse: true });
 
 export default mongoose.model('Attendance', AttendanceSchema);

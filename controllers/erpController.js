@@ -706,7 +706,7 @@ export const getNotices = async (req, res) => {
         ];
       }
     } else {
-      list = await Notice.find({ active: true }).sort({ createdAt: -1 });
+      list = await Notice.find({ active: { $ne: false } }).sort({ createdAt: -1 });
       if (list.length === 0) {
         const seedNotices = [
           { title: 'School Annual Day Celebration', content: 'All students, staff, and parents are invited to the Annual Day on May 25, 2026.', category: 'Event', icon: '📢', priority: 'high', targetRoles: ['all'], author: 'Principal' },

@@ -21,6 +21,11 @@ import companyRoutes from './routes/companyRoutes.js';
 import auditLogRoutes from './routes/auditLogRoutes.js';
 import examRoutes from './routes/examRoutes.js';
 import attendanceRoutes from './routes/attendanceRoutes.js';
+import periodRoutes from './routes/periodRoutes.js';
+import sessionRoutes from './routes/sessionRoutes.js';
+import onlineClassRoutes from './routes/onlineClassRoutes.js';
+import homeworkRoutes from './routes/homeworkRoutes.js';
+import portalRoutes from './routes/portalRoutes.js';
 import { auditMiddleware } from './middleware/auditLog.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -58,6 +63,7 @@ app.use('/api/v1', auditMiddleware);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/students', studentRoutes);
+app.use('/api/students', studentRoutes);
 app.use('/api/v1/teachers', teacherRoutes);
 app.use('/api/v1/inventory', inventoryRoutes);
 app.use('/api/v1/finance', financeRoutes);
@@ -66,7 +72,13 @@ app.use('/api/v1/company', companyRoutes);
 app.use('/api/v1/audit-logs', auditLogRoutes);
 app.use('/api/v1/exams', examRoutes);
 app.use('/api/v1/attendance', attendanceRoutes);
+app.use('/api/v1/periods', periodRoutes);
+app.use('/api/v1/sessions', sessionRoutes);
+app.use('/api/sessions', sessionRoutes);
 app.use('/api/company', companyRoutes);
+app.use('/api/v1/online-classes', onlineClassRoutes);
+app.use('/api/v1/homework', homeworkRoutes);
+app.use('/api/v1/portal', portalRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

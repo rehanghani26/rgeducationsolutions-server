@@ -136,9 +136,19 @@ const StudentSchema = new mongoose.Schema(
         trim: true,
       },
     ],
+    promotionHistory: [
+      {
+        fromClass: String,
+        toClass: String,
+        action: String, // 'promote', 'demote', 'passout'
+        sessionName: String,
+        promotedAt: { type: Date, default: Date.now },
+        promotedBy: String,
+      },
+    ],
     status: {
       type: String,
-      enum: ["active", "inactive"],
+      enum: ["active", "inactive", "Passout", "Pass Out", "graduated"],
       default: "active",
     },
     forcePasswordChange: {
@@ -172,8 +182,5 @@ StudentSchema.index(
     partialFilterExpression: { rollNumber: { $ne: null } },
   }
 );
-
-// Index admission number for fast lookup
-StudentSchema.index({ admissionNumber: 1 }, { unique: true });
 
 export default mongoose.model("Student", StudentSchema);
