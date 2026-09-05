@@ -48,8 +48,11 @@ export const login = async (req, res) => {
       }
     }
 
-    if (!user.isActive) {
-      return res.status(403).json({ success: false, message: 'Account is deactivated' });
+    if (user.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been deactivated by the administrator. You cannot log in or access the system.'
+      });
     }
 
     if (user.accountExpiryDate && new Date(user.accountExpiryDate) < new Date()) {

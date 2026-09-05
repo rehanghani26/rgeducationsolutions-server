@@ -26,6 +26,7 @@ import sessionRoutes from './routes/sessionRoutes.js';
 import onlineClassRoutes from './routes/onlineClassRoutes.js';
 import homeworkRoutes from './routes/homeworkRoutes.js';
 import portalRoutes from './routes/portalRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 import { auditMiddleware } from './middleware/auditLog.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -79,6 +80,8 @@ app.use('/api/company', companyRoutes);
 app.use('/api/v1/online-classes', onlineClassRoutes);
 app.use('/api/v1/homework', homeworkRoutes);
 app.use('/api/v1/portal', portalRoutes);
+app.use('/api/v1/users', userRoutes);
+app.use('/api/users', userRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

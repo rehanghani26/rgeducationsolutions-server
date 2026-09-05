@@ -33,13 +33,18 @@ const uploadBufferToCloudinary = (file) => {
 };
 
 const saveCompanyLogo = async (companyLogo) => {
+  const updateData = {
+    companyLogo: companyLogo || "",
+    schoolLogo: companyLogo || "",
+  };
+
   if (checkFallback()) {
-    return FallbackDb.updateSettings({ companyLogo });
+    return FallbackDb.updateSettings(updateData);
   }
 
   return Setting.findOneAndUpdate(
     {},
-    { companyLogo },
+    updateData,
     { new: true, upsert: true }
   );
 };
@@ -59,12 +64,18 @@ const getCompanySettings = async () => {
 export const getCompanyProfile = async (req, res) => {
   try {
     const settings = await getCompanySettings();
+    const logo = settings?.companyLogo || settings?.schoolLogo || "";
+    const name = settings?.schoolName || "RG EduCore";
+    const motto = settings?.schoolMotto || "School ERP";
 
     return res.json({
       success: true,
       company: {
-        companyLogo: settings?.companyLogo || "",
-        companyName: settings?.schoolName || "RG ERP",
+        companyLogo: logo,
+        schoolLogo: logo,
+        companyName: name,
+        schoolName: name,
+        schoolMotto: motto,
       },
     });
   } catch (err) {

@@ -36,8 +36,22 @@ const UserSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['super-admin', 'school-admin', 'principal', 'teacher', 'head-teacher', 'hod', 'coordinator', 'accountant', 'librarian', 'student', 'parent'],
-    default: 'student'
+    enum: [
+      'super-admin',
+      'school-admin',
+      'director',
+      'principal',
+      'teacher',
+      'head-teacher',
+      'hod',
+      'coordinator',
+      'accountant',
+      'librarian',
+      'peon',
+      'student',
+      'parent'
+    ],
+    default: 'teacher'
   },
   permissions: [{
     type: String,
@@ -47,6 +61,66 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  phone: {
+    type: String,
+    trim: true
+  },
+  alternatePhone: {
+    type: String,
+    trim: true
+  },
+  gender: {
+    type: String,
+    enum: ['Male', 'Female', 'Other', ''],
+    default: ''
+  },
+  dob: {
+    type: Date
+  },
+  address: {
+    type: String,
+    trim: true
+  },
+  qualification: {
+    type: String,
+    trim: true
+  },
+  designation: {
+    type: String,
+    trim: true
+  },
+  department: {
+    type: String,
+    trim: true
+  },
+  joiningDate: {
+    type: Date,
+    default: Date.now
+  },
+  salary: {
+    type: Number,
+    default: 0
+  },
+  isClassTeacher: {
+    type: Boolean,
+    default: false
+  },
+  classTeacherOf: {
+    type: String, // e.g. "Class 10 - Section A"
+    trim: true
+  },
+  classesAssigned: [{
+    type: String,
+    trim: true
+  }],
+  sectionsAssigned: [{
+    type: String,
+    trim: true
+  }],
+  subjectsAssigned: [{
+    type: String,
+    trim: true
+  }],
   profileId: {
     type: String // References Student/Teacher ID
   },

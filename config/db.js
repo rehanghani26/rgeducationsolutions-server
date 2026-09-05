@@ -14,6 +14,45 @@ export const connectDB = async () => {
     isConnected = true;
     fallbackActive = false;
     console.log('✨ MongoDB Connected successfully.');
+
+    // Fix legacy non-sparse indexes on User collection to prevent duplicate null key errors
+    try {
+      const usersCollection = mongoose.connection.collection('users');
+      const indexes = await usersCollection.indexes();
+      
+      const empIndex = indexes.find(
+        (idx) => idx.name === 'employeeId_1' || (idx.key && idx.key.employeeId)
+      );
+      if (empIndex && !empIndex.sparse) {
+        console.log(`🔄 Dropping legacy non-sparse index ${empIndex.name}...`);
+        await usersCollection.dropIndex(empIndex.name);
+      }
+
+      const admIndex = indexes.find(
+        (idx) => idx.name === 'admissionNumber_1' || (idx.key && idx.key.admissionNumber)
+      );
+      if (admIndex && !admIndex.sparse) {
+        console.log(`🔄 Dropping legacy non-sparse index ${admIndex.name}...`);
+        await usersCollection.dropIndex(admIndex.name);
+      }
+
+      // Remove null and empty string fields so sparse indexes ignore them
+      await usersCollection.updateMany(
+        { $or: [{ employeeId: null }, { employeeId: '' }] },
+        { $unset: { employeeId: '' } }
+      );
+      await usersCollection.updateMany(
+        { $or: [{ admissionNumber: null }, { admissionNumber: '' }] },
+        { $unset: { admissionNumber: '' } }
+      );
+
+      // Ensure sparse unique indexes
+      await usersCollection.createIndex({ employeeId: 1 }, { unique: true, sparse: true, background: true });
+      await usersCollection.createIndex({ admissionNumber: 1 }, { unique: true, sparse: true, background: true });
+      console.log('✅ Users collection sparse indexes ensured.');
+    } catch (idxErr) {
+      console.warn('Index migration note:', idxErr.message);
+    }
   } catch (error) {
     isConnected = false;
     fallbackActive = true;

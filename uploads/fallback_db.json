@@ -8,6 +8,13 @@
       "name": "Albus Dumbledore",
       "profileId": "staff1",
       "isActive": true,
+      "phone": "+1 555-0101",
+      "gender": "Male",
+      "designation": "Head Administrator",
+      "department": "Executive Management",
+      "qualification": "Ph.D. Education Administration",
+      "address": "High Tower Suite 1, Academic Wing",
+      "salary": 120000,
       "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InUxIiwicm9sZSI6InN1cGVyLWFkbWluIiwicGVybWlzc2lvbnMiOltdLCJpYXQiOjE3ODg1MzU5MzQsImV4cCI6MTc4OTE0MDczNH0.BFQWjLpbn2Eccbx36Pep-sqLBl-DkKuI2D7jjArRugg",
       "lastLogin": "2026-09-04T15:32:14.827Z",
       "loginHistory": [
@@ -26,7 +33,30 @@
       "role": "principal",
       "name": "Minerva McGonagall",
       "profileId": "staff2",
-      "isActive": true
+      "isActive": true,
+      "phone": "+1 555-0102",
+      "gender": "Female",
+      "designation": "Principal & Academic Dean",
+      "department": "Academics",
+      "qualification": "M.Ed., M.Sc. Mathematics",
+      "address": "Gryphon House, North Campus",
+      "salary": 95000
+    },
+    {
+      "id": "u8",
+      "username": "director",
+      "email": "director@school.com",
+      "role": "school-admin",
+      "name": "Arthur Weasley",
+      "profileId": "staff5",
+      "isActive": true,
+      "phone": "+1 555-0108",
+      "gender": "Male",
+      "designation": "Managing Director",
+      "department": "Board of Directors",
+      "qualification": "MBA, M.A. Public Administration",
+      "address": "The Burrow, Devon",
+      "salary": 110000
     },
     {
       "id": "u3",
@@ -35,7 +65,28 @@
       "role": "teacher",
       "name": "Severus Snape",
       "profileId": "t1",
-      "isActive": true
+      "isActive": true,
+      "phone": "+1 555-0103",
+      "gender": "Male",
+      "designation": "Senior Chemistry Teacher",
+      "department": "Science",
+      "qualification": "M.Sc. Chemistry, B.Ed.",
+      "address": "Spinner End 12, River District",
+      "salary": 75000,
+      "isClassTeacher": true,
+      "classTeacherOf": "Class 10 - Section A",
+      "classesAssigned": [
+        "Class 10",
+        "Class 11"
+      ],
+      "sectionsAssigned": [
+        "Section A",
+        "Section B"
+      ],
+      "subjectsAssigned": [
+        "Potions",
+        "Chemistry"
+      ]
     },
     {
       "id": "u4",
@@ -44,7 +95,14 @@
       "role": "accountant",
       "name": "Lucius Malfoy",
       "profileId": "staff3",
-      "isActive": true
+      "isActive": true,
+      "phone": "+1 555-0104",
+      "gender": "Male",
+      "designation": "Chief Finance Officer",
+      "department": "Finance & Accounts",
+      "qualification": "CPA, B.Com Honors",
+      "address": "Malfoy Manor, Wiltshire",
+      "salary": 85000
     },
     {
       "id": "u5",
@@ -53,7 +111,30 @@
       "role": "librarian",
       "name": "Irma Pince",
       "profileId": "staff4",
-      "isActive": true
+      "isActive": true,
+      "phone": "+1 555-0105",
+      "gender": "Female",
+      "designation": "Chief Librarian",
+      "department": "Central Library",
+      "qualification": "Master of Library Science (M.Lib)",
+      "address": "St. Jude Crescent 44",
+      "salary": 60000
+    },
+    {
+      "id": "u9",
+      "username": "peon",
+      "email": "peon@school.com",
+      "role": "peon",
+      "name": "Argus Filch",
+      "profileId": "staff6",
+      "isActive": true,
+      "phone": "+1 555-0109",
+      "gender": "Male",
+      "designation": "Head Caretaker & Support Staff",
+      "department": "Campus Operations",
+      "qualification": "High School Diploma",
+      "address": "East Gate Lodge, Campus Gate",
+      "salary": 35000
     },
     {
       "id": "u6",

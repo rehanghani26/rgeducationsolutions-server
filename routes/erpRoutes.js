@@ -5,7 +5,9 @@ import {
   getBooks, createBook, getLibraryIssues, issueBook,
   getTransport, getNotifications, getSettings, updateSettings, uploadProfileImage,
   seedDummies, getNotices, createNotice, deleteNotice,
-  getMyLeaves, getAllLeaves, requestLeave, reviewLeave
+  getMyLeaves, getAllLeaves, requestLeave, reviewLeave,
+  getCurriculums, createCurriculum, updateCurriculum, deleteCurriculum,
+  addCurriculumUnit, addCurriculumMaterial
 } from '../controllers/erpController.js';
 import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/rbac.js';
@@ -31,6 +33,39 @@ router.post('/sections', protect, authorize('super-admin', 'school-admin', 'prin
 router.get('/subjects', protect, getSubjects);
 router.post('/subjects', protect, authorize('super-admin', 'school-admin', 'principal'), createSubject);
 router.get('/seed-dummies', protect, seedDummies);
+
+// Academic Curriculum & Courses (Assignable by Super Admin, Admin & Class Teachers)
+router.get('/curriculum', protect, getCurriculums);
+router.post(
+  '/curriculum',
+  protect,
+  authorize('super-admin', 'school-admin', 'principal', 'director', 'teacher', 'head-teacher', 'hod', 'coordinator'),
+  createCurriculum
+);
+router.put(
+  '/curriculum/:id',
+  protect,
+  authorize('super-admin', 'school-admin', 'principal', 'director', 'teacher', 'head-teacher', 'hod', 'coordinator'),
+  updateCurriculum
+);
+router.delete(
+  '/curriculum/:id',
+  protect,
+  authorize('super-admin', 'school-admin', 'principal', 'director'),
+  deleteCurriculum
+);
+router.post(
+  '/curriculum/:id/units',
+  protect,
+  authorize('super-admin', 'school-admin', 'principal', 'director', 'teacher', 'head-teacher', 'hod', 'coordinator'),
+  addCurriculumUnit
+);
+router.post(
+  '/curriculum/:id/materials',
+  protect,
+  authorize('super-admin', 'school-admin', 'principal', 'director', 'teacher', 'head-teacher', 'hod', 'coordinator'),
+  addCurriculumMaterial
+);
 
 // Library Routes
 router.get('/library/books', protect, getBooks);

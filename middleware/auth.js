@@ -51,6 +51,13 @@ export const protect = async (req, res, next) => {
       }
     }
 
+    if (user && user.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been deactivated by the administrator. Access denied.'
+      });
+    }
+
     req.user = user || { id: decoded.id, role: decoded.role, name: decoded.name || 'User', permissions: decoded.permissions || [] };
     next();
   } catch (error) {
