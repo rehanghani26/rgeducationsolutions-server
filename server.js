@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -27,6 +28,7 @@ import onlineClassRoutes from './routes/onlineClassRoutes.js';
 import homeworkRoutes from './routes/homeworkRoutes.js';
 import portalRoutes from './routes/portalRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import aiRoutes from './ai/ai.routes.js';
 import { auditMiddleware } from './middleware/auditLog.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -82,6 +84,7 @@ app.use('/api/v1/homework', homeworkRoutes);
 app.use('/api/v1/portal', portalRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/v1/ai', aiRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

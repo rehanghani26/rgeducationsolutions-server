@@ -1,4 +1,6 @@
 node_modules/
 .env
-node_modules/
+uploads/*.jpg
+uploads/*.png
+uploads/*.pdf
 .env

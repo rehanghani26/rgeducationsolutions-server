@@ -4,8 +4,8 @@ import User from "../models/User.js";
 import { checkFallback, getDbState } from "../config/db.js";
 import { FallbackDb } from "../services/dbFallback.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "";
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "";
+const getJwtSecret = () => process.env.JWT_SECRET || "super_secret_jwt_access_key_ChangeMe";
+const getJwtRefreshSecret = () => process.env.JWT_REFRESH_SECRET || "super_secret_jwt_refresh_key_ChangeMe";
 
 export const generateTokens = (user) => {
   const payload = {
@@ -14,8 +14,8 @@ export const generateTokens = (user) => {
     permissions: user.permissions || [],
   };
 
-  const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
-  const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, {
+  const accessToken = jwt.sign(payload, getJwtSecret(), { expiresIn: "7d" });
+  const refreshToken = jwt.sign(payload, getJwtRefreshSecret(), {
     expiresIn: "7d",
   });
 
@@ -41,7 +41,7 @@ export const protect = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, getJwtSecret());
 
     let user = null;
     if (checkFallback()) {
