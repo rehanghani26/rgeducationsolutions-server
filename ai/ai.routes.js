@@ -7,10 +7,16 @@
  */
 
 import express from 'express';
-import { chatController } from './ai.controller.js';
+import { chatController, healthController } from './ai.controller.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
+
+/**
+ * GET /api/v1/ai/health
+ * @description AI health check & active provider status. Requires valid JWT.
+ */
+router.get('/health', protect, healthController);
 
 /**
  * POST /api/v1/ai/chat

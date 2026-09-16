@@ -22,9 +22,34 @@
  */
 
 import { processAiChat } from './ai.service.js';
+import { getProvider, getFallbackProvider } from './providers/index.js';
 
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_HISTORY_LENGTH = 40;
+
+/**
+ * GET /api/v1/ai/health
+ * Returns provider status and health.
+ */
+export async function healthController(req, res) {
+  try {
+    const provider = getProvider();
+    const fallback = getFallbackProvider();
+    return res.json({
+      success: true,
+      status: 'ready',
+      provider: provider.name,
+      fallback: fallback ? fallback.name : null,
+    });
+  } catch (error) {
+    return res.status(503).json({
+      success: false,
+      status: 'degraded',
+      error: error.message,
+    });
+  }
+}
+
 
 /**
  * POST /api/v1/ai/chat

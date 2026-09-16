@@ -75,18 +75,9 @@
       "salary": 75000,
       "isClassTeacher": true,
       "classTeacherOf": "Class 10 - Section A",
-      "classesAssigned": [
-        "Class 10",
-        "Class 11"
-      ],
-      "sectionsAssigned": [
-        "Section A",
-        "Section B"
-      ],
-      "subjectsAssigned": [
-        "Potions",
-        "Chemistry"
-      ]
+      "classesAssigned": ["Class 10", "Class 11"],
+      "sectionsAssigned": ["Section A", "Section B"],
+      "subjectsAssigned": ["Potions", "Chemistry"]
     },
     {
       "id": "u4",
@@ -232,13 +223,8 @@
       "employeeId": "EMP001",
       "qualification": "M.Sc. Potions, Ph.D.",
       "designation": "Senior Professor",
-      "subjectsAssigned": [
-        "sub1",
-        "sub2"
-      ],
-      "classesAssigned": [
-        "c1"
-      ],
+      "subjectsAssigned": ["sub1", "sub2"],
+      "classesAssigned": ["c1"],
       "salary": 85000,
       "attendanceRate": 98,
       "leaves": []
@@ -250,13 +236,8 @@
       "employeeId": "EMP002",
       "qualification": "M.A. Charms",
       "designation": "Professor",
-      "subjectsAssigned": [
-        "sub3"
-      ],
-      "classesAssigned": [
-        "c1",
-        "c2"
-      ],
+      "subjectsAssigned": ["sub3"],
+      "classesAssigned": ["c1", "c2"],
       "salary": 75000,
       "attendanceRate": 95,
       "leaves": []
@@ -499,7 +480,7 @@
     },
     {
       "id": "v2",
-      "name": "Aegis Tech Solutions",
+      "name": "RGES Tech Solutions",
       "contactPerson": "John Doe",
       "phone": "444-555-6666",
       "email": "support@aegistech.com",
@@ -637,15 +618,9 @@
       "busNumber": "BUS-GRIF-01",
       "driverName": "Hagrid R.",
       "driverContact": "0987654322",
-      "stops": [
-        "Hampstead Heath",
-        "Highgate",
-        "Kings Cross"
-      ],
+      "stops": ["Hampstead Heath", "Highgate", "Kings Cross"],
       "fare": 2500,
-      "assignedStudents": [
-        "s2"
-      ]
+      "assignedStudents": ["s2"]
     },
     {
       "id": "tr2",
@@ -653,16 +628,9 @@
       "busNumber": "BUS-SLYT-02",
       "driverName": "Stan Shunpike",
       "driverContact": "0987654323",
-      "stops": [
-        "Little Whinging",
-        "Guildford",
-        "Victoria"
-      ],
+      "stops": ["Little Whinging", "Guildford", "Victoria"],
       "fare": 3500,
-      "assignedStudents": [
-        "s1",
-        "s3"
-      ]
+      "assignedStudents": ["s1", "s3"]
     }
   ],
   "notifications": [

@@ -5,7 +5,7 @@ const SettingSchema = new mongoose.Schema(
     // School Information
     schoolName: {
       type: String,
-      default: "Aegis School & College ERP",
+      default: "RGES School & College ERP",
     },
     schoolCode: {
       type: String,
@@ -308,18 +308,29 @@ const SettingSchema = new mongoose.Schema(
     portalSettings: {
       enabled: { type: Boolean, default: true },
       schoolName: { type: String, default: "Apex International Academy" },
-      affiliation: { type: String, default: "Affiliated to Central Board & Cambridge Curriculum" },
+      affiliation: {
+        type: String,
+        default: "Affiliated to Central Board & Cambridge Curriculum",
+      },
       affiliationCode: { type: String, default: "SCH-2026-CBSE-9912" },
-      tagline: { type: String, default: "Quality Education for a Better Future" },
+      tagline: {
+        type: String,
+        default: "Quality Education for a Better Future",
+      },
       heroImage: {
         type: String,
-        default: "https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=1600&auto=format&fit=crop",
+        default:
+          "https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=1600&auto=format&fit=crop",
       },
       heroSubtitle: {
         type: String,
-        default: "Nurturing young minds towards excellence, character, and lifelong curiosity in a world-class environment.",
+        default:
+          "Nurturing young minds towards excellence, character, and lifelong curiosity in a world-class environment.",
       },
-      admissionBadge: { type: String, default: "Admissions Open for 2026-2027" },
+      admissionBadge: {
+        type: String,
+        default: "Admissions Open for 2026-2027",
+      },
       aboutTitle: { type: String, default: "About Our School" },
       aboutDescription: {
         type: String,
@@ -335,7 +346,8 @@ const SettingSchema = new mongoose.Schema(
       },
       principalImage: {
         type: String,
-        default: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=400&auto=format&fit=crop",
+        default:
+          "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=400&auto=format&fit=crop",
       },
       facilities: {
         type: Array,
@@ -343,21 +355,24 @@ const SettingSchema = new mongoose.Schema(
           {
             title: "Experienced Teachers",
             badge: "Experienced",
-            description: "Passionate, certified faculty committed to student mentorship and academic success.",
+            description:
+              "Passionate, certified faculty committed to student mentorship and academic success.",
             icon: "teachers",
             gradient: "from-blue-500 to-indigo-600",
           },
           {
             title: "Good Classrooms",
             badge: "Modern",
-            description: "Spacious, climate-controlled, smart interactive digital board learning spaces.",
+            description:
+              "Spacious, climate-controlled, smart interactive digital board learning spaces.",
             icon: "classrooms",
             gradient: "from-emerald-500 to-teal-600",
           },
           {
             title: "Sports & Activities",
             badge: "Sports & Events",
-            description: "Olympic-standard sports courts, football turf, performing arts, and annual fest.",
+            description:
+              "Olympic-standard sports courts, football turf, performing arts, and annual fest.",
             icon: "activities",
             gradient: "from-amber-500 to-orange-600",
           },
@@ -396,19 +411,22 @@ const SettingSchema = new mongoose.Schema(
         type: Array,
         default: [
           {
-            title: "Admissions Open for Academic Year 2026-2027 (Limited Seats Available)",
+            title:
+              "Admissions Open for Academic Year 2026-2027 (Limited Seats Available)",
             date: "Sep 05, 2026",
             tag: "Admissions",
             urgent: true,
           },
           {
-            title: "Annual Inter-School Robotics & STEM Innovation Fair Next Friday",
+            title:
+              "Annual Inter-School Robotics & STEM Innovation Fair Next Friday",
             date: "Sep 12, 2026",
             tag: "Events",
             urgent: false,
           },
           {
-            title: "Term 1 Comprehensive Assessment Schedule & Parent-Teacher Meeting",
+            title:
+              "Term 1 Comprehensive Assessment Schedule & Parent-Teacher Meeting",
             date: "Sep 20, 2026",
             tag: "Academic",
             urgent: false,
@@ -422,29 +440,53 @@ const SettingSchema = new mongoose.Schema(
             title: "Pre-Primary Wing (Early Years)",
             grades: "Playgroup to Kindergarten (Ages 3 – 5)",
             tag: "Play & Discovery",
-            description: "A safe, sensory-rich play-based curriculum focusing on social skills, phonics, and motor coordination.",
-            subjects: ["Phonics & Pre-Reading", "Sensory Play & Art", "Numbers & Shapes", "Music & Movement"],
+            description:
+              "A safe, sensory-rich play-based curriculum focusing on social skills, phonics, and motor coordination.",
+            subjects: [
+              "Phonics & Pre-Reading",
+              "Sensory Play & Art",
+              "Numbers & Shapes",
+              "Music & Movement",
+            ],
           },
           {
             title: "Primary School Wing",
             grades: "Grades 1 to 5 (Ages 6 – 10)",
             tag: "Foundations & Inquiry",
-            description: "Building strong conceptual understanding in mathematics, languages, science, and collaborative projects.",
-            subjects: ["Core Mathematics", "English Language Arts", "General Science", "Social Studies"],
+            description:
+              "Building strong conceptual understanding in mathematics, languages, science, and collaborative projects.",
+            subjects: [
+              "Core Mathematics",
+              "English Language Arts",
+              "General Science",
+              "Social Studies",
+            ],
           },
           {
             title: "Middle School Wing",
             grades: "Grades 6 to 8 (Ages 11 – 13)",
             tag: "Exploration & Analysis",
-            description: "Transitioning into independent analytical thinking, hands-on scientific experiments, and computer coding.",
-            subjects: ["Physics, Chemistry, Biology", "Advanced Algebra", "Python & Digital Skills", "Debate & World Cultures"],
+            description:
+              "Transitioning into independent analytical thinking, hands-on scientific experiments, and computer coding.",
+            subjects: [
+              "Physics, Chemistry, Biology",
+              "Advanced Algebra",
+              "Python & Digital Skills",
+              "Debate & World Cultures",
+            ],
           },
           {
             title: "Senior Secondary Wing",
             grades: "Grades 9 to 12 (Ages 14 – 18)",
             tag: "Career & College Prep",
-            description: "Pre-university streams (Science, Commerce, Humanities) guided by experienced board educators.",
-            subjects: ["Science: PCM / PCB", "Commerce & Accountancy", "Humanities & Social Sciences", "SAT / College Counseling"],
+            description:
+              "Pre-university streams (Science, Commerce, Humanities) guided by experienced board educators.",
+            subjects: [
+              "Science: PCM / PCB",
+              "Commerce & Accountancy",
+              "Humanities & Social Sciences",
+              "SAT / College Counseling",
+            ],
           },
         ],
       },
@@ -455,21 +497,24 @@ const SettingSchema = new mongoose.Schema(
             step: "01",
             title: "Submit Online Inquiry",
             subtitle: "Quick & Transparent",
-            description: "Fill out the simple admission inquiry form online. Our academic counselors will contact you within 24 hours.",
+            description:
+              "Fill out the simple admission inquiry form online. Our academic counselors will contact you within 24 hours.",
             badge: "Step 1: Get Started",
           },
           {
             step: "02",
             title: "Campus Tour & Assessment",
             subtitle: "Discover & Interact",
-            description: "Experience our classrooms, sports complex, and labs. Students participate in a friendly, age-appropriate conversation.",
+            description:
+              "Experience our classrooms, sports complex, and labs. Students participate in a friendly, age-appropriate conversation.",
             badge: "Step 2: Experience",
           },
           {
             step: "03",
             title: "Enrollment & Welcome",
             subtitle: "Join the Family",
-            description: "Finalize document verification, receive your ERP parent credentials, uniform kit, and attend orientation!",
+            description:
+              "Finalize document verification, receive your ERP parent credentials, uniform kit, and attend orientation!",
             badge: "Step 3: Welcome",
           },
         ],
@@ -477,12 +522,36 @@ const SettingSchema = new mongoose.Schema(
       ageCriteria: {
         type: Array,
         default: [
-          { grade: "Pre-Nursery / Playgroup", age: "2.5 – 3 Years", cutoff: "As of March 31, 2026" },
-          { grade: "Kindergarten 1 (LKG)", age: "3.5 – 4 Years", cutoff: "As of March 31, 2026" },
-          { grade: "Kindergarten 2 (UKG)", age: "4.5 – 5 Years", cutoff: "As of March 31, 2026" },
-          { grade: "Grade 1", age: "5.5 – 6.5 Years", cutoff: "As of March 31, 2026" },
-          { grade: "Grade 2 to Grade 5", age: "Age appropriate + Report card", cutoff: "Subject to seat availability" },
-          { grade: "Grade 6 to Grade 10", age: "Diagnostic assessment & interview", cutoff: "Subject to seat availability" },
+          {
+            grade: "Pre-Nursery / Playgroup",
+            age: "2.5 – 3 Years",
+            cutoff: "As of March 31, 2026",
+          },
+          {
+            grade: "Kindergarten 1 (LKG)",
+            age: "3.5 – 4 Years",
+            cutoff: "As of March 31, 2026",
+          },
+          {
+            grade: "Kindergarten 2 (UKG)",
+            age: "4.5 – 5 Years",
+            cutoff: "As of March 31, 2026",
+          },
+          {
+            grade: "Grade 1",
+            age: "5.5 – 6.5 Years",
+            cutoff: "As of March 31, 2026",
+          },
+          {
+            grade: "Grade 2 to Grade 5",
+            age: "Age appropriate + Report card",
+            cutoff: "Subject to seat availability",
+          },
+          {
+            grade: "Grade 6 to Grade 10",
+            age: "Diagnostic assessment & interview",
+            cutoff: "Subject to seat availability",
+          },
         ],
       },
       documents: {
@@ -558,10 +627,26 @@ const SettingSchema = new mongoose.Schema(
       milestones: {
         type: Array,
         default: [
-          { year: "2004", title: "Campus Founded", desc: "Started with 120 students and a vision for holistic schooling." },
-          { year: "2012", title: "STEM & Robotics Hub", desc: "Introduced 3D printing and coding for middle schoolers." },
-          { year: "2018", title: "National Sports Award", desc: "Recognized for top sporting infrastructure in the state." },
-          { year: "2026", title: "Global Dual Accreditation", desc: "Now serving over 1,500 students with 100% board distinctions." },
+          {
+            year: "2004",
+            title: "Campus Founded",
+            desc: "Started with 120 students and a vision for holistic schooling.",
+          },
+          {
+            year: "2012",
+            title: "STEM & Robotics Hub",
+            desc: "Introduced 3D printing and coding for middle schoolers.",
+          },
+          {
+            year: "2018",
+            title: "National Sports Award",
+            desc: "Recognized for top sporting infrastructure in the state.",
+          },
+          {
+            year: "2026",
+            title: "Global Dual Accreditation",
+            desc: "Now serving over 1,500 students with 100% board distinctions.",
+          },
         ],
       },
       departments: {
@@ -588,12 +673,16 @@ const SettingSchema = new mongoose.Schema(
         ],
       },
       contact: {
-        address: { type: String, default: "124 Academic Enclave, Knowledge Park, City Center" },
+        address: {
+          type: String,
+          default: "124 Academic Enclave, Knowledge Park, City Center",
+        },
         phone: { type: String, default: "+1 (555) 234-5678" },
         email: { type: String, default: "admissions@apexschool.edu" },
         timing: {
           type: String,
-          default: "Monday – Friday: 08:00 AM – 03:30 PM | Saturday: 08:30 AM – 12:30 PM",
+          default:
+            "Monday – Friday: 08:00 AM – 03:30 PM | Saturday: 08:30 AM – 12:30 PM",
         },
       },
     },

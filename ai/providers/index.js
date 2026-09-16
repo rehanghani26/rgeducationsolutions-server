@@ -14,6 +14,7 @@
  *   AI_FALLBACK_PROVIDER - 'groq' | 'gemini' | 'none'  (default: 'gemini')
  */
 
+import { NvidiaProvider } from './nvidia.provider.js';
 import { GroqProvider } from './groq.provider.js';
 import { GeminiProvider } from './gemini.provider.js';
 
@@ -59,18 +60,20 @@ export function getFallbackProvider() {
 
 /**
  * Create a fresh provider instance by name.
- * @param {'groq'|'gemini'} name
+ * @param {'nvidia'|'groq'|'gemini'} name
  * @returns {import('./base.provider.js').AIProvider}
  */
 function createProvider(name) {
   switch (name.toLowerCase()) {
+    case 'nvidia':
+      return new NvidiaProvider();
     case 'groq':
       return new GroqProvider();
     case 'gemini':
       return new GeminiProvider();
     default:
       throw new Error(
-        `Unknown AI provider: "${name}". Valid options are: "groq", "gemini".`
+        `Unknown AI provider: "${name}". Valid options are: "nvidia", "groq", "gemini".`
       );
   }
 }
