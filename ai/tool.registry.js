@@ -17,6 +17,8 @@ import { attendanceToolDefinitions, attendanceToolExecutors } from './tools/atte
 import { teacherToolDefinitions, teacherToolExecutors } from './tools/teacher.tools.js';
 import { feeToolDefinitions, feeToolExecutors } from './tools/fee.tools.js';
 import { examToolDefinitions, examToolExecutors } from './tools/exam.tools.js';
+import { resultToolDefinitions, resultToolExecutors } from './tools/result.tools.js';
+import { settingsToolDefinitions, settingsToolExecutors } from './tools/settings.tools.js';
 import { homeworkToolDefinitions, homeworkToolExecutors } from './tools/homework.tools.js';
 import { noticeToolDefinitions, noticeToolExecutors } from './tools/notice.tools.js';
 import { classToolDefinitions, classToolExecutors } from './tools/class.tools.js';
@@ -40,6 +42,8 @@ export const ALL_TOOL_DEFINITIONS = [
   ...teacherToolDefinitions,
   ...feeToolDefinitions,
   ...examToolDefinitions,
+  ...resultToolDefinitions,
+  ...settingsToolDefinitions,
   ...homeworkToolDefinitions,
   ...noticeToolDefinitions,
   ...classToolDefinitions,
@@ -63,6 +67,8 @@ const ALL_EXECUTORS = {
   ...teacherToolExecutors,
   ...feeToolExecutors,
   ...examToolExecutors,
+  ...resultToolExecutors,
+  ...settingsToolExecutors,
   ...homeworkToolExecutors,
   ...noticeToolExecutors,
   ...classToolExecutors,

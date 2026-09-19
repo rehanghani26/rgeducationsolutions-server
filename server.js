@@ -29,6 +29,8 @@ import homeworkRoutes from "./routes/homeworkRoutes.js";
 import portalRoutes from "./routes/portalRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import aiRoutes from "./ai/ai.routes.js";
+import resultRoutes from "./routes/resultRoutes.js";
+import syllabusRoutes from "./routes/syllabusRoutes.js";
 import { auditMiddleware } from "./middleware/auditLog.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -89,6 +91,8 @@ app.use("/api/v1/portal", portalRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/v1/ai", aiRoutes);
+app.use("/api/v1/results", resultRoutes);
+app.use("/api/v1/syllabus", syllabusRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

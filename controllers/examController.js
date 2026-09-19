@@ -62,16 +62,29 @@ export const getExamActivity = async (req, res) => {
 
 export const createExam = async (req, res) => {
   try {
-    const { name, term, date, status } = req.body;
+    const {
+      name, term, date, endDate, status, session,
+      classIds, classNames, subjectSchedule, subjects, classes,
+      totalMarks, passMarks, duration, venue, supervisor, description,
+    } = req.body;
+
     if (!name || !term || !date) {
       return res.status(400).json({ success: false, message: 'Name, term, and date are required' });
     }
 
+    const examData = {
+      name, term, date, status: status || 'upcoming',
+      endDate, session, classIds, classNames,
+      subjectSchedule, subjects, classes,
+      totalMarks, passMarks, duration, venue, supervisor, description,
+      createdBy: req.user?._id || req.user?.id,
+    };
+
     let exam;
     if (checkFallback()) {
-      exam = FallbackDb.create('exams', { name, term, date, status: status || 'upcoming' });
+      exam = FallbackDb.create('exams', examData);
     } else {
-      exam = await Exam.create({ name, term, date, status: status || 'upcoming' });
+      exam = await Exam.create(examData);
     }
 
     await logActivity({

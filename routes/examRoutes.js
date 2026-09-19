@@ -15,8 +15,8 @@ const router = express.Router();
 router.get('/', protect, getExams);
 router.get('/:id/activity', protect, getExamActivity);
 router.get('/:id', protect, getExamById);
-router.post('/', protect, authorize('super-admin', 'school-admin', 'principal', 'teacher', 'head-teacher'), createExam);
-router.put('/:id', protect, authorize('super-admin', 'school-admin', 'principal', 'teacher', 'head-teacher'), updateExam);
-router.delete('/:id', protect, authorize('super-admin', 'school-admin', 'principal'), deleteExam);
+router.post('/', protect, authorize('super-admin', 'school-admin', 'admin', 'principal', 'teacher', 'head-teacher', 'director', 'hod', 'coordinator'), createExam);
+router.put('/:id', protect, authorize('super-admin', 'school-admin', 'admin', 'principal', 'teacher', 'head-teacher', 'director', 'hod', 'coordinator'), updateExam);
+router.delete('/:id', protect, authorize('super-admin', 'school-admin', 'admin', 'principal'), deleteExam);
 
 export default router;

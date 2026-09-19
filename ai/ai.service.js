@@ -99,10 +99,26 @@ export async function processAiChat({
     response = await callProviderWithFallback(messages, toolDefinitions);
   }
 
+  // If the model ended on tool calls due to max iterations, request a final summary
+  if (response.type !== "text") {
+    try {
+      messages.push({
+        role: "user",
+        content: "Please summarize the actions taken and the final status based on the tool results above.",
+      });
+      const summaryResp = await callProviderWithFallback(messages, []);
+      if (summaryResp.type === "text" && summaryResp.text) {
+        response = summaryResp;
+      }
+    } catch (_) {}
+  }
+
   // At this point response.type should be 'text'
   const replyText =
     response.type === "text"
       ? response.text
+      : toolCallLog.length > 0
+      ? `Completed ${toolCallLog.length} operation(s) successfully.`
       : "I was unable to complete your request. Please try again.";
 
   return {

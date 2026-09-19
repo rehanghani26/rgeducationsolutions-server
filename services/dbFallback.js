@@ -615,6 +615,64 @@ const initialDb = {
   classTimetables: [],
   onlineClasses: [],
   homework: [],
+  exams: [
+    {
+      id: "ex-1",
+      _id: "ex-1",
+      name: "Mid-Term Evaluation — Islamic Studies & Quranic Sciences",
+      title: "Mid-Term Evaluation — Islamic Studies & Quranic Sciences",
+      term: "Term 1 (Mid-Term)",
+      session: "2025-2026",
+      date: "2026-09-15",
+      startDate: "2026-09-15",
+      endDate: "2026-09-25",
+      status: "upcoming",
+      totalStudents: 1248,
+      subjectsCount: 8,
+      createdAt: "2026-08-01",
+      duration: "2 Hours 30 Mins",
+      totalMarks: 100,
+      passMarks: 40,
+      venue: "Main Examination Hall & Block A Rooms",
+      supervisor: "Sheikh Abdullah Al-Hafiz",
+      description: "Comprehensive evaluation covering Quranic Tajweed, Hadith Studies, and Fiqh fundamentals.",
+      classes: ["Grade 9 - Section A", "Grade 10 - Section A"],
+      classNames: ["Grade 9 - Section A", "Grade 10 - Section A"],
+      subjectSchedule: [
+        { subjectName: "Quranic Sciences & Tajweed", subjectCode: "ISL-101", maxMarks: 100, passMarks: 40 },
+        { subjectName: "Classical Arabic Grammar", subjectCode: "ARB-102", maxMarks: 100, passMarks: 40 },
+        { subjectName: "Islamic History", subjectCode: "HIS-106", maxMarks: 100, passMarks: 40 },
+      ],
+    },
+    {
+      id: "ex-2",
+      _id: "ex-2",
+      name: "Annual Science & Practical Examination",
+      title: "Annual Science & Practical Examination",
+      term: "Annual Session",
+      session: "2025-2026",
+      date: "2026-09-20",
+      startDate: "2026-09-20",
+      endDate: "2026-09-28",
+      status: "upcoming",
+      totalStudents: 380,
+      subjectsCount: 4,
+      createdAt: "2026-08-02",
+      duration: "3 Hours",
+      totalMarks: 100,
+      passMarks: 35,
+      venue: "Physics & Chemistry Science Laboratories",
+      supervisor: "Prof. Mohammed Zakir",
+      description: "Practical and written assessment for Physics, Chemistry, and Biology laboratories.",
+      classes: ["Grade 11 - Section A", "Grade 12 - Section A"],
+      classNames: ["Grade 11 - Section A", "Grade 12 - Section A"],
+      subjectSchedule: [
+        { subjectName: "Physics Theory & Lab", subjectCode: "PHY-104", maxMarks: 100, passMarks: 35 },
+        { subjectName: "Chemistry Lab Experiments", subjectCode: "CHM-107", maxMarks: 100, passMarks: 35 },
+      ],
+    },
+  ],
+  results: [],
   settings: {
     companyLogo: "",
     schoolName: "Hogwarts Academy of Excellence",
@@ -639,6 +697,9 @@ const loadData = () => {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, "utf-8");
       db = JSON.parse(raw);
+      if (!db.exams) db.exams = initialDb.exams;
+      if (!db.results) db.results = [];
+      saveData();
     } else {
       saveData();
     }

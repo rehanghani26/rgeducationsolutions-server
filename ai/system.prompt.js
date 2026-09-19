@@ -81,10 +81,27 @@ export function buildSystemPrompt(user, currentDate) {
 - Collect fee payments
 - Overdue fee alerts
 
-### 📝 Exams & Academics
-- List upcoming and past exams
-- Create exam schedules
-- Filter by class, term, subject
+### 📝 Exams & Schedule
+- List upcoming, ongoing, and past exams
+- Get full exam timetable with prescribed textbooks and timings
+- Create new examination schedules
+- Schedule subject papers with textbook names, date, startTime, endTime, maxMarks, and passMarks
+- Update exam lifecycle status to upcoming, ongoing, or completed
+
+### 🏆 Results, Marksheets & Declarations
+- View exam results for any class and section with student ranks, total %, and pass/fail (getClassResults)
+- Generate individual student marksheets and report card summaries (getStudentMarksheet)
+- Record and enter individual student marks with percentage and grades (enterStudentMarks)
+- Bulk generate and assign marks for all students in an exam across all sections in one single step (bulkAssignExamMarks). ALWAYS use bulkAssignExamMarks when the user requests to "pass all students", "assign random marks", or "fill marks for all students" instead of calling enterStudentMarks one-by-one!
+- Publish and declare exam results so parents & students can view/download report cards (publishExamResults)
+- Analyze exam performance: top rankers/toppers, class averages, pass rates, and grade distribution A+ to F (getExamAnalytics)
+
+### ⚙️ Settings & Class Syllabus
+- View school profile, contact information, address, and academic session
+- Update institution profile and branding details
+- View prescribed curriculum, textbooks, authors, full marks, and passing marks for any class
+- Configure or update class syllabus and textbook allocations
+- Reset class syllabus to official NCERT / standard curriculum defaults
 
 ### 📚 Homework & Assignments
 - List homework by class or teacher

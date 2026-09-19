@@ -160,30 +160,55 @@ export const studentToolExecutors = {
     }
 
     // MongoDB path
-    const filter = {};
+    const conditions = [];
+
     if (args.search) {
       const regex = new RegExp(args.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = searchFields.map((f) => ({ [f]: regex }));
+      const orClauses = [
+        { name: regex },
+        { admissionNumber: regex },
+        { email: regex },
+      ];
+      const numVal = Number(args.search);
+      if (!isNaN(numVal) && args.search.trim() !== '') {
+        orClauses.push({ rollNumber: numVal });
+      }
+      conditions.push({ $or: orClauses });
     }
+
     if (args.class) {
       const cls = args.class.replace(/class\s*/i, '').trim();
       const classRegex = new RegExp(cls, 'i');
-      filter.$or = [
-        ...(filter.$or || []),
-        { class: classRegex },
-        { className: classRegex },
-      ];
+      conditions.push({
+        $or: [
+          { class: classRegex },
+          { className: classRegex },
+          { classId: classRegex },
+        ],
+      });
     }
+
     if (args.section) {
-      filter.$or = undefined; // reset for simple filter
-      if (args.search || args.class) {
-        // combine existing filter with section
-        filter.section = new RegExp(args.section, 'i');
-      } else {
-        filter.section = new RegExp(args.section, 'i');
-      }
+      const sec = args.section.replace(/section\s*/i, '').trim();
+      const secRegex = new RegExp(`^${sec}$|^section\\s*${sec}$`, 'i');
+      conditions.push({
+        $or: [
+          { section: secRegex },
+          { sectionName: secRegex },
+          { sectionId: secRegex },
+        ],
+      });
     }
-    if (args.status) filter.status = args.status;
+
+    if (args.status) {
+      conditions.push({ status: args.status });
+    }
+
+    const filter = conditions.length > 1
+      ? { $and: conditions }
+      : conditions.length === 1
+      ? conditions[0]
+      : {};
 
     if (args.countOnly) {
       const count = await Student.countDocuments(filter);
