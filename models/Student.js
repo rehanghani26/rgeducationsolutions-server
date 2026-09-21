@@ -111,6 +111,22 @@ const StudentSchema = new mongoose.Schema(
     aadhaarNumber: {
       type: String,
     },
+    photo: {
+      type: String,
+      default: "",
+    },
+    aadhaarDocument: {
+      type: String,
+      default: "",
+    },
+    imagesRef: {
+      id: { type: String, default: "" },
+      img: { type: String, default: "" },
+    },
+    AdharRef: {
+      id: { type: String, default: "" },
+      pdf: { type: String, default: "" },
+    },
     documents: [
       {
         name: String,

@@ -1,9 +1,12 @@
+import fs from "fs";
+import path from "path";
 import mongoose from "mongoose";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import Parent from "../models/Parent.js";
 import { checkFallback } from "../config/db.js";
 import { FallbackDb } from "../services/dbFallback.js";
+import { configureCloudinary } from "../config/cloudinary.js";
 import {
   parsePagination,
   buildSearchFilter,
@@ -242,7 +245,17 @@ const buildStudentPayload = async (data) => {
     parentName: data.parentName || `Guardian of ${name}`,
     parentContact: data.parentContact || data.contactNumber || "",
     parentEmail: data.parentEmail || "",
-    aadhaarNumber: data.aadhaarNumber || "",
+    aadhaarNumber: data.aadhaarNumber ? String(data.aadhaarNumber).trim() : "",
+    photo: data.photo || data.imagesRef?.img || data.studentImg || "",
+    aadhaarDocument: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || "",
+    imagesRef: {
+      id: data.imagesRef?.id || data.photoId || (data.photo || data.imagesRef?.img ? `img_${Date.now()}` : ""),
+      img: data.photo || data.imagesRef?.img || data.studentImg || "",
+    },
+    AdharRef: {
+      id: data.AdharRef?.id || data.aadhaarRef?.id || (data.aadhaarDocument || data.AdharRef?.pdf ? `doc_${Date.now()}` : ""),
+      pdf: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || "",
+    },
     joiningDate: data.joiningDate || new Date(),
     permissions:
       Array.isArray(data.permissions) && data.permissions.length
@@ -700,6 +713,7 @@ export const getStudentById = async (req, res) => {
           "username email role permissions isActive lastLogin loginHistory forcePasswordChange"
         )
         .populate("parentId");
+      if (student) student = enrichStudent(student);
     }
 
     if (!student) {
@@ -753,6 +767,26 @@ export const createStudent = async (req, res) => {
     if (!payload.contactNumber) payload.contactNumber = "+919876543210";
     if (!payload.parentName) payload.parentName = `Guardian of ${payload.name}`;
     if (!payload.parentContact) payload.parentContact = payload.contactNumber;
+
+    // Single / manual registration: Aadhaar number, Photo, and Aadhaar PDF are mandatory
+    if (!payload.aadhaarNumber || !payload.aadhaarNumber.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Aadhaar number is mandatory for student registration",
+      });
+    }
+    if (!payload.photo || !payload.photo.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Student photo (1MB or less) is mandatory for student registration",
+      });
+    }
+    if (!payload.aadhaarDocument || !payload.aadhaarDocument.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Aadhaar PDF document (1MB or less) is mandatory for student registration",
+      });
+    }
 
     if (
       req.body.confirmPassword !== undefined &&
@@ -984,18 +1018,31 @@ export const updateStudent = async (req, res) => {
 
     if (matchedClass) {
       updateData.class = matchedClass.name;
-      updateData.className = matchedClass.label;
+      updateData.className = matchedClass.name;
       updateData.classId = updateData.classId || matchedClass.id;
     }
     if (matchedSection) {
       updateData.section = matchedSection.name;
-      updateData.sectionName = matchedSection.label;
+      updateData.sectionName = matchedSection.name;
       updateData.sectionId = updateData.sectionId || matchedSection.id;
     }
 
     if (updateData.firstName || updateData.lastName) {
       updateData.name =
         `${updateData.firstName || ""} ${updateData.lastName || ""}`.trim();
+    }
+
+    if (updateData.imagesRef || updateData.photo) {
+      const pUrl = updateData.imagesRef?.img || updateData.photo || "";
+      const pId = updateData.imagesRef?.id || updateData.photoId || (pUrl ? `img_${Date.now()}` : "");
+      updateData.photo = pUrl;
+      updateData.imagesRef = { id: pId, img: pUrl };
+    }
+    if (updateData.AdharRef || updateData.aadhaarDocument) {
+      const aUrl = updateData.AdharRef?.pdf || updateData.aadhaarDocument || "";
+      const aId = updateData.AdharRef?.id || updateData.aadhaarDocId || (aUrl ? `doc_${Date.now()}` : "");
+      updateData.aadhaarDocument = aUrl;
+      updateData.AdharRef = { id: aId, pdf: aUrl };
     }
 
     let updatedRecord = null;
@@ -1818,6 +1865,201 @@ export const getPromotionStatus = async (req, res) => {
   }
 };
 
+/**
+ * Upload student file (photo or Aadhaar PDF) to Cloudinary.
+ * Strict 1MB size limit.
+ * Saved once to Cloudinary, returned URL is placed in form state.
+ */
+export const uploadStudentFile = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded",
+      });
+    }
 
+    if (req.file.size > 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        message: "File size must not exceed 1MB",
+      });
+    }
 
+    const isPdf =
+      req.file.mimetype === "application/pdf" ||
+      (req.file.originalname && req.file.originalname.toLowerCase().endsWith(".pdf"));
 
+    const uploadType =
+      req.body.type || (isPdf ? "aadhaar" : "photo");
+
+    const folder =
+      uploadType === "photo"
+        ? "school-erp/students/photos"
+        : "school-erp/students/aadhaar";
+
+    // Attempt Cloudinary stream upload
+    try {
+      const cloudinary = configureCloudinary();
+      const result = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder,
+            resource_type: isPdf ? "auto" : "image",
+            use_filename: true,
+            unique_filename: true,
+            overwrite: false,
+          },
+          (err, uploaded) => {
+            if (err) return reject(err);
+            resolve(uploaded);
+          }
+        );
+        stream.end(req.file.buffer);
+      });
+
+      const fileId = result.public_id;
+      let fileUrl = result.secure_url;
+      if (isPdf && fileUrl.includes("/upload/") && !fileUrl.includes("fl_inline")) {
+        fileUrl = fileUrl.replace("/upload/", "/upload/fl_inline/");
+      }
+
+      const ref =
+        uploadType === "photo"
+          ? { id: fileId, img: fileUrl }
+          : { id: fileId, pdf: fileUrl };
+
+      return res.json({
+        success: true,
+        message: `${uploadType === "photo" ? "Photo" : "Aadhaar document"} uploaded successfully`,
+        url: fileUrl,
+        id: fileId,
+        publicId: fileId,
+        format: result.format,
+        bytes: result.bytes,
+        originalName: req.file.originalname,
+        type: uploadType,
+        imagesRef: uploadType === "photo" ? ref : undefined,
+        AdharRef: uploadType !== "photo" ? ref : undefined,
+        ref,
+      });
+    } catch (cloudErr) {
+      console.warn("Cloudinary upload fallback to local storage:", cloudErr.message);
+
+      // Local fallback
+      const uploadsDir = path.join(process.cwd(), "uploads", "students");
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+
+      const ext = path.extname(req.file.originalname) || (isPdf ? ".pdf" : ".jpg");
+      const safeFilename = `${uploadType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
+      const destPath = path.join(uploadsDir, safeFilename);
+
+      fs.writeFileSync(destPath, req.file.buffer);
+      const fileUrl = `/uploads/students/${safeFilename}`;
+      const fileId = safeFilename;
+      const ref =
+        uploadType === "photo"
+          ? { id: fileId, img: fileUrl }
+          : { id: fileId, pdf: fileUrl };
+
+      return res.json({
+        success: true,
+        message: `${uploadType === "photo" ? "Photo" : "Aadhaar document"} saved locally`,
+        url: fileUrl,
+        id: fileId,
+        publicId: fileId,
+        originalName: req.file.originalname,
+        type: uploadType,
+        imagesRef: uploadType === "photo" ? ref : undefined,
+        AdharRef: uploadType !== "photo" ? ref : undefined,
+        ref,
+      });
+    }
+  } catch (error) {
+    console.error("uploadStudentFile error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to upload student file",
+    });
+  }
+};
+
+/**
+ * Retrieve image or document anywhere by its ID (imagesRef.id or AdharRef.id)
+ */
+export const getStudentFileById = async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    if (!fileId) {
+      return res.status(400).json({ success: false, message: "File ID is required" });
+    }
+
+    let fileUrl = null;
+    let fileType = "image";
+
+    // 1. Check in FallbackDb or MongoDB
+    if (checkFallback()) {
+      const allStudents = FallbackDb.find("students") || [];
+      const studentWithPhoto = allStudents.find((s) => s.imagesRef?.id === fileId || s.photoId === fileId);
+      if (studentWithPhoto) {
+        fileUrl = studentWithPhoto.imagesRef?.img || studentWithPhoto.photo;
+        fileType = "image";
+      } else {
+        const studentWithDoc = allStudents.find((s) => s.AdharRef?.id === fileId || s.aadhaarRef?.id === fileId);
+        if (studentWithDoc) {
+          fileUrl = studentWithDoc.AdharRef?.pdf || studentWithDoc.aadhaarDocument;
+          fileType = "pdf";
+        }
+      }
+    } else {
+      const studentWithPhoto = await Student.findOne({
+        $or: [{ "imagesRef.id": fileId }, { photo: new RegExp(fileId, "i") }],
+      });
+      if (studentWithPhoto) {
+        fileUrl = studentWithPhoto.imagesRef?.img || studentWithPhoto.photo;
+        fileType = "image";
+      } else {
+        const studentWithDoc = await Student.findOne({
+          $or: [{ "AdharRef.id": fileId }, { aadhaarDocument: new RegExp(fileId, "i") }],
+        });
+        if (studentWithDoc) {
+          fileUrl = studentWithDoc.AdharRef?.pdf || studentWithDoc.aadhaarDocument;
+          fileType = "pdf";
+        }
+      }
+    }
+
+    // 2. If it's a Cloudinary publicId pattern (e.g. school-erp/students/...)
+    if (!fileUrl && fileId.includes("/")) {
+      try {
+        const cloudinary = configureCloudinary();
+        fileUrl = cloudinary.url(fileId, { secure: true });
+        fileType = fileId.includes("photo") ? "image" : "pdf";
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    if (!fileUrl) {
+      return res.status(404).json({ success: false, message: `File not found for ID: ${fileId}` });
+    }
+
+    if (req.query.redirect === "true" || req.headers.accept?.includes("image/")) {
+      return res.redirect(fileUrl);
+    }
+
+    return res.json({
+      success: true,
+      id: fileId,
+      url: fileUrl,
+      type: fileType,
+      imagesRef: fileType === "image" ? { id: fileId, img: fileUrl } : undefined,
+      AdharRef: fileType === "pdf" ? { id: fileId, pdf: fileUrl } : undefined,
+    });
+  } catch (error) {
+    console.error("getStudentFileById error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Server error" });
+  }
+};

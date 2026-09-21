@@ -47,6 +47,9 @@ const PORT = process.env.PORT || 5000;
 app.use(
   helmet({
     contentSecurityPolicy: false, // Allow easy integration in development
+    crossOriginResourcePolicy: false,
+    crossOriginEmbedderPolicy: false,
+    frameguard: false, // Allow iframe embedding for PDF viewers and preview widgets
   })
 );
 app.use(
@@ -60,8 +63,21 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser());
 app.use(morgan("dev"));
 
-// Serve uploads folder as static
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Serve uploads folder as static with inline display support for PDFs and images
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "uploads"), {
+    setHeaders: (res, filePath) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      if (filePath.toLowerCase().endsWith(".pdf")) {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", "inline");
+      }
+    },
+  })
+);
 
 // Connect database
 connectDB();
