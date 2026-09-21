@@ -505,7 +505,7 @@ export const getStudents = async (req, res) => {
               contactNumber: tpl.contactNumber,
               status: "active",
             };
-            FallbackDb.insert("students", newStudent);
+            FallbackDb.create("students", newStudent);
           });
           list = FallbackDb.find("students").map(enrichStudent);
         }

@@ -31,6 +31,7 @@ import userRoutes from "./routes/userRoutes.js";
 import aiRoutes from "./ai/ai.routes.js";
 import resultRoutes from "./routes/resultRoutes.js";
 import syllabusRoutes from "./routes/syllabusRoutes.js";
+import documentRoutes from "./routes/documentRoutes.js";
 import { auditMiddleware } from "./middleware/auditLog.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -93,6 +94,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/v1/ai", aiRoutes);
 app.use("/api/v1/results", resultRoutes);
 app.use("/api/v1/syllabus", syllabusRoutes);
+app.use("/api/v1/documents", documentRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

@@ -739,14 +739,23 @@ export const FallbackDb = {
   create: (collection, data) => {
     if (!db[collection]) db[collection] = [];
     const newRecord = {
-      id: Math.random().toString(36).substring(2, 9),
-      _id: Math.random().toString(36).substring(2, 9),
+      id: data.id || Math.random().toString(36).substring(2, 9),
+      _id: data._id || Math.random().toString(36).substring(2, 9),
       createdAt: new Date().toISOString(),
       ...data,
     };
     db[collection].push(newRecord);
     saveData();
     return newRecord;
+  },
+
+  insert: (collection, data) => {
+    return FallbackDb.create(collection, data);
+  },
+
+  insertMany: (collection, items = []) => {
+    if (!Array.isArray(items)) return [];
+    return items.map((item) => FallbackDb.create(collection, item));
   },
 
   update: (collection, id, data) => {

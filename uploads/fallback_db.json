@@ -690,6 +690,946 @@
   },
   "auditLogs": [
     {
+      "id": "49j99vo",
+      "_id": "s4fjr0a",
+      "createdAt": "2026-09-21T16:31:46.929Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "audit-logs",
+      "details": "GET /api/v1/audit-logs?page=1&limit=30",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:31:46.929Z"
+    },
+    {
+      "id": "rtam7vy",
+      "_id": "wd02z4j",
+      "createdAt": "2026-09-21T16:31:45.508Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "users",
+      "details": "GET /api/v1/users/roles",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 2
+      },
+      "timestamp": "2026-09-21T16:31:45.508Z"
+    },
+    {
+      "id": "bb2g1ml",
+      "_id": "er4et72",
+      "createdAt": "2026-09-21T16:31:45.496Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "users",
+      "details": "GET /api/v1/users?limit=100",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 2
+      },
+      "timestamp": "2026-09-21T16:31:45.496Z"
+    },
+    {
+      "id": "6wha5dy",
+      "_id": "hoo29u7",
+      "createdAt": "2026-09-21T16:31:45.487Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "users",
+      "details": "GET /api/v1/users/roles",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 7
+      },
+      "timestamp": "2026-09-21T16:31:45.487Z"
+    },
+    {
+      "id": "vm1zboq",
+      "_id": "dzw0for",
+      "createdAt": "2026-09-21T16:31:45.472Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "users",
+      "details": "GET /api/v1/users?limit=100",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 26
+      },
+      "timestamp": "2026-09-21T16:31:45.471Z"
+    },
+    {
+      "id": "y0dkoze",
+      "_id": "xep8l5h",
+      "createdAt": "2026-09-21T16:31:43.301Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10006
+      },
+      "timestamp": "2026-09-21T16:31:43.301Z"
+    },
+    {
+      "id": "thuibvm",
+      "_id": "t809991",
+      "createdAt": "2026-09-21T16:31:39.015Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 2
+      },
+      "timestamp": "2026-09-21T16:31:39.015Z"
+    },
+    {
+      "id": "q4ei6zu",
+      "_id": "kxsfpu2",
+      "createdAt": "2026-09-21T16:31:36.705Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "teachers",
+      "details": "GET /api/v1/teachers?limit=100",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:36.705Z"
+    },
+    {
+      "id": "3xpfber",
+      "_id": "9rrran4",
+      "createdAt": "2026-09-21T16:31:33.338Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:33.338Z"
+    },
+    {
+      "id": "4kuyzs3",
+      "_id": "v2an0v0",
+      "createdAt": "2026-09-21T16:31:33.322Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:31:33.322Z"
+    },
+    {
+      "id": "5swwcmv",
+      "_id": "3m12f12",
+      "createdAt": "2026-09-21T16:31:33.305Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:31:33.305Z"
+    },
+    {
+      "id": "9v2m5jz",
+      "_id": "k7n1dy9",
+      "createdAt": "2026-09-21T16:31:33.288Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:33.288Z"
+    },
+    {
+      "id": "rgannp5",
+      "_id": "5sg3mfh",
+      "createdAt": "2026-09-21T16:31:31.896Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10014
+      },
+      "timestamp": "2026-09-21T16:31:31.896Z"
+    },
+    {
+      "id": "qxkp4ib",
+      "_id": "apq37id",
+      "createdAt": "2026-09-21T16:31:26.787Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "dashboard",
+      "details": "GET /api/v1/dashboard/stats",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:26.787Z"
+    },
+    {
+      "id": "ztyd4h8",
+      "_id": "3i56tf0",
+      "createdAt": "2026-09-21T16:31:26.774Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "dashboard",
+      "details": "GET /api/v1/dashboard/charts",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:26.774Z"
+    },
+    {
+      "id": "y1i8hca",
+      "_id": "rcxo570",
+      "createdAt": "2026-09-21T16:31:26.763Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "dashboard",
+      "details": "GET /api/v1/dashboard/charts",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 6
+      },
+      "timestamp": "2026-09-21T16:31:26.763Z"
+    },
+    {
+      "id": "g4fahi1",
+      "_id": "47w8p6l",
+      "createdAt": "2026-09-21T16:31:26.750Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "dashboard",
+      "details": "GET /api/v1/dashboard/stats",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 6
+      },
+      "timestamp": "2026-09-21T16:31:26.750Z"
+    },
+    {
+      "id": "375kp87",
+      "_id": "7dngl8s",
+      "createdAt": "2026-09-21T16:31:21.892Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:31:21.892Z"
+    },
+    {
+      "id": "owf9sp1",
+      "_id": "a1tplpu",
+      "createdAt": "2026-09-21T16:31:21.869Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:21.869Z"
+    },
+    {
+      "id": "i2rn76k",
+      "_id": "egwr1sw",
+      "createdAt": "2026-09-21T16:30:00.344Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10015
+      },
+      "timestamp": "2026-09-21T16:30:00.344Z"
+    },
+    {
+      "id": "q5m81nz",
+      "_id": "zphum0y",
+      "createdAt": "2026-09-21T16:29:50.323Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10021
+      },
+      "timestamp": "2026-09-21T16:29:50.323Z"
+    },
+    {
+      "id": "dmjwqvh",
+      "_id": "kbkz59g",
+      "createdAt": "2026-09-21T16:29:40.287Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10037
+      },
+      "timestamp": "2026-09-21T16:29:40.287Z"
+    },
+    {
+      "id": "8u4ppna",
+      "_id": "5ze90h3",
+      "createdAt": "2026-09-21T16:29:32.915Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:29:32.915Z"
+    },
+    {
+      "id": "k3m05i6",
+      "_id": "ro22g81",
+      "createdAt": "2026-09-21T16:29:32.903Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 2
+      },
+      "timestamp": "2026-09-21T16:29:32.902Z"
+    },
+    {
+      "id": "k8xmwpt",
+      "_id": "5i4moex",
+      "createdAt": "2026-09-21T16:29:32.890Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:29:32.890Z"
+    },
+    {
+      "id": "yzv6hbr",
+      "_id": "zzblqet",
+      "createdAt": "2026-09-21T16:29:32.881Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:29:32.881Z"
+    },
+    {
+      "id": "7axayxs",
+      "_id": "pcb5k7a",
+      "createdAt": "2026-09-21T16:29:30.232Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10010
+      },
+      "timestamp": "2026-09-21T16:29:30.232Z"
+    },
+    {
+      "id": "i7dyy6l",
+      "_id": "j7a07h5",
+      "createdAt": "2026-09-21T16:29:06.516Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10022
+      },
+      "timestamp": "2026-09-21T16:29:06.516Z"
+    },
+    {
+      "id": "yg998sb",
+      "_id": "pk37rhr",
+      "createdAt": "2026-09-21T16:28:56.475Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10010
+      },
+      "timestamp": "2026-09-21T16:28:56.475Z"
+    },
+    {
+      "id": "4vloitj",
+      "_id": "gn05xar",
+      "createdAt": "2026-09-21T16:27:47.943Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=100&class=Class+10",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:27:47.943Z"
+    },
+    {
+      "id": "y35yp9g",
+      "_id": "w2632of",
+      "createdAt": "2026-09-21T16:27:47.925Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:27:47.925Z"
+    },
+    {
+      "id": "jvnkb8k",
+      "_id": "wi77lqo",
+      "createdAt": "2026-09-21T16:27:44.940Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/certificates",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10022
+      },
+      "timestamp": "2026-09-21T16:27:44.940Z"
+    },
+    {
+      "id": "k8z4e0r",
+      "_id": "3w8oltl",
+      "createdAt": "2026-09-21T16:27:34.912Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/certificates",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10017
+      },
+      "timestamp": "2026-09-21T16:27:34.912Z"
+    },
+    {
+      "id": "7hp5x3y",
+      "_id": "lqhfp5i",
+      "createdAt": "2026-09-21T16:27:34.500Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=100",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:27:34.500Z"
+    },
+    {
+      "id": "gl914o8",
+      "_id": "7twlj1y",
+      "createdAt": "2026-09-21T16:27:34.478Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:27:34.478Z"
+    },
+    {
+      "id": "yghutox",
+      "_id": "21vrmnq",
+      "createdAt": "2026-09-21T16:27:23.892Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10025
+      },
+      "timestamp": "2026-09-21T16:27:23.892Z"
+    },
+    {
+      "id": "x8bmz3g",
+      "_id": "tetd5wl",
+      "createdAt": "2026-09-21T16:27:13.846Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10008
+      },
+      "timestamp": "2026-09-21T16:27:13.846Z"
+    },
+    {
+      "id": "vqb4ijm",
+      "_id": "fg6bfkm",
+      "createdAt": "2026-09-21T16:27:03.918Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/settings",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:27:03.918Z"
+    },
+    {
+      "id": "y4l8qi3",
+      "_id": "seqkw4n",
+      "createdAt": "2026-09-21T16:27:03.904Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "auth",
+      "details": "GET /api/v1/auth/me",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:27:03.904Z"
+    },
+    {
+      "id": "77wohi7",
+      "_id": "ls5t3eb",
+      "createdAt": "2026-09-21T16:27:03.893Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 2
+      },
+      "timestamp": "2026-09-21T16:27:03.893Z"
+    },
+    {
+      "id": "2aywb8y",
+      "_id": "z0cexko",
+      "createdAt": "2026-09-21T16:27:03.880Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/settings",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:27:03.880Z"
+    },
+    {
+      "id": "kp94osa",
+      "_id": "nomulta",
+      "createdAt": "2026-09-21T16:27:03.869Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "auth",
+      "details": "GET /api/v1/auth/me",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:27:03.869Z"
+    },
+    {
+      "id": "e0afjnn",
+      "_id": "c44dcn6",
+      "createdAt": "2026-09-21T16:27:03.847Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:27:03.847Z"
+    },
+    {
+      "id": "31nlklf",
+      "_id": "gz8mifn",
+      "createdAt": "2026-09-21T16:27:03.831Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 2
+      },
+      "timestamp": "2026-09-21T16:27:03.831Z"
+    },
+    {
+      "id": "6ndu61u",
+      "_id": "cb7bbzz",
+      "createdAt": "2026-09-21T16:27:03.816Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 2
+      },
+      "timestamp": "2026-09-21T16:27:03.816Z"
+    },
+    {
+      "id": "eka36bl",
+      "_id": "1slx90w",
+      "createdAt": "2026-09-21T16:26:54.923Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150&class=Class+10",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 6
+      },
+      "timestamp": "2026-09-21T16:26:54.923Z"
+    },
+    {
+      "id": "3lg4cz6",
+      "_id": "elvop2i",
+      "createdAt": "2026-09-21T16:26:54.143Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "teachers",
+      "details": "GET /api/v1/teachers?limit=100",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:26:54.143Z"
+    },
+    {
+      "id": "tj69h6a",
+      "_id": "hmsm92h",
+      "createdAt": "2026-09-21T16:11:49.401Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150&class=Class+10",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 13
+      },
+      "timestamp": "2026-09-21T16:11:49.401Z"
+    },
+    {
+      "id": "qvorgvb",
+      "_id": "ex9s6pj",
+      "createdAt": "2026-09-21T16:11:47.478Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150&class=Class+11",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:11:47.478Z"
+    },
+    {
+      "id": "it3kgj7",
+      "_id": "vpix6jj",
+      "createdAt": "2026-09-21T16:11:44.521Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10021
+      },
+      "timestamp": "2026-09-21T16:11:44.521Z"
+    },
+    {
+      "id": "l5gadk9",
+      "_id": "jt3ti6u",
+      "createdAt": "2026-09-21T16:11:37.800Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:11:37.800Z"
+    },
+    {
+      "id": "k8ine7e",
+      "_id": "o0fwk4b",
+      "createdAt": "2026-09-21T16:11:34.488Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10036
+      },
+      "timestamp": "2026-09-21T16:11:34.488Z"
+    },
+    {
+      "id": "71fmu8s",
+      "_id": "rgd3g40",
+      "createdAt": "2026-09-21T16:11:27.763Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "teachers",
+      "details": "GET /api/v1/teachers?limit=100",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 2
+      },
+      "timestamp": "2026-09-21T16:11:27.763Z"
+    },
+    {
+      "id": "lbg5p77",
+      "_id": "bzk6m45",
+      "createdAt": "2026-09-21T16:11:24.532Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:11:24.532Z"
+    },
+    {
+      "id": "uq30pnb",
+      "_id": "6ss86zj",
+      "createdAt": "2026-09-21T16:11:24.520Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "students",
+      "details": "GET /api/v1/students?limit=150",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-21T16:11:24.520Z"
+    },
+    {
+      "id": "abal7ou",
+      "_id": "0mmhg4d",
+      "createdAt": "2026-09-21T16:11:24.500Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:11:24.500Z"
+    },
+    {
+      "id": "k5rc2hh",
+      "_id": "oo8fjzc",
+      "createdAt": "2026-09-21T16:11:24.482Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "erp",
+      "details": "GET /api/v1/erp/classes",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:11:24.482Z"
+    },
+    {
+      "id": "kpokdmh",
+      "_id": "906rv0v",
+      "createdAt": "2026-09-04T15:32:14.890Z",
+      "userId": "u1",
+      "action": "READ",
+      "module": "auth",
+      "details": "GET /api/v1/auth/me",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-04T15:32:14.890Z"
+    },
+    {
+      "id": "cfw6k1b",
+      "_id": "8h6aava",
+      "createdAt": "2026-09-04T15:32:14.830Z",
+      "userId": "u1",
+      "action": "LOGIN",
+      "module": "auth",
+      "details": "User Albus Dumbledore logged in",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+      "timestamp": "2026-09-04T15:32:14.830Z"
+    },
+    {
       "id": "t4qru75",
       "_id": "wnn49h8",
       "createdAt": "2026-08-09T18:54:55.891Z",
@@ -770,32 +1710,132 @@
       "timestamp": "2026-08-09T18:54:55.891Z"
     },
     {
-      "id": "cfw6k1b",
-      "_id": "8h6aava",
-      "createdAt": "2026-09-04T15:32:14.830Z",
-      "userId": "u1",
-      "action": "LOGIN",
-      "module": "auth",
-      "details": "User Albus Dumbledore logged in",
-      "ipAddress": "::1",
-      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
-      "timestamp": "2026-09-04T15:32:14.830Z"
-    },
-    {
-      "id": "kpokdmh",
-      "_id": "906rv0v",
-      "createdAt": "2026-09-04T15:32:14.890Z",
-      "userId": "u1",
+      "id": "7tzirv3",
+      "_id": "98susym",
+      "createdAt": "2026-09-21T16:31:46.971Z",
+      "userId": "6a22de06b2cde6bb9073f324",
       "action": "READ",
-      "module": "auth",
-      "details": "GET /api/v1/auth/me",
+      "module": "audit-logs",
+      "details": "GET /api/v1/audit-logs?page=1&limit=30",
       "ipAddress": "::1",
-      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
       "metadata": {
         "statusCode": 200,
-        "durationMs": 5
+        "durationMs": 4
       },
-      "timestamp": "2026-09-04T15:32:14.890Z"
+      "timestamp": "2026-09-21T16:31:46.971Z"
+    },
+    {
+      "id": "fdy3533",
+      "_id": "a1wdhdf",
+      "createdAt": "2026-09-21T16:31:49.040Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "dashboard",
+      "details": "GET /api/v1/dashboard/stats",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 9
+      },
+      "timestamp": "2026-09-21T16:31:49.040Z"
+    },
+    {
+      "id": "d2n3ud3",
+      "_id": "ge6hyxp",
+      "createdAt": "2026-09-21T16:31:49.054Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "dashboard",
+      "details": "GET /api/v1/dashboard/charts",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:49.054Z"
+    },
+    {
+      "id": "u7vgdhp",
+      "_id": "mibauzm",
+      "createdAt": "2026-09-21T16:31:49.067Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "dashboard",
+      "details": "GET /api/v1/dashboard/charts",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 4
+      },
+      "timestamp": "2026-09-21T16:31:49.067Z"
+    },
+    {
+      "id": "7e921f3",
+      "_id": "cv7i1p8",
+      "createdAt": "2026-09-21T16:31:49.079Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "dashboard",
+      "details": "GET /api/v1/dashboard/stats",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:49.079Z"
+    },
+    {
+      "id": "02qioqo",
+      "_id": "votqbn4",
+      "createdAt": "2026-09-21T16:31:53.337Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "documents",
+      "details": "GET /api/v1/documents/templates/custom",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 500,
+        "durationMs": 10017
+      },
+      "timestamp": "2026-09-21T16:31:53.337Z"
+    },
+    {
+      "id": "c10evwd",
+      "_id": "oalrh7u",
+      "createdAt": "2026-09-21T16:31:54.010Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "syllabus",
+      "details": "GET /api/v1/syllabus/cls-1",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 9
+      },
+      "timestamp": "2026-09-21T16:31:54.010Z"
+    },
+    {
+      "id": "piwv92n",
+      "_id": "4aee3gn",
+      "createdAt": "2026-09-21T16:31:54.024Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "syllabus",
+      "details": "GET /api/v1/syllabus/cls-1",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 3
+      },
+      "timestamp": "2026-09-21T16:31:54.024Z"
     }
   ]
 }
