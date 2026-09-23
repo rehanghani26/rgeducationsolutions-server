@@ -53,6 +53,23 @@ export const connectDB = async () => {
     } catch (idxErr) {
       console.warn('Index migration note:', idxErr.message);
     }
+
+    // Fix legacy unique index on attendances collection (date_1_classId_1)
+    // This allows taking past date attendance and updating existing attendance records without E11000 errors
+    try {
+      const attendancesCollection = mongoose.connection.collection('attendances');
+      const attIndexes = await attendancesCollection.indexes();
+      const legacyAttIndex = attIndexes.find(
+        (idx) => idx.name === 'date_1_classId_1' || (idx.key && idx.key.date && idx.key.classId && !idx.key.sectionId)
+      );
+      if (legacyAttIndex && legacyAttIndex.unique) {
+        console.log(`🔄 Dropping legacy unique index ${legacyAttIndex.name} on attendances...`);
+        await attendancesCollection.dropIndex(legacyAttIndex.name);
+        console.log('✅ Dropped legacy unique index date_1_classId_1 on attendances.');
+      }
+    } catch (attIdxErr) {
+      // Ignore if index doesn't exist
+    }
   } catch (error) {
     isConnected = false;
     fallbackActive = true;

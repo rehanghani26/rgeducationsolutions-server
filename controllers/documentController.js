@@ -947,3 +947,266 @@ export const deleteCustomTemplate = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+// ─── Default Institution Template Controllers ─────────────────────────────────
+
+const CATEGORY_MAP = {
+  "student-id-card": "studentIdCard",
+  "teacher-id-card": "teacherIdCard",
+  "staff-id-card": "staffIdCard",
+  certificate: "certificate",
+};
+
+const DEFAULT_BUILTIN_TEMPLATES = {
+  "student-id-card": {
+    templateId: "student-id-classic",
+    name: "Classic Student Card",
+    category: "student-id-card",
+    configuration: {},
+    isDefault: true,
+  },
+  "teacher-id-card": {
+    templateId: "teacher-id-professional",
+    name: "Professional Faculty Card",
+    category: "teacher-id-card",
+    configuration: {},
+    isDefault: true,
+  },
+  "staff-id-card": {
+    templateId: "staff-id-corporate",
+    name: "Corporate Staff Card",
+    category: "staff-id-card",
+    configuration: {},
+    isDefault: true,
+  },
+  certificate: {
+    templateId: "certificate-classic",
+    name: "Classic Institutional Certificate",
+    category: "certificate",
+    configuration: {},
+    isDefault: true,
+  },
+};
+
+/**
+ * @route  GET /api/v1/documents/templates/default/:category
+ * @access Authenticated
+ */
+export const getDefaultTemplate = async (req, res) => {
+  try {
+    const category = req.params.category || "student-id-card";
+    const key = CATEGORY_MAP[category] || "studentIdCard";
+    const fallbackTemplate =
+      DEFAULT_BUILTIN_TEMPLATES[category] ||
+      DEFAULT_BUILTIN_TEMPLATES["student-id-card"];
+
+    if (checkFallback()) {
+      const settings = FallbackDb.getSettings?.() || {};
+      const saved = settings.defaultDocumentTemplates?.[category];
+      if (saved) {
+        return res.json({
+          success: true,
+          defaultTemplate: { ...saved, category },
+        });
+      }
+
+      // Check if any custom template is marked default in FallbackDb
+      const customTemplates = FallbackDb.find("customDocumentTemplates") || [];
+      const defaultCustom = customTemplates.find(
+        (ct) => ct.category === category && ct.isDefault && ct.isActive !== false
+      );
+      if (defaultCustom) {
+        return res.json({
+          success: true,
+          defaultTemplate: {
+            templateId: defaultCustom.baseTemplateId,
+            customTemplateId: defaultCustom._id || defaultCustom.id,
+            name: defaultCustom.name,
+            category: defaultCustom.category,
+            configuration: defaultCustom.configuration || {},
+            isDefault: true,
+          },
+        });
+      }
+
+      return res.json({
+        success: true,
+        defaultTemplate: fallbackTemplate,
+      });
+    }
+
+    // MongoDB mode
+    const setting = await Setting.findOne();
+    const savedConfig = setting?.defaultDocumentTemplates?.[key];
+
+    if (savedConfig && savedConfig.templateId) {
+      let finalConfig = {
+        templateId: savedConfig.templateId,
+        customTemplateId: savedConfig.customTemplateId || null,
+        configuration: savedConfig.configuration || {},
+        name: savedConfig.name || fallbackTemplate.name,
+        category,
+        finalizedAt: savedConfig.finalizedAt,
+        finalizedBy: savedConfig.finalizedBy,
+        isDefault: true,
+      };
+
+      // If custom template is attached, verify and merge
+      if (savedConfig.customTemplateId) {
+        const customDoc = await CustomDocumentTemplate.findById(
+          savedConfig.customTemplateId
+        );
+        if (customDoc && customDoc.isActive) {
+          finalConfig.configuration = {
+            ...customDoc.configuration,
+            ...finalConfig.configuration,
+          };
+          finalConfig.name = customDoc.name;
+        }
+      }
+
+      return res.json({
+        success: true,
+        defaultTemplate: finalConfig,
+      });
+    }
+
+    // Check if any custom template has isDefault: true
+    const customDefault = await CustomDocumentTemplate.findOne({
+      category,
+      isDefault: true,
+      isActive: true,
+    });
+
+    if (customDefault) {
+      return res.json({
+        success: true,
+        defaultTemplate: {
+          templateId: customDefault.baseTemplateId,
+          customTemplateId: customDefault._id,
+          name: customDefault.name,
+          category: customDefault.category,
+          configuration: customDefault.configuration || {},
+          isDefault: true,
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      defaultTemplate: fallbackTemplate,
+    });
+  } catch (error) {
+    console.error("getDefaultTemplate error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+/**
+ * @route  POST /api/v1/documents/templates/default
+ * @access Admin, Principal, Director
+ */
+export const setDefaultTemplate = async (req, res) => {
+  try {
+    const { category, templateId, configuration, customTemplateId, name } =
+      req.body;
+
+    if (!category || !templateId) {
+      return res.status(400).json({
+        success: false,
+        message: "category and templateId are required",
+      });
+    }
+
+    const key = CATEGORY_MAP[category] || "studentIdCard";
+    const templateName = name || templateId;
+    const finalData = {
+      templateId,
+      customTemplateId: customTemplateId || null,
+      configuration: configuration || {},
+      name: templateName,
+      category,
+      finalizedAt: new Date(),
+      finalizedBy: req.user?.name || "Admin",
+      isDefault: true,
+    };
+
+    if (checkFallback()) {
+      // Update custom template isDefault flag
+      const customTemplates = FallbackDb.find("customDocumentTemplates") || [];
+      customTemplates.forEach((ct) => {
+        if (ct.category === category) {
+          const isTarget =
+            customTemplateId &&
+            (ct.id === customTemplateId || ct._id === customTemplateId);
+          FallbackDb.update("customDocumentTemplates", ct.id || ct._id, {
+            isDefault: Boolean(isTarget),
+          });
+        }
+      });
+
+      const currentSettings = FallbackDb.getSettings?.() || {};
+      const updatedDefaults = {
+        ...(currentSettings.defaultDocumentTemplates || {}),
+        [category]: finalData,
+      };
+      FallbackDb.updateSettings({
+        defaultDocumentTemplates: updatedDefaults,
+      });
+
+      return res.json({
+        success: true,
+        message: "Template finalized as school default format",
+        defaultTemplate: finalData,
+      });
+    }
+
+    // MongoDB mode
+    if (customTemplateId) {
+      await CustomDocumentTemplate.updateMany(
+        { category },
+        { $set: { isDefault: false } }
+      );
+      await CustomDocumentTemplate.findByIdAndUpdate(customTemplateId, {
+        $set: { isDefault: true },
+      });
+    } else {
+      // Unset custom defaults if choosing a built-in template
+      await CustomDocumentTemplate.updateMany(
+        { category },
+        { $set: { isDefault: false } }
+      );
+    }
+
+    let setting = await Setting.findOne();
+    if (!setting) {
+      setting = new Setting();
+    }
+
+    if (!setting.defaultDocumentTemplates) {
+      setting.defaultDocumentTemplates = {};
+    }
+
+    setting.defaultDocumentTemplates[key] = {
+      templateId,
+      customTemplateId: customTemplateId || null,
+      configuration: configuration || {},
+      name: templateName,
+      finalizedAt: new Date(),
+      finalizedBy: req.user?.name || "Admin",
+    };
+
+    setting.markModified("defaultDocumentTemplates");
+    await setting.save();
+
+    return res.json({
+      success: true,
+      message: "Template finalized as school default format",
+      defaultTemplate: finalData,
+    });
+  } catch (error) {
+    console.error("setDefaultTemplate error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+

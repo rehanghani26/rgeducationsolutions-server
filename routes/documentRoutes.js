@@ -12,6 +12,8 @@ import {
   createCustomTemplate,
   updateCustomTemplate,
   deleteCustomTemplate,
+  getDefaultTemplate,
+  setDefaultTemplate,
 } from '../controllers/documentController.js';
 
 const router = express.Router();
@@ -108,6 +110,23 @@ router.delete(
   protect,
   authorize(...DOCUMENT_ADMIN_ROLES),
   deleteCustomTemplate
+);
+
+// ── Institution Default / Finalized Template Routes ──────────────────────────
+
+/**
+ * Get the active institutional default / finalized template for a category (e.g. 'student-id-card').
+ */
+router.get('/templates/default/:category', protect, getDefaultTemplate);
+
+/**
+ * Finalize and set the institutional default template for a category.
+ */
+router.post(
+  '/templates/default',
+  protect,
+  authorize(...DOCUMENT_ADMIN_ROLES),
+  setDefaultTemplate
 );
 
 export default router;

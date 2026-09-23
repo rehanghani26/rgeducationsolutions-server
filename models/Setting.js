@@ -127,6 +127,42 @@ const SettingSchema = new mongoose.Schema(
       default: "$",
     },
 
+    // Official Institutional Document Templates (Finalized Formats)
+    defaultDocumentTemplates: {
+      studentIdCard: {
+        templateId: { type: String, default: "student-id-classic" },
+        customTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: "CustomDocumentTemplate", default: null },
+        configuration: { type: mongoose.Schema.Types.Mixed, default: {} },
+        name: { type: String, default: "Classic Student Card" },
+        finalizedAt: { type: Date, default: Date.now },
+        finalizedBy: { type: String, default: "System" },
+      },
+      teacherIdCard: {
+        templateId: { type: String, default: "teacher-id-professional" },
+        customTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: "CustomDocumentTemplate", default: null },
+        configuration: { type: mongoose.Schema.Types.Mixed, default: {} },
+        name: { type: String, default: "Professional Faculty Card" },
+        finalizedAt: { type: Date, default: Date.now },
+        finalizedBy: { type: String, default: "System" },
+      },
+      staffIdCard: {
+        templateId: { type: String, default: "staff-id-corporate" },
+        customTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: "CustomDocumentTemplate", default: null },
+        configuration: { type: mongoose.Schema.Types.Mixed, default: {} },
+        name: { type: String, default: "Corporate Staff Card" },
+        finalizedAt: { type: Date, default: Date.now },
+        finalizedBy: { type: String, default: "System" },
+      },
+      certificate: {
+        templateId: { type: String, default: "certificate-classic" },
+        customTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: "CustomDocumentTemplate", default: null },
+        configuration: { type: mongoose.Schema.Types.Mixed, default: {} },
+        name: { type: String, default: "Classic Institutional Certificate" },
+        finalizedAt: { type: Date, default: Date.now },
+        finalizedBy: { type: String, default: "System" },
+      },
+    },
+
     // Teacher Settings
     autoGenerateTeacherID: {
       type: Boolean,

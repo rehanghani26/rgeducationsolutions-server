@@ -6,6 +6,16 @@ const AttendanceSchema = new mongoose.Schema({
     required: true,
     default: Date.now
   },
+  // Attendance Date: The specific calendar date for which the attendance applies (past date or today)
+  attendanceDate: {
+    type: Date,
+    default: Date.now
+  },
+  // Attendance Taken Date: The exact timestamp when this attendance was recorded/submitted
+  attendanceTakenDate: {
+    type: Date,
+    default: Date.now
+  },
   type: {
     type: String,
     enum: ['student', 'teacher'],
@@ -46,7 +56,9 @@ const AttendanceSchema = new mongoose.Schema({
   strict: false
 });
 
-// Avoid having duplicate attendance logs for same class on the same day
+// Non-unique index for fast filtering (allows multiple sections and updates)
 AttendanceSchema.index({ date: 1, classId: 1, sectionId: 1 }, { sparse: true });
+AttendanceSchema.index({ attendanceDate: 1, classId: 1 }, { sparse: true });
+AttendanceSchema.index({ attendanceTakenDate: 1 });
 
 export default mongoose.model('Attendance', AttendanceSchema);

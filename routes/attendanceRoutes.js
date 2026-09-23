@@ -13,6 +13,7 @@ import { authorize } from '../middleware/rbac.js';
 const router = express.Router();
 
 router.get('/my-attendance', protect, getMyAttendance);
+router.get('/student', protect, getStudentAttendance);
 router.get('/student/:studentId', protect, getStudentAttendance);
 router.get('/stats', protect, getAttendanceStats);
 router.get('/', protect, getAttendanceRecords);

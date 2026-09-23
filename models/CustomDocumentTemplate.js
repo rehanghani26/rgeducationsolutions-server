@@ -75,6 +75,12 @@ const CustomDocumentTemplateSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    /** Flag indicating if this custom template is finalized as the school default */
+    isDefault: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );
