@@ -747,26 +747,11 @@ export const getNotices = async (req, res) => {
   try {
     let list = [];
     if (checkFallback()) {
-      list = FallbackDb.find('notices');
-      if (!list || list.length === 0) {
-        list = [
-          { _id: 'not-1', id: 'not-1', title: 'School Annual Day Celebration', content: 'All students, staff, and parents are invited to the Annual Day on May 25, 2026.', category: 'Event', icon: '📢', priority: 'high', targetRoles: ['all'], author: 'Principal', createdAt: new Date() },
-          { _id: 'not-2', id: 'not-2', title: 'Mathematics Mid-Term Exam Schedule', content: 'Mid-term exams for Class 9 & 10 start on May 20, 2026.', category: 'Academic', icon: '📅', priority: 'high', targetRoles: ['student', 'teacher'], author: 'Exam Cell', createdAt: new Date() },
-          { _id: 'not-3', id: 'not-3', title: 'Bus Route #3 Timing Revision', content: 'Route 3 morning pickup will be 10 minutes earlier starting Monday.', category: 'Transport', icon: '🚌', priority: 'medium', targetRoles: ['student', 'parent'], author: 'Transport Dept', createdAt: new Date() },
-        ];
-      }
+      list = FallbackDb.find('notices') || [];
     } else {
       list = await Notice.find({ active: { $ne: false } }).sort({ createdAt: -1 });
-      if (list.length === 0) {
-        const seedNotices = [
-          { title: 'School Annual Day Celebration', content: 'All students, staff, and parents are invited to the Annual Day on May 25, 2026.', category: 'Event', icon: '📢', priority: 'high', targetRoles: ['all'], author: 'Principal' },
-          { title: 'Mathematics Mid-Term Exam Schedule', content: 'Mid-term exams for Class 9 & 10 start on May 20, 2026.', category: 'Academic', icon: '📅', priority: 'high', targetRoles: ['student', 'teacher'], author: 'Exam Cell' },
-          { title: 'Bus Route #3 Timing Revision', content: 'Route 3 morning pickup will be 10 minutes earlier starting Monday.', category: 'Transport', icon: '🚌', priority: 'medium', targetRoles: ['student', 'parent'], author: 'Transport Dept' },
-        ];
-        list = await Notice.insertMany(seedNotices);
-      }
     }
-    res.status(200).json({ success: true, count: list.length, notices: list });
+    res.status(200).json({ success: true, count: list.length, notices: list || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -902,172 +887,7 @@ export const reviewLeave = async (req, res) => {
 };
 
 // ─── Dynamic Academic Curriculum & Courses Helpers ─────────────────────────────
-const DEFAULT_CURRICULUM_SEED = [
-  {
-    className: 'Class 10',
-    sectionName: 'Section A',
-    name: 'Mathematics & Geometry',
-    code: 'MTH-103',
-    type: 'theory',
-    credits: 5,
-    teacher: 'Dr. Bilal Siddiqui',
-    teacherRole: 'Senior Mathematics Faculty',
-    room: 'Block A - Room 101',
-    schedule: 'Mon, Wed, Fri (08:00 AM)',
-    progress: 74,
-    currentChapter: 'Unit 4: Quadratic Equations & Parabolas',
-    assignedBy: 'System Administrator',
-    assignedByRole: 'super-admin',
-    units: [
-      { id: 1, title: 'Unit 1: Real Numbers & Set Theory', status: 'completed', duration: '2 weeks' },
-      { id: 2, title: 'Unit 2: Polynomials & Factorization', status: 'completed', duration: '3 weeks' },
-      { id: 3, title: 'Unit 3: Linear Equations in Two Variables', status: 'completed', duration: '2.5 weeks' },
-      { id: 4, title: 'Unit 4: Quadratic Equations & Parabolas', status: 'in-progress', duration: 'Current (Week 8)' },
-      { id: 5, title: 'Unit 5: Arithmetic Progressions & Series', status: 'upcoming', duration: 'Next' },
-      { id: 6, title: 'Unit 6: Coordinate Geometry & Vectors', status: 'upcoming', duration: '3 weeks' },
-    ],
-    materials: [
-      { name: 'Class 10 Geometry Formula Handbook', type: 'PDF', size: '3.4 MB', date: 'Aug 20, 2026' },
-      { name: 'Unit 3 Solved Question Bank with Solutions', type: 'PDF', size: '5.1 MB', date: 'Aug 28, 2026' },
-    ],
-  },
-  {
-    className: 'Class 10',
-    sectionName: 'Section A',
-    name: 'Physics & Applied Mechanics',
-    code: 'PHY-104',
-    type: 'practical',
-    credits: 4,
-    teacher: 'Prof. Mohammed Zakir',
-    teacherRole: 'Physics Department Head',
-    room: 'Science Lab 2',
-    schedule: 'Tue, Thu (08:55 AM)',
-    progress: 68,
-    currentChapter: 'Unit 3: Electromagnetism & Induced Currents',
-    assignedBy: 'System Administrator',
-    assignedByRole: 'super-admin',
-    units: [
-      { id: 1, title: 'Unit 1: Kinematics & Laws of Motion', status: 'completed', duration: '3 weeks' },
-      { id: 2, title: 'Unit 2: Work, Energy, and Gravitational Fields', status: 'completed', duration: '3 weeks' },
-      { id: 3, title: 'Unit 3: Electromagnetism & Induced Currents', status: 'in-progress', duration: 'Current (Week 8)' },
-      { id: 4, title: 'Unit 4: Optics, Reflection & Refraction', status: 'upcoming', duration: 'Next' },
-      { id: 5, title: 'Unit 5: Wave Mechanics & Sound Waves', status: 'upcoming', duration: '2.5 weeks' },
-    ],
-    materials: [
-      { name: 'Physics Laboratory Practical Manual & Safety Guidelines', type: 'PDF', size: '4.8 MB', date: 'Aug 15, 2026' },
-      { name: 'Electromagnetism Lecture Slides & Diagrams', type: 'PPTX', size: '8.2 MB', date: 'Sep 02, 2026' },
-    ],
-  },
-  {
-    className: 'Class 10',
-    sectionName: 'Section A',
-    name: 'Quranic Sciences & Tajweed',
-    code: 'ISL-101',
-    type: 'theory',
-    credits: 4,
-    teacher: 'Sheikh Abdullah Al-Hafiz',
-    teacherRole: 'Head of Religious Studies',
-    room: 'Main Lecture Hall B',
-    schedule: 'Mon, Wed, Thu (11:15 AM)',
-    progress: 82,
-    currentChapter: 'Unit 5: Rules of Noon Sakinah and Tanween in Recitation',
-    assignedBy: 'System Administrator',
-    assignedByRole: 'super-admin',
-    units: [
-      { id: 1, title: 'Unit 1: Introduction to Quranic Sciences (Ulum al-Quran)', status: 'completed', duration: '2 weeks' },
-      { id: 2, title: 'Unit 2: Makki and Madani Surahs and Chronology', status: 'completed', duration: '2 weeks' },
-      { id: 3, title: 'Unit 3: Makharij al-Huroof (Articulation Points)', status: 'completed', duration: '3 weeks' },
-      { id: 4, title: 'Unit 4: Sifaat al-Huroof (Characteristics of Letters)', status: 'completed', duration: '2.5 weeks' },
-      { id: 5, title: 'Unit 5: Rules of Noon Sakinah & Tanween', status: 'in-progress', duration: 'Current' },
-      { id: 6, title: 'Unit 6: Madd (Elongation) Types and Practical Recitation', status: 'upcoming', duration: '3 weeks' },
-    ],
-    materials: [
-      { name: 'Comprehensive Tajweed Rules Reference Chart', type: 'PDF', size: '2.1 MB', date: 'Aug 10, 2026' },
-      { name: 'Recitation Audio Guide & Pronunciation Guide', type: 'ZIP', size: '14.5 MB', date: 'Aug 12, 2026' },
-    ],
-  },
-  {
-    className: 'Class 10',
-    sectionName: 'Section A',
-    name: 'Classical & Modern Arabic',
-    code: 'ARB-102',
-    type: 'theory',
-    credits: 4,
-    teacher: 'Fatima Az-Zahra',
-    teacherRole: 'Faculty of Arabic Linguistics',
-    room: 'Block A - Room 102',
-    schedule: 'Mon, Tue, Thu (09:50 AM)',
-    progress: 70,
-    currentChapter: 'Unit 4: Verb Conjugations & Weak Verb Patterns',
-    assignedBy: 'System Administrator',
-    assignedByRole: 'super-admin',
-    units: [
-      { id: 1, title: 'Unit 1: Arabic Morphology & Word Construction', status: 'completed', duration: '3 weeks' },
-      { id: 2, title: 'Unit 2: Nominal Sentences and Predicates', status: 'completed', duration: '2.5 weeks' },
-      { id: 3, title: 'Unit 3: Idafa (Possession) and Adjectives', status: 'completed', duration: '2 weeks' },
-      { id: 4, title: 'Unit 4: Verb Conjugations & Irregular Verbs', status: 'in-progress', duration: 'Current' },
-      { id: 5, title: 'Unit 5: Comprehension, Translation, and Dialogue', status: 'upcoming', duration: '3 weeks' },
-    ],
-    materials: [
-      { name: 'Arabic Grammar Essentials Handbook (Nahw & Sarf)', type: 'PDF', size: '3.9 MB', date: 'Aug 18, 2026' },
-      { name: 'Weekly Vocabulary & Conversational Exercises', type: 'PDF', size: '1.7 MB', date: 'Sep 01, 2026' },
-    ],
-  },
-  {
-    className: 'Class 10',
-    sectionName: 'Section A',
-    name: 'English Language & Literature',
-    code: 'ENG-105',
-    type: 'theory',
-    credits: 4,
-    teacher: 'Sumayya Khan',
-    teacherRole: 'Department of Humanities',
-    room: 'Block B - Room 204',
-    schedule: 'Mon, Wed, Fri (12:10 PM)',
-    progress: 78,
-    currentChapter: 'Unit 4: Analytical Essay Writing & Rhetorical Devices',
-    assignedBy: 'System Administrator',
-    assignedByRole: 'super-admin',
-    units: [
-      { id: 1, title: 'Unit 1: Modern Short Stories & Literary Elements', status: 'completed', duration: '3 weeks' },
-      { id: 2, title: 'Unit 2: Poetry Analysis & Metaphorical Devices', status: 'completed', duration: '2.5 weeks' },
-      { id: 3, title: 'Unit 3: Advanced Grammar, Syntax, and Punctuation', status: 'completed', duration: '2 weeks' },
-      { id: 4, title: 'Unit 4: Analytical Essay Writing', status: 'in-progress', duration: 'Current' },
-      { id: 5, title: 'Unit 5: Drama: Shakespearean Excerpts & Performance', status: 'upcoming', duration: '3 weeks' },
-    ],
-    materials: [
-      { name: 'Selected Anthology of Prose and Poetry Reader', type: 'PDF', size: '6.2 MB', date: 'Aug 22, 2026' },
-      { name: 'Essay Writing Rubric & Model High-Scoring Samples', type: 'PDF', size: '2.4 MB', date: 'Aug 30, 2026' },
-    ],
-  },
-  {
-    className: 'Class 10',
-    sectionName: 'Section A',
-    name: 'Chemistry & Experimental Sciences',
-    code: 'CHM-107',
-    type: 'practical',
-    credits: 4,
-    teacher: 'Dr. Amina Farooqui',
-    teacherRole: 'Senior Chemistry Lecturer',
-    room: 'Chemistry Lab 1',
-    schedule: 'Tue, Fri (01:30 PM)',
-    progress: 62,
-    currentChapter: 'Unit 3: Chemical Bonding, Molecular Geometry & Orbitals',
-    assignedBy: 'System Administrator',
-    assignedByRole: 'super-admin',
-    units: [
-      { id: 1, title: 'Unit 1: Atomic Structure and Periodic Trends', status: 'completed', duration: '3 weeks' },
-      { id: 2, title: 'Unit 2: Stoichiometry and Solution Concentration', status: 'completed', duration: '2.5 weeks' },
-      { id: 3, title: 'Unit 3: Chemical Bonding & Molecular Geometry', status: 'in-progress', duration: 'Current' },
-      { id: 4, title: 'Unit 4: Thermochemistry & Reaction Kinetics', status: 'upcoming', duration: 'Next' },
-      { id: 5, title: 'Unit 5: Acids, Bases, and Equilibrium Systems', status: 'upcoming', duration: '3 weeks' },
-    ],
-    materials: [
-      { name: 'Periodic Table & Chemical Constants Reference Booklet', type: 'PDF', size: '1.9 MB', date: 'Aug 14, 2026' },
-      { name: 'Laboratory Titration & Synthesis Lab Protocols', type: 'PDF', size: '3.8 MB', date: 'Aug 26, 2026' },
-    ],
-  },
-];
+const DEFAULT_CURRICULUM_SEED = [];
 
 export const getCurriculums = async (req, res) => {
   try {
@@ -1076,10 +896,6 @@ export const getCurriculums = async (req, res) => {
 
     if (checkFallback()) {
       curriculums = FallbackDb.find('curriculums') || [];
-      if (curriculums.length === 0) {
-        DEFAULT_CURRICULUM_SEED.forEach((item) => FallbackDb.create('curriculums', item));
-        curriculums = FallbackDb.find('curriculums');
-      }
       if (className && className !== 'All') {
         const numMatch = className.match(/\d+/)?.[0];
         curriculums = curriculums.filter((c) => {
@@ -1115,20 +931,12 @@ export const getCurriculums = async (req, res) => {
       }
 
       curriculums = await Curriculum.find(query).sort({ createdAt: -1 });
-      if (curriculums.length === 0 && (!className || className.toLowerCase().includes('10'))) {
-        // Seed default records if empty
-        const count = await Curriculum.countDocuments();
-        if (count === 0) {
-          await Curriculum.insertMany(DEFAULT_CURRICULUM_SEED);
-          curriculums = await Curriculum.find(query).sort({ createdAt: -1 });
-        }
-      }
     }
 
     res.status(200).json({
       success: true,
       count: curriculums.length,
-      curriculums: curriculums.length ? curriculums : DEFAULT_CURRICULUM_SEED,
+      curriculums: curriculums || [],
     });
   } catch (err) {
     console.error('getCurriculums error:', err);

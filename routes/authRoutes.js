@@ -1,9 +1,21 @@
 import express from 'express';
-import { login, signup, logout, refresh, getMe } from '../controllers/authController.js';
+import {
+  login,
+  signup,
+  logout,
+  refresh,
+  getMe,
+  getSetupStatus,
+  sendSetupOtp,
+  verifySetupOtp,
+} from '../controllers/authController.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
+router.get('/setup-status', getSetupStatus);
+router.post('/send-otp', sendSetupOtp);
+router.post('/verify-otp', verifySetupOtp);
 router.post('/login', login);
 router.post('/signup', signup);
 router.post('/logout', logout);

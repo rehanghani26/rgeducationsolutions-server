@@ -265,24 +265,27 @@ export const getStats = async (req, res) => {
         const totalStudents = await Student.countDocuments();
         const totalTeachers = await Teacher.countDocuments();
         const totalClasses = await Class.countDocuments();
-        const totalStaff = totalTeachers + 5;
+        const totalStaff = totalTeachers;
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const todayLog = await Attendance.findOne({ date: { $gte: today } });
-        let todayAttendanceRate = 95;
-        if (todayLog && todayLog.records.length > 0) {
+        let todayAttendance = "N/A";
+        if (todayLog && todayLog.records && todayLog.records.length > 0) {
           const presentCount = todayLog.records.filter(r => r.status === 'present').length;
-          todayAttendanceRate = Math.round((presentCount / todayLog.records.length) * 100);
+          todayAttendance = `${Math.round((presentCount / todayLog.records.length) * 100)}%`;
         }
 
         const allFees = await Fee.find();
-        const pendingFees = allFees.reduce((acc, f) => acc + f.amountPending, 0);
+        const pendingFees = allFees.reduce((acc, f) => acc + (f.amountPending || 0), 0);
+        const todayFeeCollection = allFees
+          .filter(f => f.updatedAt && new Date(f.updatedAt) >= today)
+          .reduce((acc, f) => acc + (f.amountPaid || 0), 0);
         const allExpenses = await Expense.find();
-        const schoolExpenses = allExpenses.reduce((acc, e) => acc + e.amount, 0);
+        const schoolExpenses = allExpenses.reduce((acc, e) => acc + (e.amount || 0), 0);
 
         const allInventory = await Inventory.find();
-        const inventoryValue = allInventory.reduce((acc, item) => acc + (item.quantity * item.price), 0);
+        const inventoryValue = allInventory.reduce((acc, item) => acc + ((item.quantity || 0) * (item.price || 0)), 0);
 
         const activeCourses = await Subject.countDocuments();
         const upcomingExams = await Exam.countDocuments({ status: 'upcoming' });
@@ -294,8 +297,8 @@ export const getStats = async (req, res) => {
           totalTeachers,
           totalClasses,
           totalStaff,
-          todayAttendance: `${todayAttendanceRate}%`,
-          feeCollectionToday: 4800,
+          todayAttendance,
+          feeCollectionToday: Math.round(todayFeeCollection),
           pendingFees,
           schoolExpenses,
           inventoryValue,
@@ -319,13 +322,7 @@ export const getCharts = async (req, res) => {
 
     if (role === 'student') {
       let recentGrades = [];
-      let timetable = [
-        { day: 'Mon', period1: 'Potions (Prof. Snape)', period2: 'Charms (Prof. Flitwick)', period3: 'DADA (Prof. Lupin)' },
-        { day: 'Tue', period1: 'DADA (Prof. Lupin)', period2: 'Potions (Prof. Snape)', period3: 'History of Magic' },
-        { day: 'Wed', period1: 'Charms (Prof. Flitwick)', period2: 'Astronomy', period3: 'Potions (Prof. Snape)' },
-        { day: 'Thu', period1: 'Potions (Prof. Snape)', period2: 'Herbology', period3: 'DADA (Prof. Lupin)' },
-        { day: 'Fri', period1: 'DADA (Prof. Lupin)', period2: 'Charms (Prof. Flitwick)', period3: 'Transfiguration' }
-      ];
+      let timetable = [];
       let upcomingExamsList = [];
 
       if (checkFallback()) {
@@ -367,57 +364,16 @@ export const getCharts = async (req, res) => {
         }
       }
 
-      if (recentGrades.length === 0) {
-        recentGrades = [
-          { name: "Mathematics", obtained: 92, total: 100 },
-          { name: "Science", obtained: 88, total: 100 },
-          { name: "English Lit", obtained: 95, total: 100 },
-          { name: "Physics", obtained: 84, total: 100 },
-          { name: "Islamic Studies", obtained: 98, total: 100 },
-          { name: "Computer Sci", obtained: 90, total: 100 },
-        ];
-      }
-
-      const attendanceWeekly = [
-        { name: "Mon", rate: 100 },
-        { name: "Tue", rate: 100 },
-        { name: "Wed", rate: 95 },
-        { name: "Thu", rate: 100 },
-        { name: "Fri", rate: 100 },
-      ];
-
-      const monthlyAttendance = [
-        { month: "Jan", rate: 96 },
-        { month: "Feb", rate: 94 },
-        { month: "Mar", rate: 98 },
-        { month: "Apr", rate: 95 },
-        { month: "May", rate: 97 },
-        { month: "Jun", rate: 96 },
-      ];
-
-      const termComparison = [
-        { term: "Term 1 (Fall)", score: 86, avg: 80 },
-        { term: "Term 2 (Mid)", score: 89, avg: 82 },
-        { term: "Term 3 (Final)", score: 94, avg: 84 },
-      ];
-
-      const libraryReading = [
-        { category: "Science & Tech", books: 6 },
-        { category: "Literature", books: 4 },
-        { category: "History", books: 3 },
-        { category: "General", books: 2 },
-      ];
-
       return res.json({
         success: true,
         data: {
           recentGrades,
           timetable,
           upcomingExams: upcomingExamsList,
-          attendanceWeekly,
-          monthlyAttendance,
-          termComparison,
-          libraryReading,
+          attendanceWeekly: [],
+          monthlyAttendance: [],
+          termComparison: [],
+          libraryReading: [],
         },
       });
 
@@ -426,13 +382,7 @@ export const getCharts = async (req, res) => {
       let pendingCount = 0;
       let rejectedCount = 0;
       let leavesList = [];
-      let timetable = [
-        { day: 'Mon', period1: 'Class 10 (Potions)', period2: 'Class 11 (Potions)', period3: 'Free Period' },
-        { day: 'Tue', period1: 'Free Period', period2: 'Class 10 (Potions)', period3: 'Class 11 (Potions)' },
-        { day: 'Wed', period1: 'Class 10 (Potions)', period2: 'Free Period', period3: 'Class 11 (Potions)' },
-        { day: 'Thu', period1: 'Class 11 (Potions)', period2: 'Class 10 (Potions)', period3: 'Free Period' },
-        { day: 'Fri', period1: 'Free Period', period2: 'Class 11 (Potions)', period3: 'Class 10 (Potions)' }
-      ];
+      let timetable = [];
 
       if (checkFallback()) {
         const teacher = FallbackDb.findOne('teachers', { user: id }) || FallbackDb.findById('teachers', profileId);
@@ -459,78 +409,50 @@ export const getCharts = async (req, res) => {
         { name: 'Rejected', value: rejectedCount }
       ].filter(x => x.value > 0);
 
-      if (leaveStatus.length === 0) {
-        leaveStatus.push({ name: 'No Leaves Requested', value: 1 });
-      }
-
-      const classAttendance = [
-        { name: 'Mon', rate: 94 },
-        { name: 'Tue', rate: 96 },
-        { name: 'Wed', rate: 95 },
-        { name: 'Thu', rate: 93 },
-        { name: 'Fri', rate: 91 }
-      ];
-
       return res.json({
         success: true,
         data: {
           leaveStatus,
           timetable,
-          classAttendance,
+          classAttendance: [],
           leavesList
         }
       });
     }
 
-    // Default Admin Charts
-    const studentGrowth = [
-      { name: 'Jan', students: 120 },
-      { name: 'Feb', students: 135 },
-      { name: 'Mar', students: 150 },
-      { name: 'Apr', students: 180 },
-      { name: 'May', students: 210 },
-      { name: 'Jun', students: 245 }
-    ];
+    // Real Admin Charts (calculated or empty when no records)
+    let expenseCategory = [];
+    try {
+      const expenses = await Expense.find();
+      const catMap = {};
+      expenses.forEach(e => {
+        const c = e.category || 'Other';
+        catMap[c] = (catMap[c] || 0) + (e.amount || 0);
+      });
+      expenseCategory = Object.entries(catMap).map(([name, value]) => ({ name, value }));
+    } catch {
+      expenseCategory = [];
+    }
 
-    const feeCollection = [
-      { name: 'Jan', collected: 45000, target: 50000 },
-      { name: 'Feb', collected: 52000, target: 50000 },
-      { name: 'Mar', collected: 49000, target: 50000 },
-      { name: 'Apr', collected: 68000, target: 60000 },
-      { name: 'May', collected: 72000, target: 70000 },
-      { name: 'Jun', collected: 85000, target: 80000 }
-    ];
-
-    const attendanceRate = [
-      { name: 'Mon', rate: 94 },
-      { name: 'Tue', rate: 96 },
-      { name: 'Wed', rate: 95 },
-      { name: 'Thu', rate: 93 },
-      { name: 'Fri', rate: 91 }
-    ];
-
-    const expenseCategory = [
-      { name: 'Salaries', value: 620000 },
-      { name: 'Utilities', value: 24000 },
-      { name: 'Maintenance', value: 12000 },
-      { name: 'Supplies', value: 9500 },
-      { name: 'Transport', value: 45000 }
-    ];
-
-    const inventoryCategory = [
-      { name: 'Books', value: 20250 },
-      { name: 'Computers', value: 90000 },
-      { name: 'Lab Equip', value: 9000 },
-      { name: 'Furniture', value: 96000 },
-      { name: 'Sports', value: 1950 }
-    ];
+    let inventoryCategory = [];
+    try {
+      const inventory = await Inventory.find();
+      const invMap = {};
+      inventory.forEach(i => {
+        const c = i.category || 'General';
+        invMap[c] = (invMap[c] || 0) + ((i.quantity || 0) * (i.price || 0));
+      });
+      inventoryCategory = Object.entries(invMap).map(([name, value]) => ({ name, value }));
+    } catch {
+      inventoryCategory = [];
+    }
 
     return res.json({
       success: true,
       data: {
-        studentGrowth,
-        feeCollection,
-        attendanceRate,
+        studentGrowth: [],
+        feeCollection: [],
+        attendanceRate: [],
         expenseCategory,
         inventoryCategory
       }

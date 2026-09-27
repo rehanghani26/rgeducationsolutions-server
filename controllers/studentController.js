@@ -670,61 +670,6 @@ export const getStudents = async (req, res) => {
       Student.countDocuments(filter),
     ]);
 
-    // If MongoDB has zero students for this class, auto-seed standard students
-    if (students.length === 0 && targetClass && !search) {
-      const clsNum = targetClass.id.replace("cls-", "");
-      const dummyTemplates = [
-        { name: "Aarav Sharma", gender: "Male", parentName: "Rajesh Sharma", contactNumber: "9876543001" },
-        { name: "Ananya Patel", gender: "Female", parentName: "Vikram Patel", contactNumber: "9876543002" },
-        { name: "Rohan Verma", gender: "Male", parentName: "Sanjay Verma", contactNumber: "9876543003" },
-        { name: "Priya Singh", gender: "Female", parentName: "Amit Singh", contactNumber: "9876543004" },
-        { name: "Kabir Mehta", gender: "Male", parentName: "Deepak Mehta", contactNumber: "9876543005" },
-        { name: "Diya Mukherjee", gender: "Female", parentName: "Debashis Mukherjee", contactNumber: "9876543006" },
-        { name: "Aditya Nair", gender: "Male", parentName: "Suresh Nair", contactNumber: "9876543007" },
-        { name: "Isha Gupta", gender: "Female", parentName: "Manoj Gupta", contactNumber: "9876543008" },
-      ];
-
-      try {
-        const seededDocs = dummyTemplates.map((tpl, idx) => {
-          const secName = idx % 2 === 0 ? "Section A" : (targetSection ? targetSection.name : "Section D");
-          const secId = secName === "Section A" ? "sec-a" : "sec-d";
-          return {
-            name: tpl.name,
-            firstName: tpl.name.split(" ")[0],
-            lastName: tpl.name.split(" ")[1] || "",
-            rollNumber: idx + 1,
-            admissionNumber: `STD-2026-${clsNum}-${String(idx + 1).padStart(3, "0")}`,
-            classId: targetClass.id,
-            className: targetClass.name,
-            class: targetClass.name,
-            sectionId: secId,
-            sectionName: secName,
-            section: secName,
-            email: `${tpl.name.toLowerCase().replace(/\s+/g, ".")}@school.edu`,
-            gender: tpl.gender,
-            parentName: tpl.parentName,
-            contactNumber: tpl.contactNumber,
-            status: "active",
-          };
-        });
-
-        await Student.insertMany(seededDocs, { ordered: false }).catch(() => {});
-        [students, total] = await Promise.all([
-          Student.find(filter)
-            .populate("classId", "name code")
-            .populate("sectionId", "name")
-            .populate("user", "username email role permissions isActive lastLogin")
-            .populate("parentId", "name phone email")
-            .sort(sortObj)
-            .skip(skip)
-            .limit(limit),
-          Student.countDocuments(filter),
-        ]);
-      } catch (err) {
-        console.warn("Auto-seed error ignored:", err.message);
-      }
-    }
-
     return res.json({
       success: true,
       // Resolve S3 presigned URLs for all student file references

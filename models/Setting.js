@@ -5,7 +5,7 @@ const SettingSchema = new mongoose.Schema(
     // School Information
     schoolName: {
       type: String,
-      default: "RGES School & College ERP",
+      default: "",
     },
     schoolCode: {
       type: String,
@@ -21,8 +21,8 @@ const SettingSchema = new mongoose.Schema(
     },
     schoolType: {
       type: String,
-      enum: ["primary", "secondary", "senior", "college", "university"],
-      default: "secondary",
+      enum: ["", "primary", "secondary", "senior", "college", "university"],
+      default: "",
     },
     establishedYear: {
       type: Number,
@@ -30,13 +30,13 @@ const SettingSchema = new mongoose.Schema(
     },
     academicYear: {
       type: String,
-      default: "2026-2027",
+      default: "",
     },
 
     // Contact Information
     contactEmail: {
       type: String,
-      default: "admin@school.com",
+      default: "",
     },
     schoolPhone: {
       type: String,

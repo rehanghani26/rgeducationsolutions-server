@@ -1,9 +1,11 @@
 import User from '../models/User.js';
 import Setting from '../models/Setting.js';
+import Otp from '../models/Otp.js';
 import { generateTokens, protect } from '../middleware/auth.js';
 import { checkFallback } from '../config/db.js';
 import { FallbackDb } from '../services/dbFallback.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { sendOtpEmail } from '../services/emailService.js';
 
 export const login = async (req, res) => {
   const { username, password } = req.body;
@@ -375,3 +377,266 @@ export const signup = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Server error during registration' });
   }
 };
+
+/**
+ * Check if the database requires initial Super Admin setup.
+ * Returns true if no users exist in the system.
+ */
+export const getSetupStatus = async (req, res) => {
+  try {
+    let count = 0;
+    if (checkFallback()) {
+      count = FallbackDb.findAll('users')?.length || 0;
+    } else {
+      count = await User.countDocuments();
+    }
+
+    return res.json({
+      success: true,
+      isSetupRequired: count === 0,
+      hasUsers: count > 0,
+      userCount: count,
+    });
+  } catch (error) {
+    console.error('Setup status check error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to check setup status' });
+  }
+};
+
+/**
+ * Generate and send OTP via Resend for initial Super Admin setup.
+ */
+export const sendSetupOtp = async (req, res) => {
+  const { name, email, password, confirmPassword } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please provide Super Admin Name, Email Address, and Password.',
+    });
+  }
+
+  if (password.length < 5) {
+    return res.status(400).json({
+      success: false,
+      message: 'Password must be at least 5 characters long.',
+    });
+  }
+
+  if (confirmPassword && password !== confirmPassword) {
+    return res.status(400).json({
+      success: false,
+      message: 'Passwords do not match.',
+    });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  try {
+    // Check if system already has users
+    let existingCount = 0;
+    if (checkFallback()) {
+      existingCount = FallbackDb.findAll('users')?.length || 0;
+    } else {
+      existingCount = await User.countDocuments();
+    }
+
+    if (existingCount > 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'System setup is already complete. New administrators cannot be registered from this screen.',
+      });
+    }
+
+    // Check if email already registered
+    let existingUser = null;
+    if (checkFallback()) {
+      existingUser = FallbackDb.findOne('users', { email: normalizedEmail });
+    } else {
+      existingUser = await User.findOne({ email: normalizedEmail });
+    }
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'A user with this email address already exists.',
+      });
+    }
+
+    // Generate secure 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Store in DB with TTL
+    if (!checkFallback()) {
+      await Otp.deleteMany({ email: normalizedEmail });
+      await Otp.create({
+        email: normalizedEmail,
+        name: name.trim(),
+        password,
+        otp,
+      });
+    } else {
+      FallbackDb.create('otps', {
+        email: normalizedEmail,
+        name: name.trim(),
+        password,
+        otp,
+        createdAt: new Date(),
+      });
+    }
+
+    // Send email via Resend
+    await sendOtpEmail({
+      to: normalizedEmail,
+      name: name.trim(),
+      otp,
+    });
+
+    return res.json({
+      success: true,
+      message: `A 6-digit verification code was sent to ${normalizedEmail}.`,
+      email: normalizedEmail,
+    });
+  } catch (error) {
+    console.error('Error sending setup OTP:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to send verification code. Please try again.',
+    });
+  }
+};
+
+/**
+ * Verify OTP and activate Super Admin account.
+ */
+export const verifySetupOtp = async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email address and 6-digit OTP code are required.',
+    });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const cleanOtp = otp.toString().trim();
+
+  try {
+    let otpRecord = null;
+    if (checkFallback()) {
+      otpRecord = FallbackDb.findOne('otps', { email: normalizedEmail, otp: cleanOtp });
+    } else {
+      otpRecord = await Otp.findOne({ email: normalizedEmail, otp: cleanOtp });
+    }
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired verification code. Please check and try again.',
+      });
+    }
+
+    // Ensure no duplicate user was created in the meantime
+    let existingUser = null;
+    if (checkFallback()) {
+      existingUser = FallbackDb.findOne('users', { email: normalizedEmail });
+    } else {
+      existingUser = await User.findOne({
+        $or: [{ email: normalizedEmail }, { username: normalizedEmail }],
+      });
+    }
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'An account with this email address already exists.',
+      });
+    }
+
+    let user = null;
+    if (checkFallback()) {
+      user = FallbackDb.create('users', {
+        username: normalizedEmail,
+        email: normalizedEmail,
+        password: otpRecord.password,
+        role: 'super-admin',
+        name: otpRecord.name,
+        isActive: true,
+      });
+      if (otpRecord.id) FallbackDb.delete('otps', otpRecord.id);
+    } else {
+      user = await User.create({
+        name: otpRecord.name,
+        username: normalizedEmail,
+        email: normalizedEmail,
+        password: otpRecord.password,
+        role: 'super-admin',
+        isActive: true,
+      });
+
+      // Remove used OTP
+      await Otp.deleteMany({ email: normalizedEmail });
+    }
+
+    // Generate tokens for automatic authenticated login
+    const { accessToken, refreshToken } = generateTokens(user);
+
+    const loginEntry = {
+      ip: req.ip || req.headers['x-forwarded-for'],
+      userAgent: req.headers['user-agent'],
+      timestamp: new Date(),
+    };
+
+    if (checkFallback()) {
+      FallbackDb.update('users', user.id, {
+        refreshToken,
+        lastLogin: loginEntry.timestamp,
+        loginHistory: [loginEntry],
+      });
+    } else {
+      user.refreshToken = refreshToken;
+      user.lastLogin = loginEntry.timestamp;
+      user.loginHistory = [loginEntry];
+      await user.save();
+    }
+
+    await logActivity({
+      userId: user.id || user._id,
+      action: 'SIGNUP_SUPER_ADMIN',
+      module: 'auth',
+      details: `Super Admin ${user.name} (${user.email}) registered and verified via Resend OTP`,
+      ipAddress: loginEntry.ip,
+      userAgent: loginEntry.userAgent,
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Super Admin verified and registered successfully!',
+      accessToken,
+      user: {
+        id: user.id || user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        permissions: user.permissions || [],
+        name: user.name,
+        isActive: user.isActive,
+      },
+    });
+  } catch (error) {
+    console.error('Error verifying setup OTP:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error during verification. Please try again.',
+    });
+  }
+};
+
