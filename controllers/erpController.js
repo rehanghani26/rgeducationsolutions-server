@@ -1,5 +1,5 @@
 import Class from '../models/Class.js';
-import { v2 as cloudinary } from 'cloudinary';
+import { uploadToS3, generateS3Key, getPresignedUrl, resolveFileUrl, isS3Key } from '../config/s3.js';
 import Section from '../models/Section.js';
 import Subject from '../models/Subject.js';
 import Book from '../models/Book.js';
@@ -17,23 +17,26 @@ import Curriculum from '../models/Curriculum.js';
 import { checkFallback } from '../config/db.js';
 import { FallbackDb } from '../services/dbFallback.js';
 
-const uploadBufferToCloudinary = (fileBuffer, type) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: `school-erp/company-profile/${type}`,
-        resource_type: 'image',
-        use_filename: true,
-        unique_filename: true,
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-
-    stream.end(fileBuffer);
-  });
+/**
+ * Upload an image buffer to S3 under the company-profile folder.
+ * Returns an S3-result-shaped object so the rest of the function can stay the same.
+ *
+ * @param {Buffer} fileBuffer
+ * @param {string} type        'logo' | 'banner'
+ * @param {string} originalName
+ * @param {string} mimeType
+ */
+const uploadBufferToS3 = async (fileBuffer, type, originalName, mimeType) => {
+  const folder = `school-erp/company-profile/${type}`;
+  const key = generateS3Key(folder, originalName);
+  await uploadToS3({ buffer: fileBuffer, key, contentType: mimeType });
+  return {
+    key,
+    secure_url: key,        // Store S3 key in URL fields — resolved to presigned URL on read
+    public_id: key,         // Used as publicId in MongoDB
+    asset_id: '',           // No concept of asset_id in S3
+    original_filename: originalName.replace(/\.[^.]+$/, ''), // strip extension
+  };
 };
 
 // Academic helpers
@@ -348,8 +351,32 @@ export const getSettings = async (req, res) => {
         await config.save();
       }
     }
-    return res.json({ success: true, settings: config });
+
+    // Convert raw config to plain object so we can resolve presigned URLs
+    const settings = config?.toObject ? config.toObject() : { ...(config || {}) };
+
+    // Resolve S3 keys → presigned URLs for logo and banner fields.
+    // Cloudinary URLs and empty strings pass through unchanged (resolveFileUrl handles this).
+    // Priority: use the PublicId field (permanent S3 key) when available.
+    const logoKey = settings.schoolLogoPublicId || settings.schoolLogo || settings.companyLogo || '';
+    const bannerKey = settings.schoolBannerPublicId || settings.schoolBanner || '';
+
+    const [resolvedLogo, resolvedBanner] = await Promise.all([
+      resolveFileUrl(logoKey, 3600),
+      resolveFileUrl(bannerKey, 3600),
+    ]);
+
+    if (resolvedLogo) {
+      settings.schoolLogo = resolvedLogo;
+      settings.companyLogo = resolvedLogo;
+    }
+    if (resolvedBanner) {
+      settings.schoolBanner = resolvedBanner;
+    }
+
+    return res.json({ success: true, settings });
   } catch (err) {
+    console.error('getSettings error:', err.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -381,30 +408,39 @@ export const uploadProfileImage = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please upload an image file' });
     }
 
+    if (!req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({ success: false, message: 'Please upload a valid image file' });
+    }
+
     const type = req.body.type === 'banner' ? 'banner' : 'logo';
 
-    if (!process.env.CLOUDINARY_URL) {
+    // ── Guard: AWS configured ────────────────────────────────────────────────
+    if (!process.env.AWS_S3_BUCKET_NAME) {
       return res.status(500).json({
         success: false,
-        message: 'Cloudinary is not configured on the server'
+        message: 'AWS S3 is not configured on the server',
       });
     }
 
-    cloudinary.config(true);
-    cloudinary.config({ secure: true });
+    // ── Upload to S3 ─────────────────────────────────────────────────────────
+    const result = await uploadBufferToS3(
+      req.file.buffer,
+      type,
+      req.file.originalname,
+      req.file.mimetype,
+    );
 
-    const result = await uploadBufferToCloudinary(req.file.buffer, type);
-    const originalName = req.file.originalname;
     const fieldPrefix = type === 'banner' ? 'schoolBanner' : 'schoolLogo';
-    const imageData = {
-      [`${fieldPrefix}`]: result.secure_url,
-      [`${fieldPrefix}PublicId`]: result.public_id,
-      [`${fieldPrefix}AssetId`]: result.asset_id,
-      [`${fieldPrefix}Name`]: result.original_filename || originalName,
-    };
 
+    // Store S3 key (permanent reference) in MongoDB
+    const imageData = {
+      [`${fieldPrefix}`]:         result.key,
+      [`${fieldPrefix}PublicId`]: result.key,   // key doubles as publicId
+      [`${fieldPrefix}AssetId`]:  '',             // no asset_id concept in S3
+      [`${fieldPrefix}Name`]:     result.original_filename || req.file.originalname,
+    };
     if (type === 'logo') {
-      imageData.companyLogo = result.secure_url;
+      imageData.companyLogo = result.key;
     }
 
     let settings = null;
@@ -414,17 +450,20 @@ export const uploadProfileImage = async (req, res) => {
       settings = await Setting.findOneAndUpdate({}, imageData, { new: true, upsert: true });
     }
 
+    // Generate presigned URL for immediate display in the UI (1 hour)
+    const presignedUrl = await getPresignedUrl(result.key, 3600);
+
     return res.status(201).json({
       success: true,
       message: 'Image uploaded successfully',
       image: {
         type,
-        url: result.secure_url,
-        publicId: result.public_id,
-        assetId: result.asset_id,
-        name: result.original_filename || originalName,
+        url: presignedUrl,          // time-limited URL for client display
+        publicId: result.key,       // permanent S3 key — stored in form state
+        assetId: '',
+        name: result.original_filename || req.file.originalname,
       },
-      settings
+      settings,
     });
   } catch (err) {
     console.error('Profile image upload failed:', err.message);

@@ -620,7 +620,6 @@ export const getStudentAttendance = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
-};
 
 export const getMyAttendance = async (req, res) => {
   try {

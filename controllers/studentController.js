@@ -6,7 +6,14 @@ import User from "../models/User.js";
 import Parent from "../models/Parent.js";
 import { checkFallback } from "../config/db.js";
 import { FallbackDb } from "../services/dbFallback.js";
-import { configureCloudinary } from "../config/cloudinary.js";
+import { configureCloudinary } from "../config/cloudinary.js"; // kept for legacy URL detection only
+import {
+  uploadToS3,
+  generateS3Key,
+  getPresignedUrl,
+  resolveFileUrl,
+  isS3Key,
+} from "../config/s3.js";
 import {
   parsePagination,
   buildSearchFilter,
@@ -430,6 +437,42 @@ const enrichStudent = (stud) => {
   };
 };
 
+/**
+ * Resolve S3 keys stored in a student's imagesRef / AdharRef / photo / aadhaarDocument
+ * to fresh presigned URLs (1-hour TTL).
+ *
+ * - S3 keys  → presigned URL
+ * - Cloudinary URLs / local /uploads/ paths → pass through unchanged
+ * - Called after enrichStudent so it receives a plain object.
+ *
+ * @param {object} student  Plain student object (already passed through enrichStudent)
+ * @returns {Promise<object>}  Same object with URL fields resolved
+ */
+const resolveStudentFileUrls = async (student) => {
+  if (!student) return student;
+
+  const [photoUrl, aadhaarUrl, imagesRefImg, adharRefPdf] = await Promise.all([
+    resolveFileUrl(student.photo, 3600),
+    resolveFileUrl(student.aadhaarDocument, 3600),
+    resolveFileUrl(student.imagesRef?.img, 3600),
+    resolveFileUrl(student.AdharRef?.pdf, 3600),
+  ]);
+
+  return {
+    ...student,
+    photo: photoUrl,
+    aadhaarDocument: aadhaarUrl,
+    imagesRef: {
+      id: student.imagesRef?.id || '',
+      img: imagesRefImg,
+    },
+    AdharRef: {
+      id: student.AdharRef?.id || '',
+      pdf: adharRefPdf,
+    },
+  };
+};
+
 export const getStudents = async (req, res) => {
   try {
     const { page, limit, skip, sort, search, status } = parsePagination(
@@ -545,7 +588,9 @@ export const getStudents = async (req, res) => {
         status,
         searchFields,
       });
-      return res.json({ success: true, students: result.data, ...result });
+      // Resolve S3 presigned URLs for all student file references
+      const resolved = await Promise.all(result.data.map(resolveStudentFileUrls));
+      return res.json({ success: true, students: resolved, ...result, data: resolved });
     }
 
     // MongoDB Mode
@@ -682,7 +727,8 @@ export const getStudents = async (req, res) => {
 
     return res.json({
       success: true,
-      students: students.map(enrichStudent),
+      // Resolve S3 presigned URLs for all student file references
+      students: await Promise.all(students.map(enrichStudent).map(resolveStudentFileUrls)),
       ...paginateResult(students, total, { page, limit }),
     });
   } catch (error) {
@@ -721,6 +767,9 @@ export const getStudentById = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Student not found" });
     }
+
+    // Resolve S3 presigned URLs for file references
+    student = await resolveStudentFileUrls(student);
 
     return res.json({ success: true, student });
   } catch (error) {
@@ -1898,53 +1947,49 @@ export const uploadStudentFile = async (req, res) => {
         ? "school-erp/students/photos"
         : "school-erp/students/aadhaar";
 
-    // Attempt Cloudinary stream upload
+    // ── Attempt S3 upload ─────────────────────────────────────────────────
     try {
-      const cloudinary = configureCloudinary();
-      const result = await new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          {
-            folder,
-            resource_type: isPdf ? "auto" : "image",
-            use_filename: true,
-            unique_filename: true,
-            overwrite: false,
-          },
-          (err, uploaded) => {
-            if (err) return reject(err);
-            resolve(uploaded);
-          }
-        );
-        stream.end(req.file.buffer);
+      if (!process.env.AWS_S3_BUCKET_NAME) {
+        throw new Error('AWS_S3_BUCKET_NAME is not configured');
+      }
+
+      // Build S3 key preserving the same folder structure that Cloudinary used
+      const s3Key = generateS3Key(folder, req.file.originalname ||
+        (isPdf ? `aadhaar-${Date.now()}.pdf` : `photo-${Date.now()}.jpg`));
+
+      // For PDFs: set ContentDisposition: 'inline' so browsers render them
+      // instead of forcing a download (replaces Cloudinary's fl_inline transform)
+      await uploadToS3({
+        buffer: req.file.buffer,
+        key: s3Key,
+        contentType: isPdf ? 'application/pdf' : req.file.mimetype,
+        contentDisposition: isPdf ? 'inline' : undefined,
       });
 
-      const fileId = result.public_id;
-      let fileUrl = result.secure_url;
-      if (isPdf && fileUrl.includes("/upload/") && !fileUrl.includes("fl_inline")) {
-        fileUrl = fileUrl.replace("/upload/", "/upload/fl_inline/");
-      }
+      // Generate a 1-hour presigned URL for immediate use
+      const presignedUrl = await getPresignedUrl(s3Key, 3600);
 
       const ref =
         uploadType === "photo"
-          ? { id: fileId, img: fileUrl }
-          : { id: fileId, pdf: fileUrl };
+          ? { id: s3Key, img: presignedUrl }
+          : { id: s3Key, pdf: presignedUrl };
 
       return res.json({
         success: true,
         message: `${uploadType === "photo" ? "Photo" : "Aadhaar document"} uploaded successfully`,
-        url: fileUrl,
-        id: fileId,
-        publicId: fileId,
-        format: result.format,
-        bytes: result.bytes,
+        url: presignedUrl,   // presigned URL for immediate display
+        id: s3Key,           // S3 key — stored as imagesRef.id / AdharRef.id in MongoDB
+        publicId: s3Key,     // same — mirrors Cloudinary public_id field name
+        format: isPdf ? 'pdf' : (req.file.originalname?.split('.').pop() || 'jpg'),
+        bytes: req.file.size,
         originalName: req.file.originalname,
         type: uploadType,
         imagesRef: uploadType === "photo" ? ref : undefined,
         AdharRef: uploadType !== "photo" ? ref : undefined,
         ref,
       });
-    } catch (cloudErr) {
-      console.warn("Cloudinary upload fallback to local storage:", cloudErr.message);
+    } catch (s3Err) {
+      console.warn("S3 upload failed, falling back to local storage:", s3Err.message);
 
       // Local fallback
       const uploadsDir = path.join(process.cwd(), "uploads", "students");
@@ -2031,14 +2076,26 @@ export const getStudentFileById = async (req, res) => {
       }
     }
 
-    // 2. If it's a Cloudinary publicId pattern (e.g. school-erp/students/...)
+    // 2. If it's an S3 key (contains "/" but NOT a full URL), generate a presigned URL
     if (!fileUrl && fileId.includes("/")) {
       try {
-        const cloudinary = configureCloudinary();
-        fileUrl = cloudinary.url(fileId, { secure: true });
-        fileType = fileId.includes("photo") ? "image" : "pdf";
+        if (isS3Key(fileId)) {
+          fileUrl = await getPresignedUrl(fileId, 3600);
+          fileType = fileId.toLowerCase().includes("aadhaar") ||
+                     fileId.toLowerCase().includes("adhar") ||
+                     fileId.toLowerCase().endsWith(".pdf") ? "pdf" : "image";
+        } else {
+          // Legacy Cloudinary publicId — try to reconstruct Cloudinary URL
+          try {
+            const cloudinary = configureCloudinary();
+            fileUrl = cloudinary.url(fileId, { secure: true });
+            fileType = fileId.includes("photo") ? "image" : "pdf";
+          } catch (err) {
+            // ignore — Cloudinary not configured
+          }
+        }
       } catch (err) {
-        // ignore
+        // ignore — presigned URL generation failed
       }
     }
 
