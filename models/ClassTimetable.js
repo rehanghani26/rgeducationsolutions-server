@@ -12,6 +12,8 @@ const SlotAllocationSchema = new mongoose.Schema({
   teacherId: { type: String, default: '' },
   teacherName: { type: String, default: '' },
   roomNo: { type: String, default: '' },
+  bookName: { type: String, default: '' },
+  subjectCode: { type: String, default: '' },
 });
 
 const ClassTimetableSchema = new mongoose.Schema(

@@ -28,6 +28,103 @@ const sanitizePeriods = (periods = []) => {
   });
 };
 
+// ─── Default Saturday half-day slots template ────────────────────────────────
+const DEFAULT_SATURDAY_PERIODS = [
+  { order: 1, type: 'prayer', customLabel: 'Morning Prayer & Assembly', startTime: '08:00', endTime: '08:20', durationMinutes: 20 },
+  { order: 2, type: 'class',  customLabel: 'Period 1', startTime: '08:20', endTime: '09:05', durationMinutes: 45 },
+  { order: 3, type: 'class',  customLabel: 'Period 2', startTime: '09:05', endTime: '09:50', durationMinutes: 45 },
+  { order: 4, type: 'recess', customLabel: 'Fruit Recess', startTime: '09:50', endTime: '10:15', durationMinutes: 25 },
+  { order: 5, type: 'class',  customLabel: 'Period 3', startTime: '10:15', endTime: '11:00', durationMinutes: 45 },
+  { order: 6, type: 'class',  customLabel: 'Period 4', startTime: '11:00', endTime: '11:45', durationMinutes: 45 },
+  { order: 7, type: 'leave',  customLabel: 'School Dispersal', startTime: '11:45', endTime: '12:00', durationMinutes: 15 },
+];
+
+// ─── Helper: sanitize day-specific schedules ensuring EVERY active day is stored ──
+const sanitizeDaySchedules = (
+  daySchedules = {},
+  defaultStart = '07:00',
+  defaultEnd = '14:00',
+  operatingDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
+  defaultPeriods = []
+) => {
+  const result = {};
+  const inputMap = daySchedules && typeof daySchedules === 'object' ? daySchedules : {};
+  const activeDays = operatingDays && operatingDays.length > 0
+    ? operatingDays
+    : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+  activeDays.forEach((dayKey) => {
+    const isSat = dayKey.toLowerCase() === 'saturday';
+    const ds = inputMap[dayKey];
+
+    if (ds && Array.isArray(ds.periods) && ds.periods.length > 0) {
+      result[dayKey] = {
+        day: dayKey,
+        dayLabel: ds.dayLabel || (dayKey.charAt(0).toUpperCase() + dayKey.slice(1)),
+        enabled: ds.enabled !== undefined ? Boolean(ds.enabled) : true,
+        isHalfDay: ds.isHalfDay !== undefined ? Boolean(ds.isHalfDay) : isSat,
+        name: ds.name || (isSat ? 'Saturday Half Day' : `${dayKey.charAt(0).toUpperCase() + dayKey.slice(1)} Schedule`),
+        schoolStartTime: ds.schoolStartTime || (isSat ? '08:00' : defaultStart),
+        schoolEndTime: ds.schoolEndTime || (isSat ? '12:00' : defaultEnd),
+        periods: sanitizePeriods(ds.periods),
+      };
+    } else {
+      result[dayKey] = {
+        day: dayKey,
+        dayLabel: dayKey.charAt(0).toUpperCase() + dayKey.slice(1),
+        enabled: true,
+        isHalfDay: isSat,
+        name: isSat ? 'Saturday Half Day' : `${dayKey.charAt(0).toUpperCase() + dayKey.slice(1)} Schedule`,
+        schoolStartTime: isSat ? '08:00' : defaultStart,
+        schoolEndTime: isSat ? '12:00' : defaultEnd,
+        periods: isSat ? DEFAULT_SATURDAY_PERIODS : sanitizePeriods(defaultPeriods),
+      };
+    }
+  });
+
+  // Preserve any other days in inputMap (e.g. sunday)
+  Object.keys(inputMap).forEach((k) => {
+    if (!result[k] && inputMap[k]) {
+      const ex = inputMap[k];
+      result[k] = {
+        day: k,
+        dayLabel: ex.dayLabel || (k.charAt(0).toUpperCase() + k.slice(1)),
+        enabled: ex.enabled !== undefined ? Boolean(ex.enabled) : true,
+        isHalfDay: Boolean(ex.isHalfDay),
+        name: ex.name || `${k.charAt(0).toUpperCase() + k.slice(1)} Schedule`,
+        schoolStartTime: ex.schoolStartTime || defaultStart,
+        schoolEndTime: ex.schoolEndTime || defaultEnd,
+        periods: sanitizePeriods(ex.periods || []),
+      };
+    }
+  });
+
+  return result;
+};
+
+// ─── Helper: enrich schedule document with complete day-wise data ────────────
+const enrichScheduleWithDayWise = (schedule) => {
+  if (!schedule) return schedule;
+  const doc = schedule.toObject ? schedule.toObject() : { ...schedule };
+  const days = doc.days && doc.days.length > 0
+    ? doc.days
+    : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+  const defaultStart = doc.schoolStartTime || '07:00';
+  const defaultEnd = doc.schoolEndTime || '14:00';
+  const defaultPeriods = sanitizePeriods(doc.periods || []);
+
+  doc.daySchedules = sanitizeDaySchedules(
+    doc.daySchedules,
+    defaultStart,
+    defaultEnd,
+    days,
+    defaultPeriods
+  );
+
+  return doc;
+};
+
 // ─── GET all master periods (both types) ──────────────────────────────────────
 export const getMasterPeriods = async (req, res) => {
   try {
@@ -42,7 +139,9 @@ export const getMasterPeriods = async (req, res) => {
     } else {
       list = await MasterPeriod.find(filter).sort({ createdAt: -1 });
     }
-    return res.json({ success: true, schedules: list });
+
+    const enrichedList = list.map((item) => enrichScheduleWithDayWise(item));
+    return res.json({ success: true, schedules: enrichedList });
   } catch (err) {
     console.error('getMasterPeriods error:', err);
     return res.status(500).json({ success: false, message: err.message || 'Server error' });
@@ -68,7 +167,7 @@ export const getMasterPeriodById = async (req, res) => {
     if (!schedule) {
       return res.status(404).json({ success: false, message: 'Schedule not found' });
     }
-    return res.json({ success: true, schedule });
+    return res.json({ success: true, schedule: enrichScheduleWithDayWise(schedule) });
   } catch (err) {
     console.error('getMasterPeriodById error:', err);
     return res.status(500).json({ success: false, message: err.message || 'Server error' });
@@ -78,7 +177,16 @@ export const getMasterPeriodById = async (req, res) => {
 // ─── CREATE master period schedule ────────────────────────────────────────────
 export const createMasterPeriod = async (req, res) => {
   try {
-    const { scheduleType, name, schoolStartTime, schoolEndTime, days, periods = [] } = req.body;
+    const {
+      scheduleType,
+      name,
+      schoolStartTime,
+      schoolEndTime,
+      days,
+      periods = [],
+      daySchedules = {},
+      isConfigured = true,
+    } = req.body;
 
     if (!scheduleType || !schoolStartTime || !schoolEndTime) {
       return res.status(400).json({
@@ -87,7 +195,17 @@ export const createMasterPeriod = async (req, res) => {
       });
     }
 
+    const activeDays = days && days.length > 0
+      ? days
+      : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const enrichedPeriods = sanitizePeriods(periods);
+    const enrichedDaySchedules = sanitizeDaySchedules(
+      daySchedules,
+      schoolStartTime,
+      schoolEndTime,
+      activeDays,
+      enrichedPeriods
+    );
 
     let schedule;
     if (checkFallback()) {
@@ -97,8 +215,10 @@ export const createMasterPeriod = async (req, res) => {
         name: name || `${scheduleType} Schedule`,
         schoolStartTime,
         schoolEndTime,
-        days: days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
+        days: activeDays,
         periods: enrichedPeriods,
+        daySchedules: enrichedDaySchedules,
+        isConfigured: Boolean(isConfigured),
         isActive: true,
         createdBy: req.user?.name || 'admin',
         createdAt: new Date().toISOString(),
@@ -112,15 +232,17 @@ export const createMasterPeriod = async (req, res) => {
           name: name || `${scheduleType} Schedule`,
           schoolStartTime,
           schoolEndTime,
-          ...(days && { days }),
+          days: activeDays,
           periods: enrichedPeriods,
+          daySchedules: enrichedDaySchedules,
+          isConfigured: Boolean(isConfigured),
           createdBy: req.user?.name || 'admin',
         },
         { new: true, upsert: true }
       );
     }
 
-    return res.status(201).json({ success: true, schedule });
+    return res.status(201).json({ success: true, schedule: enrichScheduleWithDayWise(schedule) });
   } catch (err) {
     console.error('createMasterPeriod error:', err);
     return res.status(500).json({ success: false, message: err.message || 'Server error' });
@@ -131,9 +253,29 @@ export const createMasterPeriod = async (req, res) => {
 export const updateMasterPeriod = async (req, res) => {
   try {
     const { id } = req.params;
-    const { scheduleType, schoolStartTime, schoolEndTime, name, days, periods = [], isActive } = req.body;
+    const {
+      scheduleType,
+      schoolStartTime,
+      schoolEndTime,
+      name,
+      days,
+      periods = [],
+      daySchedules = {},
+      isConfigured = true,
+      isActive,
+    } = req.body;
 
+    const activeDays = days && days.length > 0
+      ? days
+      : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const enrichedPeriods = sanitizePeriods(periods);
+    const enrichedDaySchedules = sanitizeDaySchedules(
+      daySchedules,
+      schoolStartTime,
+      schoolEndTime,
+      activeDays,
+      enrichedPeriods
+    );
 
     let schedule;
     if (checkFallback()) {
@@ -148,8 +290,10 @@ export const updateMasterPeriod = async (req, res) => {
           name: name || 'Schedule',
           schoolStartTime,
           schoolEndTime,
-          days: days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
+          days: activeDays,
           periods: enrichedPeriods,
+          daySchedules: enrichedDaySchedules,
+          isConfigured: Boolean(isConfigured),
           isActive: true,
           createdBy: req.user?.name || 'admin',
           createdAt: new Date().toISOString(),
@@ -161,8 +305,10 @@ export const updateMasterPeriod = async (req, res) => {
           name: name || all[idx].name,
           schoolStartTime: schoolStartTime || all[idx].schoolStartTime,
           schoolEndTime: schoolEndTime || all[idx].schoolEndTime,
-          days: days || all[idx].days,
+          days: activeDays,
           periods: enrichedPeriods,
+          daySchedules: enrichedDaySchedules,
+          isConfigured: isConfigured !== undefined ? Boolean(isConfigured) : all[idx].isConfigured,
           isActive: isActive !== undefined ? isActive : all[idx].isActive,
           updatedAt: new Date().toISOString(),
         };
@@ -170,19 +316,19 @@ export const updateMasterPeriod = async (req, res) => {
         schedule = all[idx];
       }
     } else {
+      const updateData = {
+        ...(name && { name }),
+        ...(schoolStartTime && { schoolStartTime }),
+        ...(schoolEndTime && { schoolEndTime }),
+        days: activeDays,
+        periods: enrichedPeriods,
+        daySchedules: enrichedDaySchedules,
+        isConfigured: isConfigured !== undefined ? Boolean(isConfigured) : true,
+        ...(isActive !== undefined && { isActive }),
+      };
+
       if (mongoose.Types.ObjectId.isValid(id)) {
-        schedule = await MasterPeriod.findByIdAndUpdate(
-          id,
-          {
-            ...(name && { name }),
-            ...(schoolStartTime && { schoolStartTime }),
-            ...(schoolEndTime && { schoolEndTime }),
-            ...(days && { days }),
-            periods: enrichedPeriods,
-            ...(isActive !== undefined && { isActive }),
-          },
-          { new: true }
-        );
+        schedule = await MasterPeriod.findByIdAndUpdate(id, updateData, { new: true });
       }
 
       if (!schedule && scheduleType) {
@@ -191,18 +337,14 @@ export const updateMasterPeriod = async (req, res) => {
           {
             scheduleType,
             name: name || `${scheduleType} Schedule`,
-            schoolStartTime,
-            schoolEndTime,
-            ...(days && { days }),
-            periods: enrichedPeriods,
-            ...(isActive !== undefined && { isActive }),
+            ...updateData,
           },
           { new: true, upsert: true }
         );
       }
     }
 
-    return res.json({ success: true, schedule });
+    return res.json({ success: true, schedule: enrichScheduleWithDayWise(schedule) });
   } catch (err) {
     console.error('updateMasterPeriod error:', err);
     return res.status(500).json({ success: false, message: err.message || 'Server error' });

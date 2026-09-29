@@ -31,6 +31,11 @@ const MasterPeriodSchema = new mongoose.Schema(
       default: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
     },
     periods: [PeriodSlotSchema],
+    daySchedules: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    isConfigured: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
     createdBy: { type: String, default: 'admin' },
   },

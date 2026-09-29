@@ -341,11 +341,24 @@ export const getNotifications = async (req, res) => {
 // Global App Settings
 export const getSettings = async (req, res) => {
   try {
+    const { category, includePortal, includeTemplates } = req.query;
+
     let config = null;
     if (checkFallback()) {
       config = FallbackDb.getSettings();
     } else {
-      config = await Setting.findOne();
+      // Exclude heavy portalSettings and defaultDocumentTemplates by default.
+      // Those modules have their dedicated endpoints: /portal/settings and /documents/templates.
+      let query = Setting.findOne();
+      if (includePortal !== 'true' && includeTemplates !== 'true') {
+        query = query.select('-portalSettings -defaultDocumentTemplates');
+      } else if (includePortal !== 'true') {
+        query = query.select('-portalSettings');
+      } else if (includeTemplates !== 'true') {
+        query = query.select('-defaultDocumentTemplates');
+      }
+
+      config = await query;
       if (!config) {
         config = new Setting({});
         await config.save();
@@ -354,6 +367,13 @@ export const getSettings = async (req, res) => {
 
     // Convert raw config to plain object so we can resolve presigned URLs
     const settings = config?.toObject ? config.toObject() : { ...(config || {}) };
+
+    if (includePortal !== 'true') {
+      delete settings.portalSettings;
+    }
+    if (includeTemplates !== 'true') {
+      delete settings.defaultDocumentTemplates;
+    }
 
     // Resolve S3 keys → presigned URLs for logo and banner fields.
     // Cloudinary URLs and empty strings pass through unchanged (resolveFileUrl handles this).
@@ -374,6 +394,36 @@ export const getSettings = async (req, res) => {
       settings.schoolBanner = resolvedBanner;
     }
 
+    // Optional category filtering if client requests a specific slice
+    if (category) {
+      const categoryFilters = {
+        profile: [
+          'schoolName', 'schoolCode', 'registrationNumber', 'affiliationNumber', 'schoolType',
+          'establishedYear', 'academicYear', 'contactEmail', 'schoolPhone', 'alternatePhone',
+          'websiteUrl', 'addressLine1', 'addressLine2', 'city', 'state', 'country', 'postalCode',
+          'companyLogo', 'schoolLogo', 'schoolBanner', 'schoolMotto', 'principalName', 'currencySymbol'
+        ],
+        academic: ['defaultPassingPercentage', 'gradePointScale', 'enableGradeDistribution', 'academicYear'],
+        students: ['autoGenerateAdmissionNumber', 'admissionNumberPrefix', 'defaultStudentPassword', 'maxStudentsPerSection'],
+        teachers: ['autoGenerateTeacherID', 'teacherIDPrefix', 'maxTeachersPerClass'],
+        finance: ['currencySymbol', 'enableInstallmentPayment', 'lateFeesPercentage', 'enableAutoReminder', 'reminderDaysBefore'],
+        inventory: ['enableInventoryTracking', 'lowStockAlert', 'lowStockThreshold', 'enableBarcode'],
+        security: ['enableDataEncryption', 'enableAuditLog', 'enableTwoFactor', 'sessionTimeout', 'passwordExpiry'],
+        notifications: ['enableEmailAlerts', 'enableSmsAlerts', 'enablePushNotifications'],
+        hr: ['enableTimesheet', 'timesheetFrequency', 'overtimeMultiplier', 'attendanceRequirement', 'enableLeavePolicy', 'annualLeaveDays', 'sickLeaveDays', 'enablePerformanceReview', 'reviewFrequency'],
+        backup: ['autoBackupEnabled', 'backupFrequency']
+      };
+
+      const allowedFields = categoryFilters[category.toLowerCase()];
+      if (allowedFields) {
+        const filtered = { _id: settings._id };
+        allowedFields.forEach((key) => {
+          if (settings[key] !== undefined) filtered[key] = settings[key];
+        });
+        return res.json({ success: true, category, settings: filtered });
+      }
+    }
+
     return res.json({ success: true, settings });
   } catch (err) {
     console.error('getSettings error:', err.message);
@@ -384,6 +434,21 @@ export const getSettings = async (req, res) => {
 export const updateSettings = async (req, res) => {
   try {
     const data = { ...req.body };
+
+    // Prevent overwriting internal timestamps or IDs
+    delete data._id;
+    delete data.__v;
+    delete data.createdAt;
+    delete data.updatedAt;
+
+    // Do NOT wipe or overwrite separate sub-modules through general settings update
+    if (!data.portalSettings) {
+      delete data.portalSettings;
+    }
+    if (!data.defaultDocumentTemplates) {
+      delete data.defaultDocumentTemplates;
+    }
+
     if (data.companyLogo && !data.schoolLogo) {
       data.schoolLogo = data.companyLogo;
     } else if (data.schoolLogo && !data.companyLogo) {
@@ -394,9 +459,18 @@ export const updateSettings = async (req, res) => {
     if (checkFallback()) {
       config = FallbackDb.updateSettings(data);
     } else {
-      config = await Setting.findOneAndUpdate({}, data, { new: true, upsert: true });
+      config = await Setting.findOneAndUpdate(
+        {},
+        { $set: data },
+        { new: true, upsert: true }
+      ).select('-portalSettings -defaultDocumentTemplates');
     }
-    return res.json({ success: true, message: 'Configuration settings updated', settings: config });
+
+    const settings = config?.toObject ? config.toObject() : { ...(config || {}) };
+    delete settings.portalSettings;
+    delete settings.defaultDocumentTemplates;
+
+    return res.json({ success: true, message: 'Configuration settings updated', settings });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Server error' });
   }

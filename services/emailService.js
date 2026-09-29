@@ -1,21 +1,7 @@
-/**
- * @file emailService.js
- * @description Email sending service using Resend REST API.
- * Uses native fetch (Node 18+) so no external dependencies are strictly required.
- */
+const RESEND_API_URL = "https://api.resend.com/emails";
+const DEFAULT_FROM = process.env.RESEND_FROM || "onboarding@resend.dev";
+const DEV_FALLBACK_EMAIL = "rehanghani366@gmail.com";
 
-const RESEND_API_URL = 'https://api.resend.com/emails';
-const DEFAULT_FROM = process.env.RESEND_FROM || 'onboarding@resend.dev';
-const DEV_FALLBACK_EMAIL = 'rehanghani366@gmail.com';
-
-/**
- * Send an email via Resend
- * @param {object} options
- * @param {string} options.to - Recipient email
- * @param {string} options.subject - Email subject
- * @param {string} options.html - HTML body
- * @param {string} [options.from] - Sender email
- */
 export async function sendEmail({ to, subject, html, from = DEFAULT_FROM }) {
   const apiKey = process.env.RESEND_API_KEY;
   const sender = process.env.RESEND_FROM || from || DEFAULT_FROM;
@@ -29,10 +15,10 @@ export async function sendEmail({ to, subject, html, from = DEFAULT_FROM }) {
 
   try {
     const response = await fetch(RESEND_API_URL, {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     });
@@ -43,18 +29,19 @@ export async function sendEmail({ to, subject, html, from = DEFAULT_FROM }) {
       // If Resend free tier returns domain restriction (can only send to verified email),
       // retry by routing to the developer's registered Resend email in development
       const isDomainRestriction =
-        data?.message?.includes('only send testing emails to your own email address') ||
-        data?.name === 'validation_error';
+        data?.message?.includes(
+          "only send testing emails to your own email address"
+        ) || data?.name === "validation_error";
 
       if (isDomainRestriction && to !== DEV_FALLBACK_EMAIL) {
         console.warn(
           `[Resend Notice] Recipient ${to} is restricted on free tier. Retrying delivery to ${DEV_FALLBACK_EMAIL}...`
         );
         const retryRes = await fetch(RESEND_API_URL, {
-          method: 'POST',
+          method: "POST",
           headers: {
             Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             ...payload,
@@ -64,7 +51,11 @@ export async function sendEmail({ to, subject, html, from = DEFAULT_FROM }) {
         });
         const retryData = await retryRes.json();
         if (retryRes.ok) {
-          return { success: true, id: retryData.id, reroutedTo: DEV_FALLBACK_EMAIL };
+          return {
+            success: true,
+            id: retryData.id,
+            reroutedTo: DEV_FALLBACK_EMAIL,
+          };
         }
       }
 
@@ -73,7 +64,7 @@ export async function sendEmail({ to, subject, html, from = DEFAULT_FROM }) {
 
     return { success: true, id: data.id };
   } catch (error) {
-    console.error('Failed to send email via Resend:', error.message);
+    console.error("Failed to send email via Resend:", error.message);
     throw error;
   }
 }
@@ -180,7 +171,7 @@ export async function sendOtpEmail({ to, name, otp }) {
         <p>If you did not initiate this setup request, you can safely ignore this email.</p>
 
         <div class="footer">
-          &copy; ${new Date().getFullYear()} RG EduCore — Advanced Campus Management System
+          &copy; ${new Date().getFullYear()} RGES. All rights reserved.
         </div>
       </div>
     </body>

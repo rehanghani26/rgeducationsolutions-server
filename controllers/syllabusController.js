@@ -342,21 +342,22 @@ export const getSyllabusByClass = async (req, res) => {
   try {
     const { classId } = req.params;
     const normalized = normalizeClassId(classId);
+    const defaultCurriculum = getDefaultCurriculumForClass(classId);
 
     if (checkFallback()) {
       const list = FallbackDb.find("syllabus") || [];
       const found = list.find(
         (s) =>
           normalizeClassId(s.classId) === normalized ||
-          String(s.className || "").toLowerCase() === String(classId).toLowerCase()
+          String(s.className || "").toLowerCase() === String(classId).toLowerCase() ||
+          (defaultCurriculum?.className && String(s.className || "").toLowerCase() === String(defaultCurriculum.className).toLowerCase())
       );
 
       if (found) {
-        return res.json({ success: true, syllabus: found });
+        return res.json({ success: true, syllabus: found, isDefault: false });
       }
 
       // Return default template
-      const defaultCurriculum = getDefaultCurriculumForClass(classId);
       return res.json({ success: true, syllabus: defaultCurriculum, isDefault: true });
     }
 
@@ -366,12 +367,12 @@ export const getSyllabusByClass = async (req, res) => {
         { classId: classId },
         { classId: normalized },
         { className: new RegExp(`^${classId}$`, "i") },
+        ...(defaultCurriculum?.className ? [{ className: new RegExp(`^${defaultCurriculum.className}$`, "i") }] : []),
       ],
     });
 
     if (!syllabus) {
       // Return default curriculum
-      const defaultCurriculum = getDefaultCurriculumForClass(classId);
       return res.json({
         success: true,
         syllabus: defaultCurriculum,

@@ -1,28 +1,5 @@
-/**
- * @file ai.controller.js
- * @description Express controller for the AI Chat API.
- *
- * POST /api/v1/ai/chat
- *
- * Request body:
- *   {
- *     "message": "How many students are absent today?",
- *     "conversationHistory": [   // optional, last N messages
- *       { "role": "user", "content": "..." },
- *       { "role": "assistant", "content": "..." }
- *     ]
- *   }
- *
- * Response:
- *   {
- *     "success": true,
- *     "reply": "Yesterday, 12 students were absent...",
- *     "toolCalls": [{ "tool": "getAttendanceByDate", "status": "success", "durationMs": 134 }]
- *   }
- */
-
-import { processAiChat } from './ai.service.js';
-import { getProvider, getFallbackProvider } from './providers/index.js';
+import { processAiChat } from "./ai.service.js";
+import { getProvider, getFallbackProvider } from "./providers/index.js";
 
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_HISTORY_LENGTH = 40;
@@ -37,19 +14,18 @@ export async function healthController(req, res) {
     const fallback = getFallbackProvider();
     return res.json({
       success: true,
-      status: 'ready',
+      status: "ready",
       provider: provider.name,
       fallback: fallback ? fallback.name : null,
     });
   } catch (error) {
     return res.status(503).json({
       success: false,
-      status: 'degraded',
+      status: "degraded",
       error: error.message,
     });
   }
 }
-
 
 /**
  * POST /api/v1/ai/chat
@@ -59,10 +35,11 @@ export async function chatController(req, res) {
     const { message, conversationHistory } = req.body;
 
     // ── Input validation ──────────────────────────────────────────────────────
-    if (!message || typeof message !== 'string' || !message.trim()) {
+    if (!message || typeof message !== "string" || !message.trim()) {
       return res.status(400).json({
         success: false,
-        message: 'The "message" field is required and must be a non-empty string.',
+        message:
+          'The "message" field is required and must be a non-empty string.',
       });
     }
 
@@ -81,9 +58,9 @@ export async function chatController(req, res) {
         .filter(
           (m) =>
             m &&
-            typeof m === 'object' &&
-            typeof m.content === 'string' &&
-            ['user', 'assistant', 'model'].includes(m.role)
+            typeof m === "object" &&
+            typeof m.content === "string" &&
+            ["user", "assistant", "model"].includes(m.role)
         )
         .map((m) => ({
           role: m.role,
@@ -106,42 +83,57 @@ export async function chatController(req, res) {
       toolCalls: result.toolCalls,
     });
   } catch (error) {
-    console.error('[AI Controller] ── FULL ERROR ──────────────────────────────');
-    console.error('[AI Controller] Message:', error.message);
-    console.error('[AI Controller] Status:', error.status);
-    console.error('[AI Controller] Stack:', error.stack);
-    console.error('[AI Controller] ────────────────────────────────────────────');
+    console.error(
+      "[AI Controller] ── FULL ERROR ──────────────────────────────"
+    );
+    console.error("[AI Controller] Message:", error.message);
+    console.error("[AI Controller] Status:", error.status);
+    console.error("[AI Controller] Stack:", error.stack);
+    console.error(
+      "[AI Controller] ────────────────────────────────────────────"
+    );
 
     // ── Provider-specific friendly errors ─────────────────────────────────────
     let statusCode = 500;
     // In development, expose the real error; in production keep it generic
-    const isDev = process.env.NODE_ENV !== 'production';
+    const isDev = process.env.NODE_ENV !== "production";
     let userMessage = isDev
       ? `AI Error: ${error.message}`
-      : 'The AI assistant is temporarily unavailable. Please try again.';
+      : "The AI assistant is temporarily unavailable. Please try again.";
 
-    const msg = error.message || '';
+    const msg = error.message || "";
 
     if (
-      msg.includes('API Key') ||
-      msg.includes('api_key') ||
-      msg.includes('API_KEY_INVALID') ||
-      msg.includes('PERMISSION_DENIED') ||
-      msg.includes('Invalid API key') ||
-      msg.includes('401')
+      msg.includes("API Key") ||
+      msg.includes("api_key") ||
+      msg.includes("API_KEY_INVALID") ||
+      msg.includes("PERMISSION_DENIED") ||
+      msg.includes("Invalid API key") ||
+      msg.includes("401")
     ) {
       statusCode = 503;
-      userMessage = 'AI provider API key is invalid or expired. Please update the API key in the server .env file.';
-    } else if (msg.includes('rate limit') || msg.toLowerCase().includes('quota') || msg.includes('429')) {
+      userMessage =
+        "AI provider API key is invalid or expired. Please update the API key in the server .env file.";
+    } else if (
+      msg.includes("rate limit") ||
+      msg.toLowerCase().includes("quota") ||
+      msg.includes("429")
+    ) {
       statusCode = 429;
-      userMessage = 'AI rate limit reached. Please wait a moment and try again.';
-    } else if (msg.includes('timeout') || msg.includes('ETIMEDOUT') || msg.includes('ECONNRESET')) {
+      userMessage =
+        "AI rate limit reached. Please wait a moment and try again.";
+    } else if (
+      msg.includes("timeout") ||
+      msg.includes("ETIMEDOUT") ||
+      msg.includes("ECONNRESET")
+    ) {
       statusCode = 504;
-      userMessage = 'The AI request timed out. Please try again.';
-    } else if (msg.includes('unavailable') || msg.includes('503')) {
+      userMessage = "The AI request timed out. Please try again.";
+    } else if (msg.includes("unavailable") || msg.includes("503")) {
       statusCode = 503;
-      userMessage = msg.length < 300 ? msg : 'AI service is temporarily unavailable.';
-    } else if (msg.includes('is not set')) {
+      userMessage =
+        msg.length < 300 ? msg : "AI service is temporarily unavailable.";
+    } else if (msg.includes("is not set")) {
       statusCode = 503;
       userMessage = `AI configuration error: ${msg}`;
     }
