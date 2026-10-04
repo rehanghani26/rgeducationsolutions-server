@@ -36,6 +36,10 @@ const StudentSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
     alternatePhone: {
       type: String,
       trim: true,

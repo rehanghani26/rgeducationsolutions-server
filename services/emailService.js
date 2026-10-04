@@ -180,3 +180,117 @@ export async function sendOtpEmail({ to, name, otp }) {
 
   return await sendEmail({ to, subject, html });
 }
+
+/**
+ * Send OTP Verification Email for Student Email Verification
+ * @param {object} params
+ * @param {string} params.to - Recipient student email
+ * @param {string} params.name - Student name
+ * @param {string} params.otp - 6-digit OTP code
+ */
+export async function sendStudentOtpEmail({ to, name = "Student", otp }) {
+  const subject = `🔐 ${otp} is your Student Email Verification Code`;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>RG EduCore Student Verification</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          background-color: #0b0f19;
+          margin: 0;
+          padding: 24px;
+          color: #f1f5f9;
+        }
+        .container {
+          max-width: 520px;
+          margin: 0 auto;
+          background: #111827;
+          border: 1px solid #1f2937;
+          border-radius: 16px;
+          padding: 36px 32px;
+          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+        .logo-badge {
+          display: inline-block;
+          background: #4f46e5;
+          color: #ffffff;
+          font-weight: 800;
+          font-size: 14px;
+          letter-spacing: 1px;
+          padding: 6px 14px;
+          border-radius: 8px;
+          margin-bottom: 20px;
+        }
+        h1 {
+          font-size: 22px;
+          font-weight: 700;
+          color: #ffffff;
+          margin: 0 0 12px 0;
+        }
+        p {
+          font-size: 14px;
+          line-height: 1.6;
+          color: #94a3b8;
+          margin: 0 0 20px 0;
+        }
+        .otp-box {
+          background: #1e1b4b;
+          border: 1px solid #4338ca;
+          border-radius: 12px;
+          padding: 20px;
+          text-align: center;
+          margin: 28px 0;
+        }
+        .otp-code {
+          font-family: monospace;
+          font-size: 36px;
+          font-weight: 800;
+          letter-spacing: 8px;
+          color: #818cf8;
+          display: block;
+        }
+        .otp-note {
+          font-size: 12px;
+          color: #a5b4fc;
+          margin-top: 8px;
+        }
+        .footer {
+          border-top: 1px solid #1f2937;
+          padding-top: 20px;
+          margin-top: 24px;
+          font-size: 12px;
+          color: #64748b;
+          text-align: center;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="logo-badge">RG EDUCORE ERP</div>
+        <h1>Verify Student Email</h1>
+        <p>Hello${name ? ` <strong>${name}</strong>` : ""},</p>
+        <p>A request was made to verify this email address for student registration/profile update. Please use the 6-digit verification code below to complete email verification:</p>
+        
+        <div class="otp-box">
+          <span class="otp-code">${otp}</span>
+          <div class="otp-note">Valid for 10 minutes</div>
+        </div>
+
+        <p>If you did not request this verification code, please ignore this email.</p>
+
+        <div class="footer">
+          &copy; ${new Date().getFullYear()} RG EduCore ERP. All rights reserved.
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  return await sendEmail({ to, subject, html });
+}
+

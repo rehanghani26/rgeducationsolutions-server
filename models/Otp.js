@@ -14,12 +14,16 @@ const OtpSchema = new mongoose.Schema({
   },
   name: {
     type: String,
-    required: true,
     trim: true,
+    default: '',
   },
   password: {
     type: String,
-    required: true,
+    default: '',
+  },
+  purpose: {
+    type: String,
+    default: 'signup',
   },
   createdAt: {
     type: Date,

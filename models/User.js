@@ -16,6 +16,10 @@ const UserSchema = new mongoose.Schema({
     trim: true,
     lowercase: true
   },
+  isEmailVerified: {
+    type: Boolean,
+    default: false
+  },
   employeeId: {
     type: String,
     trim: true,
@@ -60,6 +64,20 @@ const UserSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true
+  },
+  avatar: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  photo: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  imagesRef: {
+    id: { type: String, default: '' },
+    img: { type: String, default: '' },
   },
   phone: {
     type: String,

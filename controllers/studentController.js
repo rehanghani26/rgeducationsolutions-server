@@ -4,9 +4,11 @@ import mongoose from "mongoose";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import Parent from "../models/Parent.js";
+import Otp from "../models/Otp.js";
 import { checkFallback } from "../config/db.js";
 import { FallbackDb } from "../services/dbFallback.js";
 import { configureCloudinary } from "../config/cloudinary.js"; // kept for legacy URL detection only
+import { sendStudentOtpEmail } from "../services/emailService.js";
 import {
   uploadToS3,
   generateS3Key,
@@ -275,6 +277,7 @@ const buildStudentPayload = async (data) => {
     loginRestriction: data.loginRestriction || "none",
     documents: data.documents || [],
     academicHistory: data.academicHistory || [],
+    isEmailVerified: Boolean(data.isEmailVerified),
   };
 };
 
@@ -288,12 +291,16 @@ const syncUserFromStudent = async ({ student, password, existingUser }) => {
     role: "student",
     permissions: student.permissions || DEFAULT_STUDENT_PERMISSIONS,
     name: student.name,
+    photo: student.photo || student.imagesRef?.img || "",
+    avatar: student.photo || student.imagesRef?.img || "",
+    imagesRef: student.imagesRef || { id: "", img: student.photo || "" },
     profileId: student._id,
     isActive: student.status === "active",
     forcePasswordChange: Boolean(student.forcePasswordChange),
     accountExpiryDate: student.accountExpiryDate,
     loginRestriction: student.loginRestriction || "none",
     twoFactorEnabled: Boolean(student.twoFactorEnabled),
+    isEmailVerified: Boolean(student.isEmailVerified),
   };
 
   if (existingUser) {
@@ -519,6 +526,25 @@ export const getStudents = async (req, res) => {
     if (checkFallback()) {
       let list = FallbackDb.find("students").map(enrichStudent);
 
+      const userRole = (req.user?.role || "").toLowerCase();
+      if (userRole === "student") {
+        const studentId = String(req.user.profileId || req.user._id || req.user.id || "");
+        const adm = String(req.user.admissionNumber || "").toLowerCase();
+        list = list.filter(
+          (s) =>
+            String(s.id || s._id) === studentId ||
+            String(s.user) === String(req.user._id) ||
+            (adm && String(s.admissionNumber || "").toLowerCase() === adm)
+        );
+      } else if (userRole === "parent") {
+        const parentId = String(req.user.profileId || req.user._id || req.user.id || "");
+        const parent =
+          FallbackDb.findById("parents", parentId) ||
+          FallbackDb.findOne("parents", { user: req.user._id });
+        const childIds = (parent?.children || []).map(String);
+        list = list.filter((s) => childIds.includes(String(s.id || s._id)));
+      }
+
       // Auto-populate sample students if fallback list has no students for this target class
       if (targetClass) {
         const hasStudentsInClass = list.some((s) => {
@@ -596,6 +622,32 @@ export const getStudents = async (req, res) => {
     // MongoDB Mode
     const conditions = [];
 
+    const userRole = (req.user?.role || "").toLowerCase();
+    if (userRole === "student") {
+      const orClauses = [{ user: req.user._id }];
+      if (req.user.profileId && mongoose.Types.ObjectId.isValid(req.user.profileId)) {
+        orClauses.push({ _id: req.user.profileId });
+      }
+      if (req.user.admissionNumber) {
+        orClauses.push({ admissionNumber: req.user.admissionNumber });
+      }
+      conditions.push({ $or: orClauses });
+    } else if (userRole === "parent") {
+      let childIds = [];
+      try {
+        const parent = await Parent.findOne({
+          $or: [
+            ...(req.user.profileId && mongoose.Types.ObjectId.isValid(req.user.profileId) ? [{ _id: req.user.profileId }] : []),
+            { user: req.user._id },
+          ],
+        });
+        if (parent?.children?.length) {
+          childIds = parent.children;
+        }
+      } catch (e) {}
+      conditions.push({ _id: { $in: childIds } });
+    }
+
     if (search) {
       const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       const orClauses = [
@@ -670,11 +722,14 @@ export const getStudents = async (req, res) => {
       Student.countDocuments(filter),
     ]);
 
+    // Resolve S3 presigned URLs for all student file references
+    const resolvedStudents = await Promise.all(students.map(enrichStudent).map(resolveStudentFileUrls));
+
     return res.json({
       success: true,
-      // Resolve S3 presigned URLs for all student file references
-      students: await Promise.all(students.map(enrichStudent).map(resolveStudentFileUrls)),
-      ...paginateResult(students, total, { page, limit }),
+      students: resolvedStudents,
+      data: resolvedStudents,
+      ...paginateResult(resolvedStudents, total, { page, limit }),
     });
   } catch (error) {
     console.error("getStudents error:", error);
@@ -746,6 +801,148 @@ export const getStudentActivity = async (req, res) => {
   } catch (error) {
     console.error("getStudentActivity error:", error);
     return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+/**
+ * Send 6-digit OTP to student email for verification during creation or editing
+ */
+export const sendStudentEmailOtp = async (req, res) => {
+  try {
+    const { email, name } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Email address is required",
+      });
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address",
+      });
+    }
+
+    // Generate secure 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    if (!checkFallback()) {
+      await Otp.deleteMany({ email: normalizedEmail });
+      await Otp.create({
+        email: normalizedEmail,
+        name: (name || "Student").trim(),
+        otp,
+        purpose: "student-email-verification",
+      });
+    } else {
+      FallbackDb.create("otps", {
+        email: normalizedEmail,
+        name: (name || "Student").trim(),
+        otp,
+        purpose: "student-email-verification",
+        createdAt: new Date(),
+      });
+    }
+
+    // Send email via Resend
+    await sendStudentOtpEmail({
+      to: normalizedEmail,
+      name: (name || "Student").trim(),
+      otp,
+    });
+
+    return res.json({
+      success: true,
+      message: `A 6-digit verification code was sent to ${normalizedEmail}`,
+      email: normalizedEmail,
+    });
+  } catch (error) {
+    console.error("sendStudentEmailOtp error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to send verification code",
+    });
+  }
+};
+
+/**
+ * Verify 6-digit OTP for student email.
+ * If studentId is provided (e.g. edit mode), also persist isEmailVerified: true to Student and User records in DB.
+ */
+export const verifyStudentEmailOtp = async (req, res) => {
+  try {
+    const { email, otp, studentId } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Email address and 6-digit verification code are required",
+      });
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    const enteredOtp = String(otp).trim();
+
+    if (!checkFallback()) {
+      const otpRecord = await Otp.findOne({
+        email: normalizedEmail,
+        otp: enteredOtp,
+      }).sort({ createdAt: -1 });
+
+      if (!otpRecord) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid or expired verification code. Please request a new code.",
+        });
+      }
+
+      await Otp.deleteMany({ email: normalizedEmail });
+    } else {
+      const allOtps = FallbackDb.find("otps") || [];
+      const idx = allOtps.findIndex(
+        (o) => o.email === normalizedEmail && String(o.otp).trim() === enteredOtp
+      );
+      if (idx === -1) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid or expired verification code. Please request a new code.",
+        });
+      }
+      FallbackDb.delete("otps", allOtps[idx].id);
+    }
+
+    // If studentId was provided (edit flow), update DB records directly
+    if (studentId) {
+      if (checkFallback() || !mongoose.Types.ObjectId.isValid(studentId)) {
+        const updated = FallbackDb.update("students", studentId, { isEmailVerified: true });
+        if (updated?.user) {
+          FallbackDb.update("users", updated.user, { isEmailVerified: true });
+        }
+      } else {
+        const student = await Student.findByIdAndUpdate(
+          studentId,
+          { isEmailVerified: true },
+          { new: true }
+        );
+        if (student?.user) {
+          await User.findByIdAndUpdate(student.user, { isEmailVerified: true });
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      isEmailVerified: true,
+      message: "Student email verified successfully!",
+    });
+  } catch (error) {
+    console.error("verifyStudentEmailOtp error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to verify email code",
+    });
   }
 };
 
@@ -844,6 +1041,7 @@ export const createStudent = async (req, res) => {
         accountExpiryDate: payload.accountExpiryDate,
         loginRestriction: payload.loginRestriction,
         twoFactorEnabled: payload.twoFactorEnabled,
+        isEmailVerified: Boolean(payload.isEmailVerified),
       });
       const studentRecord = FallbackDb.create("students", {
         ...payload,
@@ -955,6 +1153,7 @@ export const createStudent = async (req, res) => {
       accountExpiryDate: payload.accountExpiryDate,
       loginRestriction: payload.loginRestriction,
       twoFactorEnabled: payload.twoFactorEnabled,
+      isEmailVerified: Boolean(payload.isEmailVerified),
     });
     studentRecord.user = userRecord._id;
     await studentRecord.save();
@@ -1039,6 +1238,10 @@ export const updateStudent = async (req, res) => {
       updateData.AdharRef = { id: aId, pdf: aUrl };
     }
 
+    if (updateData.isEmailVerified !== undefined) {
+      updateData.isEmailVerified = Boolean(updateData.isEmailVerified);
+    }
+
     let updatedRecord = null;
 
     if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
@@ -1053,6 +1256,7 @@ export const updateStudent = async (req, res) => {
           permissions: updatedRecord.permissions,
           name: updatedRecord.name,
           isActive: updatedRecord.status === "active",
+          isEmailVerified: Boolean(updatedRecord.isEmailVerified),
         });
       }
     } else {
@@ -1071,6 +1275,7 @@ export const updateStudent = async (req, res) => {
           accountExpiryDate: updatedRecord.accountExpiryDate,
           loginRestriction: updatedRecord.loginRestriction,
           twoFactorEnabled: updatedRecord.twoFactorEnabled,
+          isEmailVerified: Boolean(updatedRecord.isEmailVerified),
         });
       }
     }
@@ -2041,6 +2246,14 @@ export const getStudentFileById = async (req, res) => {
         }
       } catch (err) {
         // ignore — presigned URL generation failed
+      }
+    }
+
+    if (fileUrl && isS3Key(fileUrl)) {
+      try {
+        fileUrl = await getPresignedUrl(fileUrl, 3600);
+      } catch (err) {
+        console.warn("Could not presign S3 URL for fileUrl:", err);
       }
     }
 

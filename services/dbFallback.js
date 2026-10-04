@@ -24,6 +24,7 @@ const initialDb = {
   library: [],
   otps: [],
   results: [],
+  passwordRequests: [],
   settings: {},
 };
 
@@ -57,6 +58,7 @@ const loadData = () => {
       if (!db.library) db.library = [];
       if (!db.otps) db.otps = [];
       if (!db.results) db.results = [];
+      if (!db.passwordRequests) db.passwordRequests = [];
       if (!db.settings) db.settings = {};
       saveData();
     } else {

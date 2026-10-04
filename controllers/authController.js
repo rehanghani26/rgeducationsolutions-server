@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import Student from '../models/Student.js';
 import Setting from '../models/Setting.js';
 import Otp from '../models/Otp.js';
 import { generateTokens, protect } from '../middleware/auth.js';
@@ -6,6 +7,7 @@ import { checkFallback } from '../config/db.js';
 import { FallbackDb } from '../services/dbFallback.js';
 import { logActivity } from '../utils/activityLogger.js';
 import { sendOtpEmail } from '../services/emailService.js';
+import { resolveFileUrl } from '../config/s3.js';
 
 export const login = async (req, res) => {
   const { username, password } = req.body;
@@ -98,6 +100,48 @@ export const login = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
+    let resolvedAvatar = user.avatar || user.photo || user.imagesRef?.img || '';
+    let resolvedImagesRef = user.imagesRef || { id: '', img: resolvedAvatar };
+    if (!resolvedAvatar && user.role === 'student') {
+      try {
+        let studentRecord = null;
+        if (checkFallback()) {
+          studentRecord =
+            FallbackDb.findOne('students', { email: user.email }) ||
+            FallbackDb.findOne('students', { admissionNumber: user.admissionNumber });
+        } else {
+          studentRecord = await Student.findOne({
+            $or: [
+              { user: user._id },
+              { email: user.email },
+              { admissionNumber: user.admissionNumber },
+            ],
+          });
+        }
+        if (studentRecord) {
+          resolvedAvatar = studentRecord.photo || studentRecord.imagesRef?.img || '';
+          resolvedImagesRef = studentRecord.imagesRef || { id: '', img: resolvedAvatar };
+        }
+      } catch (e) {
+        console.warn('Student photo lookup error during login:', e);
+      }
+    }
+
+    if (resolvedAvatar) {
+      try {
+        resolvedAvatar = await resolveFileUrl(resolvedAvatar, 3600);
+      } catch (err) {
+        console.warn('resolveFileUrl failed for avatar:', err);
+      }
+    }
+    if (resolvedImagesRef?.img) {
+      try {
+        resolvedImagesRef.img = await resolveFileUrl(resolvedImagesRef.img, 3600);
+      } catch (err) {
+        console.warn('resolveFileUrl failed for imagesRef.img:', err);
+      }
+    }
+
     return res.json({
       success: true,
       message: 'Login successful',
@@ -111,6 +155,9 @@ export const login = async (req, res) => {
         role: user.role,
         permissions: user.permissions || [],
         name: user.name,
+        avatar: resolvedAvatar,
+        photo: resolvedAvatar,
+        imagesRef: resolvedImagesRef,
         profileId: user.profileId,
         forcePasswordChange: user.forcePasswordChange || false,
         twoFactorEnabled: user.twoFactorEnabled || false
@@ -212,6 +259,9 @@ export const getMe = async (req, res) => {
       role: req.user.role,
       permissions: req.user.permissions || [],
       name: req.user.name,
+      avatar: req.user.avatar || req.user.photo || req.user.imagesRef?.img || '',
+      photo: req.user.photo || req.user.avatar || req.user.imagesRef?.img || '',
+      imagesRef: req.user.imagesRef || { id: '', img: req.user.avatar || req.user.photo || '' },
       profileId: req.user.profileId,
       forcePasswordChange: req.user.forcePasswordChange || false,
       twoFactorEnabled: req.user.twoFactorEnabled || false

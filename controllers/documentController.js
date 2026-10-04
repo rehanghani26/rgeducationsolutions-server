@@ -473,13 +473,32 @@ export const getIssuedCertificates = async (req, res) => {
         const studentId = String(
           req.user.profileId || req.user._id || req.user.id || ""
         );
+        const adm = String(req.user.admissionNumber || "").toLowerCase();
+        const userName = (req.user.name || "").toLowerCase();
         list = list.filter(
           (c) =>
             c.recipientType === "student" &&
             (String(c.recipientId) === studentId ||
-              String(c.recipientIdSnapshot) ===
-                String(req.user.admissionNumber))
+              (adm && String(c.recipientIdSnapshot || "").toLowerCase() === adm) ||
+              (userName && (c.recipientNameSnapshot || "").toLowerCase() === userName))
         );
+      } else if (userRole === "parent") {
+        const parentId = String(req.user.profileId || req.user._id || req.user.id || "");
+        const parent = FallbackDb.findById("parents", parentId) || FallbackDb.findOne("parents", { user: req.user._id });
+        const childIds = (parent?.children || []).map(String);
+        list = list.filter((c) => c.recipientType === "student" && childIds.includes(String(c.recipientId)));
+      } else if (!isAdmin) {
+        const isTeacherOrStaff = [
+          "teacher",
+          "head-teacher",
+          "hod",
+          "coordinator",
+          "accountant",
+          "librarian",
+        ].includes(userRole);
+        if (!isTeacherOrStaff) {
+          list = list.filter((c) => String(c.recipientId) === String(req.user._id || req.user.id));
+        }
       }
 
       if (status && status !== "ALL") {
@@ -524,10 +543,49 @@ export const getIssuedCertificates = async (req, res) => {
 
     if (userRole === "student") {
       const studentId = req.user.profileId || req.user._id || req.user.id;
-      filter.recipientId = studentId;
+      const orConditions = [
+        { recipientId: studentId },
+        { recipientId: req.user._id },
+      ];
+      if (req.user.admissionNumber) {
+        orConditions.push({ recipientIdSnapshot: req.user.admissionNumber });
+      }
+      if (req.user.name) {
+        orConditions.push({ recipientNameSnapshot: req.user.name });
+      }
+      filter.$and = [
+        { recipientType: "student" },
+        { $or: orConditions },
+      ];
+    } else if (userRole === "parent") {
+      let childIds = [];
+      try {
+        const Parent = mongoose.model("Parent");
+        const parent = await Parent.findOne({
+          $or: [{ _id: req.user.profileId }, { user: req.user._id }],
+        });
+        if (parent?.children?.length) {
+          childIds = parent.children;
+        }
+      } catch (e) {}
+      filter.recipientId = { $in: childIds };
       filter.recipientType = "student";
     } else if (!isAdmin) {
-      filter.recipientId = req.user._id || req.user.id;
+      const isTeacherOrStaff = [
+        "teacher",
+        "head-teacher",
+        "hod",
+        "coordinator",
+        "accountant",
+        "librarian",
+      ].includes(userRole);
+      if (isTeacherOrStaff) {
+        if (recipientType && recipientType !== "ALL") {
+          filter.recipientType = recipientType;
+        }
+      } else {
+        filter.recipientId = req.user._id || req.user.id;
+      }
     }
 
     if (status && status !== "ALL") filter.status = status.toUpperCase();
