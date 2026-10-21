@@ -16,5 +16,8 @@
   "otps": [],
   "settings": {},
   "results": [],
-  "passwordRequests": []
+  "passwordRequests": [],
+  "academicSessions": [],
+  "masterPeriods": [],
+  "classTimetables": []
 }

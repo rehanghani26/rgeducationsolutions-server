@@ -13,10 +13,7 @@ import User from "../models/User.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const mongoURI =
-  process.env.MONGODB_URI ||
-  process.env.MONGO_URI ||
-  "mongodb://localhost:27017/school_erp";
+const mongoURI = process.env.MONGODB_URI;
 
 const seedDatabase = async () => {
   try {

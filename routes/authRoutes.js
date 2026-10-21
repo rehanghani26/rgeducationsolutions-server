@@ -14,6 +14,7 @@ import { protect } from '../middleware/auth.js';
 const router = express.Router();
 
 router.get('/setup-status', getSetupStatus);
+router.get('/has-users', getSetupStatus);
 router.post('/send-otp', sendSetupOtp);
 router.post('/verify-otp', verifySetupOtp);
 router.post('/login', login);

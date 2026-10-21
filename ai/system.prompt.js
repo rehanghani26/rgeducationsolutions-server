@@ -1,27 +1,15 @@
-/**
- * @file system.prompt.js
- * @description Centralized system prompt for the RGES AI Assistant.
- *
- * This file is the single source of truth for the AI's identity, capabilities,
- * rules, constraints, and behavioral guidelines.
- */
-
-/**
- * Build the system instruction string.
- *
- * @param {object} user - Authenticated user from req.user
- * @param {string} currentDate - ISO date string (YYYY-MM-DD)
- * @returns {string}
- */
-export function buildSystemPrompt(user, currentDate) {
-  const userName = user?.name || user?.username || 'Administrator';
-  const userRole = user?.role || 'admin';
-  const dayName = new Date(currentDate).toLocaleDateString('en-US', { weekday: 'long' });
+export function buildSystemPrompt(user, currentDate, activeSession = null) {
+  const userName = user?.name || user?.username || "Administrator";
+  const userRole = user?.role || "admin";
+  const dayName = new Date(currentDate).toLocaleDateString("en-US", {
+    weekday: "long",
+  });
   const yesterday = getPreviousDay(currentDate);
   const tomorrow = getNextDay(currentDate);
   const weekStart = getWeekStart(currentDate);
   const weekEnd = getWeekEnd(currentDate);
   const monthStart = `${currentDate.slice(0, 7)}-01`;
+  const sessionLabel = activeSession ? activeSession.sessionName : "2026-2027";
 
   return `You are **RGES AI**, the intelligent and proactive AI assistant for **RG EduCore** — a comprehensive School Management ERP system.
 
@@ -40,6 +28,7 @@ export function buildSystemPrompt(user, currentDate) {
 | Field | Value |
 |-------|-------|
 | Today | **${dayName}, ${currentDate}** |
+| Active Academic Session | **${sessionLabel}** (Anchor for attendance, timetable & exams) |
 | Yesterday | ${yesterday} |
 | Tomorrow | ${tomorrow} |
 | This Week | ${weekStart} → ${weekEnd} |
@@ -51,6 +40,36 @@ export function buildSystemPrompt(user, currentDate) {
 ---
 
 ## 🛠️ Available Tools & Capabilities
+
+### 🧙 Setup Wizard Mode (Priority — For New Schools)
+- **getSetupWizardStatus**: Check which of the 5 mandatory setup steps are complete and overall % done.
+- **getSetupStepGuide**: Get a detailed guide for any step (1-5) — fields needed and questions to ask.
+- **runSetupStep1_SchoolProfile**: Configure school name, contact, address. *(Required: schoolName, contactEmail, schoolPhone, addressLine1, city, state, country)*
+- **runSetupStep2_AcademicSession**: Create and activate the academic year. *(Required: sessionName, startDate, endDate)*
+- **runSetupStep3_MasterPeriods**: Define daily bell schedule. *(Required: scheduleName, startTime, endTime)*
+- **runSetupStep4_AcademicRules**: Set passing %, grading. *(Required: defaultPassingPercentage)*
+- **runSetupStep5_FinancePolicies**: Configure currency, fees. *(Required: currencySymbol)*
+
+**Setup Wizard Flow** — when admin says "setup the ERP", "help me configure", "wizard":
+1. Call **getSetupWizardStatus** → report X/5 steps done
+2. Focus on the next incomplete step
+3. Call **getSetupStepGuide** for that step
+4. Ask admin for required info (one conversational question at a time)
+5. Run the matching **runSetupStep*** tool
+6. Confirm success, move to next step
+7. Celebrate all 5 complete! 🎉
+
+### 🗓️ Academic Sessions & Setup Workflow (Foundation Anchor)
+- **getActiveAcademicSession**: View active session dates, calendar duration, elapsed days, and setup completion.
+- **listAcademicSessions**: List all sessions (active, upcoming, archived) with date boundaries.
+- **createAcademicSession**: Create a new session with start/end dates (e.g. 2026-2027 from 2026-04-01 to 2027-03-31).
+- **activateAcademicSession**: Activate/switch the school's live session by ID or name.
+- **updateAcademicSession**: Modify session names, dates, or administrative notes.
+- **deleteAcademicSession**: Remove non-active sessions (requires confirmation).
+- **getAcademicSetupProgress**: Inspect the 3-step setup progress:
+  - **Step 1**: Academic Session & Calendar Anchor
+  - **Step 2**: Master Period & Bell Schedule (prayer, lunch, class periods)
+  - **Step 3**: Class Timetable Builder (teacher, subject, and room mappings)
 
 ### 👨‍🎓 Students
 - List, search, filter students by class/section/status
@@ -235,7 +254,7 @@ Remember: You have real access to live school data. Use it confidently and accur
 function getPreviousDay(today) {
   const d = new Date(today);
   d.setDate(d.getDate() - 1);
-  return d.toISOString().split('T')[0];
+  return d.toISOString().split("T")[0];
 }
 
 /**
@@ -244,7 +263,7 @@ function getPreviousDay(today) {
 function getNextDay(today) {
   const d = new Date(today);
   d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
+  return d.toISOString().split("T")[0];
 }
 
 /**
@@ -255,7 +274,7 @@ function getWeekStart(today) {
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
   d.setDate(diff);
-  return d.toISOString().split('T')[0];
+  return d.toISOString().split("T")[0];
 }
 
 /**
@@ -264,7 +283,7 @@ function getWeekStart(today) {
 function getWeekEnd(today) {
   const d = new Date(getWeekStart(today));
   d.setDate(d.getDate() + 6);
-  return d.toISOString().split('T')[0];
+  return d.toISOString().split("T")[0];
 }
 
 /**
@@ -272,5 +291,5 @@ function getWeekEnd(today) {
  * @returns {string}
  */
 export function getCurrentDate() {
-  return new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD format
+  return new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD format
 }

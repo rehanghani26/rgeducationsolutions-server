@@ -26,6 +26,10 @@ const initialDb = {
   results: [],
   passwordRequests: [],
   settings: {},
+  // ── Academic scheduling collections ──
+  academicSessions: [],
+  masterPeriods: [],
+  classTimetables: [],
 };
 
 let db = { ...initialDb };
@@ -60,6 +64,10 @@ const loadData = () => {
       if (!db.results) db.results = [];
       if (!db.passwordRequests) db.passwordRequests = [];
       if (!db.settings) db.settings = {};
+      // ── Academic scheduling collections ──
+      if (!db.academicSessions) db.academicSessions = [];
+      if (!db.masterPeriods) db.masterPeriods = [];
+      if (!db.classTimetables) db.classTimetables = [];
       saveData();
     } else {
       saveData();
@@ -160,5 +168,11 @@ export const FallbackDb = {
     db.settings = { ...db.settings, ...newSettings };
     saveData();
     return db.settings;
+  },
+
+  // Replace an entire collection array (used for bulk isCurrent toggling, ordering, etc.)
+  updateAll: (collection, newArray) => {
+    db[collection] = Array.isArray(newArray) ? newArray : [];
+    saveData();
   },
 };

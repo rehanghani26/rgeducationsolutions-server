@@ -28,6 +28,8 @@ import { transportToolDefinitions, transportToolExecutors } from './tools/transp
 import { timetableToolDefinitions, timetableToolExecutors } from './tools/timetable.tools.js';
 import { dashboardToolDefinitions, dashboardToolExecutors } from './tools/dashboard.tools.js';
 import { onlineClassToolDefinitions, onlineClassToolExecutors } from './tools/online-class.tools.js';
+import { sessionToolDefinitions, sessionToolExecutors } from './tools/session.tools.js';
+import { setupToolDefinitions, setupToolExecutors } from './tools/setup.tools.js';
 
 // ─── Combined Definitions (schema for the AI model) ──────────────────────────
 
@@ -44,6 +46,7 @@ export const ALL_TOOL_DEFINITIONS = [
   ...examToolDefinitions,
   ...resultToolDefinitions,
   ...settingsToolDefinitions,
+  ...sessionToolDefinitions,
   ...homeworkToolDefinitions,
   ...noticeToolDefinitions,
   ...classToolDefinitions,
@@ -53,6 +56,7 @@ export const ALL_TOOL_DEFINITIONS = [
   ...timetableToolDefinitions,
   ...dashboardToolDefinitions,
   ...onlineClassToolDefinitions,
+  ...setupToolDefinitions,
 ];
 
 // ─── Combined Executors (implementation functions) ────────────────────────────
@@ -69,6 +73,7 @@ const ALL_EXECUTORS = {
   ...examToolExecutors,
   ...resultToolExecutors,
   ...settingsToolExecutors,
+  ...sessionToolExecutors,
   ...homeworkToolExecutors,
   ...noticeToolExecutors,
   ...classToolExecutors,
@@ -78,6 +83,7 @@ const ALL_EXECUTORS = {
   ...timetableToolExecutors,
   ...dashboardToolExecutors,
   ...onlineClassToolExecutors,
+  ...setupToolExecutors,
 };
 
 // Build a Set of approved tool names for O(1) lookup

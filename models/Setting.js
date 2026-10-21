@@ -722,6 +722,27 @@ const SettingSchema = new mongoose.Schema(
         },
       },
     },
+
+    // ─── Setup Wizard Progress Tracking ────────────────────────────────────────
+    // Tracks completion of the 5 critical initial setup steps.
+    // Each step is set to true when the admin completes its mandatory fields.
+    // This is the single source of truth for wizard progress.
+    setupWizard: {
+      // Step 1: School profile — name, contact, address, logo
+      schoolProfile: { type: Boolean, default: false },
+      // Step 2: Academic session — at least one session created and activated
+      academicSession: { type: Boolean, default: false },
+      // Step 3: Master periods — daily bell schedule defined
+      masterPeriods: { type: Boolean, default: false },
+      // Step 4: Academic rules — passing %, grading system
+      academicRules: { type: Boolean, default: false },
+      // Step 5: Finance policies — currency, fee types set
+      financePolicies: { type: Boolean, default: false },
+      // When all 5 steps are done, record the timestamp
+      completedAt: { type: Date, default: null },
+      // Whether the admin has dismissed the wizard (skipped remaining steps)
+      dismissed: { type: Boolean, default: false },
+    },
   },
   {
     timestamps: true,

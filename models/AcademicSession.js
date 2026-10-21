@@ -33,6 +33,15 @@ const AcademicSessionSchema = new mongoose.Schema(
       type: String,
       default: 'admin',
     },
+    // ── Downstream linkage metadata (denormalized for fast stepper reads) ──
+    hasMasterSchedule: {
+      type: Boolean,
+      default: false,
+    },
+    timetableCount: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

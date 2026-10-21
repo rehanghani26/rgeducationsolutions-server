@@ -159,3 +159,48 @@ export const deleteAcademicSession = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message || 'Server error' });
   }
 };
+
+// GET active session (fast single-record lookup for stepper banner & downstream controllers)
+export const getActiveSession = async (req, res) => {
+  try {
+    if (checkFallback()) {
+      const all = FallbackDb.find('academicSessions') || [];
+      const active = all.find((s) => s.isCurrent) || all[0] || null;
+      return res.json({ success: true, session: active });
+    }
+    const session = await AcademicSession.findOne({ isCurrent: true }).lean();
+    return res.json({ success: true, session: session || null });
+  } catch (err) {
+    console.error('getActiveSession error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+};
+
+/**
+ * Internal helper — NOT exposed as an HTTP route.
+ * Called by masterPeriodController and classTimetableController after save/delete
+ * to keep the denormalized hasMasterSchedule / timetableCount in sync.
+ *
+ * @param {string} sessionId  – Mongo ObjectId string or FallbackDb _id
+ * @param {object} patch      – e.g. { hasMasterSchedule: true } or { timetableCount: 5 }
+ */
+export const updateSessionMetadata = async (sessionId, patch) => {
+  try {
+    if (!sessionId) return;
+    if (checkFallback()) {
+      const all = FallbackDb.find('academicSessions') || [];
+      const idx = all.findIndex(
+        (s) => String(s._id) === String(sessionId) || String(s.id) === String(sessionId)
+      );
+      if (idx !== -1) {
+        Object.assign(all[idx], patch);
+        FallbackDb.updateAll('academicSessions', all);
+      }
+      return;
+    }
+    await AcademicSession.findByIdAndUpdate(sessionId, { $set: patch });
+  } catch (err) {
+    // Non-critical — log but do not throw so the caller is not disrupted
+    console.warn('updateSessionMetadata (non-fatal):', err.message);
+  }
+};

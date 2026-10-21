@@ -7,6 +7,9 @@ import { getProvider, getFallbackProvider } from './providers/index.js';
 import { getAllToolDefinitions } from './tool.registry.js';
 import { executeTool } from './tool.executor.js';
 import { buildSystemPrompt, getCurrentDate } from './system.prompt.js';
+import AcademicSession from '../models/AcademicSession.js';
+import { checkFallback } from '../config/db.js';
+import { FallbackDb } from '../services/dbFallback.js';
 
 const MAX_TOOL_ITERATIONS = 6;
 const MAX_HISTORY_MESSAGES = 20; // Limit history sent to model to control token cost
@@ -32,8 +35,23 @@ export async function processAiChat({
     throw new Error("User message cannot be empty.");
   }
 
+  let activeSession = null;
+  try {
+    if (checkFallback()) {
+      const all = FallbackDb.find('academicSessions') || [];
+      activeSession = all.find((s) => s.isCurrent) || all[0] || null;
+    } else {
+      activeSession = await AcademicSession.findOne({ isCurrent: true }).lean();
+      if (!activeSession) {
+        activeSession = await AcademicSession.findOne().sort({ startDate: -1 }).lean();
+      }
+    }
+  } catch (err) {
+    // Non-fatal fallback
+  }
+
   const currentDate = getCurrentDate();
-  const systemPrompt = buildSystemPrompt(user, currentDate);
+  const systemPrompt = buildSystemPrompt(user, currentDate, activeSession);
   const toolDefinitions = getAllToolDefinitions();
   const context = { user, ip };
 

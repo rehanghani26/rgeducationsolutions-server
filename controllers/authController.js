@@ -441,11 +441,13 @@ export const getSetupStatus = async (req, res) => {
       count = await User.countDocuments();
     }
 
+    const hasUsers = count > 0;
+
     return res.json({
       success: true,
-      isSetupRequired: count === 0,
-      hasUsers: count > 0,
-      userCount: count,
+      hasUsers,
+      exists: hasUsers,
+      isSetupRequired: !hasUsers,
     });
   } catch (error) {
     console.error('Setup status check error:', error);
