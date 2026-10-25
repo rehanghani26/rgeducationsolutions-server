@@ -5,10 +5,12 @@ import {
   getBooks, createBook, getLibraryIssues, issueBook,
   getTransport, getNotifications, getSettings, updateSettings, uploadProfileImage,
   seedDummies, getNotices, createNotice, deleteNotice,
-  getMyLeaves, getAllLeaves, requestLeave, reviewLeave,
   getCurriculums, createCurriculum, updateCurriculum, deleteCurriculum,
   addCurriculumUnit, addCurriculumMaterial
 } from '../controllers/erpController.js';
+import {
+  getMyLeaves, getAllLeaves, requestLeave, reviewLeave
+} from '../controllers/leaveController.js';
 import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/rbac.js';
 

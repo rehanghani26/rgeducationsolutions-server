@@ -23,6 +23,9 @@ import {
   paginateArray,
 } from "../utils/paginateQuery.js";
 import { logActivity, getRecordActivity } from "../utils/activityLogger.js";
+import AcademicSession from "../models/AcademicSession.js";
+import StudentSessionHistory from "../models/StudentSessionHistory.js";
+import ClassRoom from "../models/ClassRoom.js";
 
 const DEFAULT_STUDENT_PERMISSIONS = [
   "dashboard",
@@ -1828,7 +1831,9 @@ export const promoteStudents = async (req, res) => {
       });
     }
 
-    // MongoDB Mode
+    // MongoDB Mode — fetch active session to attach sessionId
+    const activeSession = await AcademicSession.findOne({ isCurrent: true }).lean();
+
     let query = {};
     if (mode === 'class_wise') {
       const clsName = String(sourceClass).split(' - ')[0].trim();
@@ -1859,12 +1864,46 @@ export const promoteStudents = async (req, res) => {
         fromClass: currentCls,
         toClass: newCls,
         action: isPassout ? 'passout' : action,
-        sessionName: targetSession,
+        sessionName: targetSession || activeSession?.sessionName || '',
+        sessionId: activeSession?._id || null,  // ← added
         promotedAt: new Date(),
         promotedBy: req.user?.name || 'admin',
       });
 
       await student.save();
+
+      // ── Write / update StudentSessionHistory ──────────────────────────────
+      if (activeSession) {
+        // Close old record for previous session
+        await StudentSessionHistory.findOneAndUpdate(
+          { studentId: student._id, status: 'active' },
+          { status: 'completed', completedAt: new Date(), completedBy: req.user?.name || 'admin', action: isPassout ? 'passout' : action }
+        );
+        // Create new record for new session if not passout
+        if (!isPassout) {
+          await StudentSessionHistory.findOneAndUpdate(
+            { studentId: student._id, sessionId: activeSession._id },
+            {
+              studentId:       student._id,
+              studentName:     student.name,
+              admissionNumber: student.admissionNumber,
+              sessionId:       activeSession._id,
+              sessionName:     activeSession.sessionName,
+              classId:         student.classId || '',
+              className:       newCls,
+              sectionId:       student.sectionId || '',
+              sectionName:     student.sectionName || student.section || '',
+              rollNumber:      student.rollNumber,
+              action:          'promoted',
+              status:          'active',
+              enrolledAt:      new Date(),
+              enrolledBy:      req.user?.name || 'admin',
+            },
+            { upsert: true, new: true }
+          );
+        }
+      }
+
       updatedCount++;
       updateLogs.push({ studentId: student._id, name: student.name, from: currentCls, to: newCls });
     }

@@ -1,6 +1,5 @@
 import Student from '../models/Student.js';
 import Teacher from '../models/Teacher.js';
-import Class from '../models/Class.js';
 import Attendance from '../models/Attendance.js';
 import Fee from '../models/Fee.js';
 import Expense from '../models/Expense.js';

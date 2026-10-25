@@ -30,6 +30,8 @@ const initialDb = {
   academicSessions: [],
   masterPeriods: [],
   classTimetables: [],
+  // ── Leaves collection ──
+  leaveRequests: [],
 };
 
 let db = { ...initialDb };
@@ -68,6 +70,8 @@ const loadData = () => {
       if (!db.academicSessions) db.academicSessions = [];
       if (!db.masterPeriods) db.masterPeriods = [];
       if (!db.classTimetables) db.classTimetables = [];
+      // ── Leaves collection ──
+      if (!db.leaveRequests) db.leaveRequests = [];
       saveData();
     } else {
       saveData();

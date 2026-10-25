@@ -83,6 +83,18 @@ const StudentSchema = new mongoose.Schema(
           : `${yr - 1}-${String(yr).slice(-2)}`;
       },
     },
+    // ── Current ClassRoom reference (added for ClassRoom module) ──
+    currentClassRoomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ClassRoom',
+      default: null,
+    },
+    sessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AcademicSession',
+      default: null,
+      index: true,
+    },
     dob: {
       type: Date,
     },
@@ -160,8 +172,12 @@ const StudentSchema = new mongoose.Schema(
       {
         fromClass: String,
         toClass: String,
-        action: String, // 'promote', 'demote', 'passout'
+        fromSection: String,
+        toSection: String,
+        action: String, // 'promote', 'demote', 'passout', 'transfer'
         sessionName: String,
+        sessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicSession' }, // ← added
+        classRoomId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClassRoom' },     // ← added
         promotedAt: { type: Date, default: Date.now },
         promotedBy: String,
       },

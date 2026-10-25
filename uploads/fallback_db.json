@@ -19,5 +19,6 @@
   "passwordRequests": [],
   "academicSessions": [],
   "masterPeriods": [],
-  "classTimetables": []
+  "classTimetables": [],
+  "leaveRequests": []
 }

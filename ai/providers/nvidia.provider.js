@@ -1,7 +1,14 @@
 import { AIProvider } from "./base.provider.js";
 
-const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b";
+const DEFAULT_MODEL = "meta/llama-3.3-70b-instruct";
 const DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1";
+
+const RELIABLE_NVIDIA_MODELS = [
+  "meta/llama-3.3-70b-instruct",
+  "meta/llama-3.1-70b-instruct",
+  "nvidia/llama-3.1-nemotron-70b-instruct",
+  "meta/llama-3.1-8b-instruct",
+];
 
 export class NvidiaProvider extends AIProvider {
   constructor() {
@@ -69,24 +76,55 @@ export class NvidiaProvider extends AIProvider {
     try {
       completionData = await this._callApi(requestParams);
     } catch (err) {
-      // If the selected model does not support tools/function calling, retry without tools
       const errLower = (err.message || "").toLowerCase();
+
+      // If the model name is invalid or decommissioned (404), try reliable fallback models
       if (
-        requestParams.tools &&
-        (errLower.includes("tool") ||
+        err.status === 404 ||
+        errLower.includes("404") ||
+        errLower.includes("not found")
+      ) {
+        console.warn(
+          `[NVIDIA Provider] Model "${requestParams.model}" returned 404 Not Found. Trying available models...`
+        );
+        const candidates = RELIABLE_NVIDIA_MODELS.filter(
+          (m) => m !== requestParams.model
+        );
+        for (const candidate of candidates) {
+          try {
+            console.warn(
+              `[NVIDIA Provider] Retrying with model "${candidate}"...`
+            );
+            requestParams.model = candidate;
+            completionData = await this._callApi(requestParams);
+            this.model = candidate;
+            break;
+          } catch (retryErr) {
+            // continue trying next candidate
+          }
+        }
+      }
+
+      // If the selected model does not support tools/function calling, retry without tools
+      if (!completionData && requestParams.tools) {
+        if (
+          errLower.includes("tool") ||
           errLower.includes("function") ||
           errLower.includes("not supported") ||
           errLower.includes("unknown parameter") ||
-          errLower.includes("400"))
-      ) {
-        console.warn(
-          `[NVIDIA Provider] Model "${model}" failed with tools parameter. Retrying without tools...`
-        );
-        delete requestParams.tools;
-        delete requestParams.tool_choice;
-        requestParams.messages = sanitizeMessagesWithoutTools(messages);
-        completionData = await this._callApi(requestParams);
-      } else {
+          errLower.includes("400")
+        ) {
+          console.warn(
+            `[NVIDIA Provider] Model "${model}" failed with tools parameter. Retrying without tools...`
+          );
+          delete requestParams.tools;
+          delete requestParams.tool_choice;
+          requestParams.messages = sanitizeMessagesWithoutTools(messages);
+          completionData = await this._callApi(requestParams);
+        }
+      }
+
+      if (!completionData) {
         throw err;
       }
     }

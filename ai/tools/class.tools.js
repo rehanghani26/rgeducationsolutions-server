@@ -3,7 +3,7 @@
  * @description AI Tool definitions and executors for Classes, Sections, and Subjects.
  */
 
-import Class from '../../models/Class.js';
+import ClassRoom from '../../models/ClassRoom.js';
 import Section from '../../models/Section.js';
 import Subject from '../../models/Subject.js';
 import Student from '../../models/Student.js';
@@ -54,7 +54,7 @@ export const classToolExecutors = {
     if (checkFallback()) {
       list = FallbackDb.find('classes') || [];
     } else {
-      list = await Class.find().sort({ name: 1 });
+      list = await ClassRoom.find().sort({ className: 1, sectionName: 1 });
     }
 
     return {
@@ -62,8 +62,8 @@ export const classToolExecutors = {
       count: list.length,
       classes: list.map((c) => ({
         id: c._id || c.id,
-        name: c.name,
-        code: c.code || '-',
+        name: c.displayName || `${c.className} - ${c.sectionName}`,
+        code: c.classCode || c.code || '-',
         capacity: c.capacity || '-',
       })),
     };

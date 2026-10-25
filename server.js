@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { connectDB, getDbState } from "./config/db.js";
+import { connectDB, getDbState, reconnectDB } from "./config/db.js";
 
 // Routers
 import authRoutes from "./routes/authRoutes.js";
@@ -34,6 +34,8 @@ import resultRoutes from "./routes/resultRoutes.js";
 import syllabusRoutes from "./routes/syllabusRoutes.js";
 import documentRoutes from "./routes/documentRoutes.js";
 import setupRoutes from "./routes/setupRoutes.js";
+import classRoutes from "./routes/classRoutes.js"; // ← ClassRoom module
+import leaveRoutes from "./routes/leaveRoutes.js"; // ← Universal Leave Management module
 import { auditMiddleware } from "./middleware/auditLog.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -116,6 +118,14 @@ app.use("/api/v1/results", resultRoutes);
 app.use("/api/v1/syllabus", syllabusRoutes);
 app.use("/api/v1/documents", documentRoutes);
 app.use("/api/v1/setup", setupRoutes);
+app.use("/api/v1/classes", classRoutes); // ← ClassRoom module
+app.use(["/api/v1/leaves", "/api/leaves"], leaveRoutes); // ← Universal Leave Management module
+
+// Forward notices endpoints to ERP notice board routes
+app.use(["/api/v1/notices", "/api/notices"], (req, res, next) => {
+  req.url = `/notices${req.url === "/" ? "" : req.url}`;
+  return erpRoutes(req, res, next);
+});
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
@@ -127,6 +137,18 @@ app.get("/api/health", (req, res) => {
       ? "MongoDB Connected"
       : "Fallback Engine (Active JSON File)",
     dbDetail: dbStatus,
+  });
+});
+
+// Database reconnect endpoint
+app.all("/api/reconnect-db", async (req, res) => {
+  const dbStatus = await reconnectDB();
+  return res.json({
+    success: dbStatus.isConnected,
+    message: dbStatus.isConnected
+      ? "MongoDB connected successfully"
+      : `Connection failed: ${dbStatus.lastError || "Unknown error"}`,
+    dbStatus,
   });
 });
 

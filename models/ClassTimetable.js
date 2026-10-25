@@ -34,6 +34,26 @@ const ClassTimetableSchema = new mongoose.Schema(
     },
     masterPeriodId: { type: String, default: '' },
     allocations: [SlotAllocationSchema],
+
+    // ── Session scoping (added for ClassRoom-based timetable management) ──────
+    sessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AcademicSession',
+      default: null,
+      index: true,
+    },
+    sessionName: {
+      type: String,
+      default: '',
+      trim: true,
+    }, // e.g. "2025-26" — denormalized
+    classRoomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ClassRoom',
+      default: null,
+      index: true,
+    },
+
     createdBy: { type: String, default: 'admin' },
   },
   { timestamps: true }

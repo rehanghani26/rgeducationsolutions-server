@@ -10,13 +10,15 @@ import {
   deleteTeacher,
   bulkDeleteTeachers,
   exportTeachers,
+  getTeacherCredentials,
+  bulkImportTeachers,
+} from '../controllers/teacherController.js';
+import {
   getAllLeaves,
   requestLeave,
   reviewLeave,
   getMyLeaves,
-  getTeacherCredentials,
-  bulkImportTeachers,
-} from '../controllers/teacherController.js';
+} from '../controllers/leaveController.js';
 import { protect } from '../middleware/auth.js';
 import { authorize } from '../middleware/rbac.js';
 

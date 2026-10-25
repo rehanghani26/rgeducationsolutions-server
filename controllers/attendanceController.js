@@ -167,6 +167,9 @@ export const createAttendance = async (req, res) => {
     const lateCount = formattedStudents.filter(
       (s) => s.status === "late"
     ).length;
+    const leaveCount = formattedStudents.filter(
+      (s) => s.status === "leave" || s.status === "on leave" || s.status === "on_leave"
+    ).length;
     const totalCount = formattedStudents.length;
 
     const takenByObj =
@@ -197,6 +200,7 @@ export const createAttendance = async (req, res) => {
       present: presentCount,
       absent: absentCount,
       late: lateCount,
+      leave: leaveCount,
       students: formattedStudents,
       records: formattedStudents.map((s) => ({
         ...s,
@@ -471,7 +475,9 @@ export const getStudentAttendance = async (req, res) => {
                   ? "Late"
                   : rawStatus === "half day" || rawStatus === "halfday"
                     ? "Half Day"
-                    : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+                    : rawStatus === "leave" || rawStatus === "on leave" || rawStatus === "on_leave"
+                      ? "Leave"
+                      : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
 
           const attDateStr = d.toISOString().split("T")[0];
           const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
@@ -545,7 +551,9 @@ export const getStudentAttendance = async (req, res) => {
                   ? "Late"
                   : rawStatus === "half day" || rawStatus === "halfday"
                     ? "Half Day"
-                    : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+                    : rawStatus === "leave" || rawStatus === "on leave" || rawStatus === "on_leave"
+                      ? "Leave"
+                      : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
 
           const d = new Date(att.attendanceDate || att.date);
           const attDateStr = d.toISOString().split("T")[0];
@@ -587,11 +595,16 @@ export const getStudentAttendance = async (req, res) => {
     const halfDayCount = logs.filter(
       (l) => l.status.toLowerCase() === "half day"
     ).length;
+    const leaveCount = logs.filter(
+      (l) => l.status.toLowerCase() === "leave"
+    ).length;
 
     const totalDays = logs.length;
+    // Authorized leave days do not penalize compliance
+    const denominator = Math.max(1, totalDays - leaveCount);
     const effectivePresent = presentCount + halfDayCount * 0.5;
     const percentage = totalDays
-      ? `${Math.round((effectivePresent / totalDays) * 100)}%`
+      ? `${Math.min(100, Math.round((effectivePresent / denominator) * 100))}%`
       : "0%";
 
     return res.json({
@@ -611,6 +624,7 @@ export const getStudentAttendance = async (req, res) => {
         absentCount,
         lateCount,
         halfDayCount,
+        leaveCount,
         percentage,
       },
       logs,

@@ -94,6 +94,17 @@ const TeacherSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // ── Current classroom assignment (added for ClassRoom module) ──
+    currentClassRoomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ClassRoom',
+      default: null,
+    },
+    currentClassRoomName: {
+      type: String,
+      default: '',
+      trim: true,
+    }, // e.g. "Class 10 – A (2025-26)" — denormalized
     salary: {
       type: Number,
       default: 0,

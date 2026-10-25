@@ -1,4 +1,4 @@
-import Class from '../models/Class.js';
+import ClassRoom from '../models/ClassRoom.js';
 import { uploadToS3, generateS3Key, getPresignedUrl, resolveFileUrl, isS3Key } from '../config/s3.js';
 import Section from '../models/Section.js';
 import Subject from '../models/Subject.js';
@@ -46,7 +46,7 @@ export const getClasses = async (req, res) => {
     if (checkFallback()) {
       list = FallbackDb.find('classes');
     } else {
-      list = await Class.find();
+      list = await ClassRoom.find().sort({ className: 1, sectionName: 1 });
     }
     return res.json({ success: true, classes: list });
   } catch (err) {

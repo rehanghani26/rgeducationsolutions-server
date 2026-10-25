@@ -5,7 +5,7 @@
 
 import Student from '../../models/Student.js';
 import Teacher from '../../models/Teacher.js';
-import Class from '../../models/Class.js';
+import ClassRoom from '../../models/ClassRoom.js';
 import Fee from '../../models/Fee.js';
 import Attendance from '../../models/Attendance.js';
 import Exam from '../../models/Exam.js';
@@ -64,7 +64,7 @@ export const dashboardToolExecutors = {
       Student.countDocuments({ status: 'active' }),
       Teacher.countDocuments({}),
       Teacher.countDocuments({ status: 'active' }),
-      Class.countDocuments({}),
+      ClassRoom.countDocuments({ status: 'active' }),
       Fee.aggregate([
         {
           $group: {

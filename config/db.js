@@ -1,18 +1,86 @@
 import mongoose from "mongoose";
+import dns from "node:dns";
+
+// Fix for Node.js / Windows DNS SRV lookup failures with MongoDB Atlas clusters
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch (e) {
+  // Ignore if custom DNS servers cannot be set
+}
 
 let isConnected = false;
 let fallbackActive = false;
+let lastDbError = null;
+let lastAttemptTime = null;
+let isConnecting = false;
+let reconnectTimer = null;
+
+// Attach persistent event listeners to Mongoose connection
+mongoose.connection.on("connected", () => {
+  isConnected = true;
+  fallbackActive = false;
+  lastDbError = null;
+  console.log("✨ MongoDB connection established successfully.");
+});
+
+mongoose.connection.on("error", (err) => {
+  lastDbError = err.message;
+  console.error("❌ MongoDB connection error:", err.message);
+});
+
+mongoose.connection.on("disconnected", () => {
+  if (isConnected) {
+    console.warn("⚠️ MongoDB disconnected. Activating fallback engine.");
+  }
+  isConnected = false;
+  fallbackActive = true;
+  scheduleReconnect();
+});
+
+const scheduleReconnect = () => {
+  if (reconnectTimer || isConnected || isConnecting) return;
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (!isConnected) {
+      console.log("🔄 Background retry: Connecting to MongoDB...");
+      await connectDB();
+    }
+  }, 10000); // Retry every 10 seconds in the background
+};
 
 export const connectDB = async () => {
-  const mongoURI = process.env.MONGODB_URI;
+  if (isConnecting || isConnected) return;
+
+  const mongoURI = (process.env.MONGODB_URI || "").trim().replace(/^["']|["']$/g, "");
+  lastAttemptTime = new Date().toISOString();
+
+  if (!mongoURI) {
+    isConnected = false;
+    fallbackActive = true;
+    lastDbError = "MONGODB_URI is empty or undefined in server/.env";
+    console.warn(`⚠️ ${lastDbError}. Using local fallback engine.`);
+    return;
+  }
+
+  isConnecting = true;
 
   try {
     mongoose.set("strictQuery", true);
+
+    // Timeout of 10 seconds allows Atlas SRV query + TLS handshake without failing prematurely
     await mongoose.connect(mongoURI, {
-      serverSelectionTimeoutMS: 3000, // Timeout fast so we can trigger the fallback database
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
     });
+
     isConnected = true;
     fallbackActive = false;
+    lastDbError = null;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
     console.log("✨ MongoDB Connected successfully.");
 
     // Fix legacy non-sparse indexes on User collection to prevent duplicate null key errors
@@ -63,7 +131,6 @@ export const connectDB = async () => {
     }
 
     // Fix legacy unique index on attendances collection (date_1_classId_1)
-    // This allows taking past date attendance and updating existing attendance records without E11000 errors
     try {
       const attendancesCollection =
         mongoose.connection.collection("attendances");
@@ -88,10 +155,24 @@ export const connectDB = async () => {
   } catch (error) {
     isConnected = false;
     fallbackActive = true;
+    lastDbError = error.message;
+
     console.warn(
       "⚠️ MongoDB connection failed. Falling back to local in-memory JSON data storage."
     );
     console.warn(`Error detail: ${error.message}`);
+
+    if (error.message.includes("Server selection timed out") || error.name === "MongooseServerSelectionError") {
+      console.warn("💡 Tip: Check MongoDB Atlas Network Access (IP Access List). Ensure '0.0.0.0/0' (Allow Access From Anywhere) is added.");
+    } else if (error.message.includes("bad auth") || error.message.includes("Authentication failed")) {
+      console.warn("💡 Tip: MongoDB Atlas authentication failed. Check your username and password in MONGODB_URI.");
+    } else if (error.message.includes("querySrv")) {
+      console.warn("💡 Tip: DNS SRV resolution issue. Check your internet connection or DNS provider.");
+    }
+
+    scheduleReconnect();
+  } finally {
+    isConnecting = false;
   }
 };
 
@@ -99,9 +180,18 @@ export const getDbState = () => {
   return {
     isConnected,
     isFallback: fallbackActive,
+    lastError: lastDbError,
+    lastAttempt: lastAttemptTime,
   };
 };
 
 export const checkFallback = () => {
   return fallbackActive || !isConnected;
+};
+
+export const reconnectDB = async () => {
+  isConnected = false;
+  fallbackActive = true;
+  await connectDB();
+  return getDbState();
 };
