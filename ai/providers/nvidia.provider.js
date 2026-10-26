@@ -1,9 +1,23 @@
 import { AIProvider } from "./base.provider.js";
 
-const DEFAULT_MODEL = "meta/llama-3.3-70b-instruct";
+const DEFAULT_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
 const DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1";
 
+// Models that support tool/function calling
+const TOOL_CAPABLE_MODELS = [
+  "meta/llama-3.3-70b-instruct",
+  "meta/llama-3.1-70b-instruct",
+  "nvidia/llama-3.1-nemotron-70b-instruct",
+  "meta/llama-3.1-8b-instruct",
+];
+
+// Reasoning models — require special parameters, no tool-calling
+const REASONING_MODELS = [
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+];
+
 const RELIABLE_NVIDIA_MODELS = [
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
   "meta/llama-3.3-70b-instruct",
   "meta/llama-3.1-70b-instruct",
   "nvidia/llama-3.1-nemotron-70b-instruct",
@@ -47,9 +61,14 @@ export class NvidiaProvider extends AIProvider {
    */
   async generateWithTools(messages, tools = [], options = {}) {
     const model = options.model || this.model;
+    const isReasoningModel = REASONING_MODELS.includes(model);
+
+    // Reasoning models (Nemotron) don't support function/tool calling
+    // Fallback: treat as plain text generation
+    const effectiveTools = isReasoningModel ? [] : tools;
 
     // Convert internal tool definitions to OpenAI/NVIDIA function format
-    const nvidiaTools = tools.map((tool) => ({
+    const nvidiaTools = effectiveTools.map((tool) => ({
       type: "function",
       function: {
         name: tool.name,
@@ -61,10 +80,15 @@ export class NvidiaProvider extends AIProvider {
     const requestParams = {
       model,
       messages: sanitizeMessages(messages),
-      temperature: options.temperature ?? 0.5,
-      max_tokens: options.maxTokens ?? 1024,
-      top_p: options.topP ?? 1,
+      temperature: options.temperature ?? (isReasoningModel ? 0.6 : 0.5),
+      max_tokens: options.maxTokens ?? (isReasoningModel ? 65536 : 1024),
+      top_p: options.topP ?? (isReasoningModel ? 0.95 : 1),
     };
+
+    // Add reasoning budget for reasoning-capable models
+    if (isReasoningModel) {
+      requestParams.reasoning_budget = options.reasoningBudget ?? 16384;
+    }
 
     if (nvidiaTools.length > 0) {
       requestParams.tools = nvidiaTools;
