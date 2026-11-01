@@ -1,21 +1,21 @@
 // 2. External packages
-import mongoose from "mongoose";
+import mongoose from 'mongoose';
 
 // 3. Configuration
-import { checkFallback } from "../config/db.js";
+import { checkFallback } from '../config/db.js';
 
 // 4. Models
-import Attendance from "../models/Attendance.js";
-import LeaveRequest from "../models/LeaveRequest.js";
-import Student from "../models/Student.js";
-import Teacher from "../models/Teacher.js";
-import User from "../models/User.js";
+import Attendance from '../models/Attendance.js';
+import LeaveRequest from '../models/LeaveRequest.js';
+import Student from '../models/Student.js';
+import Teacher from '../models/Teacher.js';
+import User from '../models/User.js';
 
 // 6. Services
-import { FallbackDb } from "./dbFallback.js";
+import { FallbackDb } from './dbFallback.js';
 
 // 7. Utilities
-import { isValidObjectId } from "../utils/commonUtil.js";
+import { isValidObjectId } from '../utils/commonUtil.js';
 
 /**
  * @file leaveService.js
@@ -43,7 +43,7 @@ export const calculateLeaveDays = (
   const end = new Date(endDateInput);
 
   if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-    return { valid: false, error: "Start date and End date must be valid dates." };
+    return { valid: false, error: 'Start date and End date must be valid dates.' };
   }
 
   // Normalize to local midnight
@@ -51,19 +51,19 @@ export const calculateLeaveDays = (
   end.setHours(0, 0, 0, 0);
 
   if (start > end) {
-    return { valid: false, error: "Start date cannot be after end date." };
+    return { valid: false, error: 'Start date cannot be after end date.' };
   }
 
   if (isHalfDay) {
     if (start.getTime() !== end.getTime()) {
       return {
         valid: false,
-        error: "Half-day leave must start and end on the same calendar day.",
+        error: 'Half-day leave must start and end on the same calendar day.',
       };
     }
     const dayOfWeek = start.getDay();
     if (weeklyOffDays.includes(dayOfWeek)) {
-      return { valid: false, error: "Selected date is a weekly institutional off day." };
+      return { valid: false, error: 'Selected date is a weekly institutional off day.' };
     }
     return {
       valid: true,
@@ -87,8 +87,7 @@ export const calculateLeaveDays = (
   if (workingDates.length === 0) {
     return {
       valid: false,
-      error:
-        "Selected leave range consists entirely of weekly off days or non-working days.",
+      error: 'Selected leave range consists entirely of weekly off days or non-working days.',
     };
   }
 
@@ -109,7 +108,7 @@ export const generateLeaveCode = async () => {
   let count = 0;
 
   if (checkFallback()) {
-    const list = FallbackDb.find("leaveRequests") || [];
+    const list = FallbackDb.find('leaveRequests') || [];
     count = list.length + 1;
   } else {
     try {
@@ -119,7 +118,7 @@ export const generateLeaveCode = async () => {
     }
   }
 
-  const seq = String(count).padStart(4, "0");
+  const seq = String(count).padStart(4, '0');
   return `LV-${year}-${seq}`;
 };
 
@@ -139,26 +138,26 @@ export const resolveApplicantIdentity = async (identifier, reqUser = null) => {
   if (checkFallback()) {
     // 1. Check Student
     let student =
-      FallbackDb.findById("students", idStr) ||
-      FallbackDb.findOne("students", { admissionNumber: idStr }) ||
-      FallbackDb.findOne("students", { rollNumber: idStr });
+      FallbackDb.findById('students', idStr) ||
+      FallbackDb.findOne('students', { admissionNumber: idStr }) ||
+      FallbackDb.findOne('students', { rollNumber: idStr });
 
     if (student) {
       return {
         applicantId: student.id || student._id,
-        applicantModel: "Student",
+        applicantModel: 'Student',
         applicantName:
-          student.name || `${student.firstName || ""} ${student.lastName || ""}`.trim(),
-        applicantRole: "student",
+          student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        applicantRole: 'student',
         user: student.user || null,
-        admissionNumber: student.admissionNumber || "",
-        rollNumber: student.rollNumber || "",
-        className: student.className || student.class || "",
-        sectionName: student.sectionName || student.section || "",
+        admissionNumber: student.admissionNumber || '',
+        rollNumber: student.rollNumber || '',
+        className: student.className || student.class || '',
+        sectionName: student.sectionName || student.section || '',
         classSection:
           student.className && student.sectionName
             ? `${student.className} - ${student.sectionName}`
-            : student.classSection || "",
+            : student.classSection || '',
         classRoomId: student.currentClassRoomId || null,
         sessionId: student.sessionId || null,
       };
@@ -166,22 +165,22 @@ export const resolveApplicantIdentity = async (identifier, reqUser = null) => {
 
     // 2. Check Teacher
     let teacher =
-      FallbackDb.findById("teachers", idStr) ||
-      FallbackDb.findOne("teachers", { employeeId: idStr.toUpperCase() }) ||
-      FallbackDb.findOne("teachers", { email: idStr.toLowerCase() });
+      FallbackDb.findById('teachers', idStr) ||
+      FallbackDb.findOne('teachers', { employeeId: idStr.toUpperCase() }) ||
+      FallbackDb.findOne('teachers', { email: idStr.toLowerCase() });
 
     if (teacher) {
       return {
         applicantId: teacher.id || teacher._id,
-        applicantModel: "Teacher",
+        applicantModel: 'Teacher',
         applicantName:
-          teacher.name || `${teacher.firstName || ""} ${teacher.lastName || ""}`.trim(),
-        applicantRole: teacher.role || "teacher",
+          teacher.name || `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim(),
+        applicantRole: teacher.role || 'teacher',
         user: teacher.user || null,
-        employeeId: teacher.employeeId || "",
-        className: "",
-        sectionName: "",
-        classSection: teacher.currentClassRoomName || "",
+        employeeId: teacher.employeeId || '',
+        className: '',
+        sectionName: '',
+        classSection: teacher.currentClassRoomName || '',
         classRoomId: teacher.currentClassRoomId || null,
         sessionId: null,
       };
@@ -189,9 +188,9 @@ export const resolveApplicantIdentity = async (identifier, reqUser = null) => {
 
     // 3. Check User
     let user =
-      FallbackDb.findById("users", idStr) ||
-      FallbackDb.findOne("users", { username: idStr.toLowerCase() }) ||
-      FallbackDb.findOne("users", { email: idStr.toLowerCase() });
+      FallbackDb.findById('users', idStr) ||
+      FallbackDb.findOne('users', { username: idStr.toLowerCase() }) ||
+      FallbackDb.findOne('users', { email: idStr.toLowerCase() });
 
     if (user) {
       if (user.profileId) {
@@ -201,16 +200,16 @@ export const resolveApplicantIdentity = async (identifier, reqUser = null) => {
       }
       return {
         applicantId: user.id || user._id,
-        applicantModel: "User",
+        applicantModel: 'User',
         applicantName: user.name || user.username,
-        applicantRole: user.role || "staff",
+        applicantRole: user.role || 'staff',
         user: user.id || user._id,
-        employeeId: user.employeeId || "",
-        admissionNumber: user.admissionNumber || "",
-        rollNumber: "",
-        className: "",
-        sectionName: "",
-        classSection: "",
+        employeeId: user.employeeId || '',
+        admissionNumber: user.admissionNumber || '',
+        rollNumber: '',
+        className: '',
+        sectionName: '',
+        classSection: '',
         classRoomId: null,
         sessionId: null,
       };
@@ -232,19 +231,18 @@ export const resolveApplicantIdentity = async (identifier, reqUser = null) => {
   if (student) {
     return {
       applicantId: student._id,
-      applicantModel: "Student",
-      applicantName:
-        student.name || `${student.firstName || ""} ${student.lastName || ""}`.trim(),
-      applicantRole: "student",
+      applicantModel: 'Student',
+      applicantName: student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+      applicantRole: 'student',
       user: student.user || null,
-      admissionNumber: student.admissionNumber || "",
-      rollNumber: student.rollNumber || "",
-      className: student.className || student.class || "",
-      sectionName: student.sectionName || student.section || "",
+      admissionNumber: student.admissionNumber || '',
+      rollNumber: student.rollNumber || '',
+      className: student.className || student.class || '',
+      sectionName: student.sectionName || student.section || '',
       classSection:
         student.className && student.sectionName
           ? `${student.className} - ${student.sectionName}`
-          : student.classSection || "",
+          : student.classSection || '',
       classRoomId: student.currentClassRoomId || null,
       sessionId: student.sessionId || null,
     };
@@ -262,15 +260,14 @@ export const resolveApplicantIdentity = async (identifier, reqUser = null) => {
   if (teacher) {
     return {
       applicantId: teacher._id,
-      applicantModel: "Teacher",
-      applicantName:
-        teacher.name || `${teacher.firstName || ""} ${teacher.lastName || ""}`.trim(),
-      applicantRole: teacher.role || "teacher",
+      applicantModel: 'Teacher',
+      applicantName: teacher.name || `${teacher.firstName || ''} ${teacher.lastName || ''}`.trim(),
+      applicantRole: teacher.role || 'teacher',
       user: teacher.user || null,
-      employeeId: teacher.employeeId || "",
-      className: "",
-      sectionName: "",
-      classSection: teacher.currentClassRoomName || "",
+      employeeId: teacher.employeeId || '',
+      className: '',
+      sectionName: '',
+      classSection: teacher.currentClassRoomName || '',
       classRoomId: teacher.currentClassRoomId || null,
       sessionId: null,
     };
@@ -292,16 +289,16 @@ export const resolveApplicantIdentity = async (identifier, reqUser = null) => {
     }
     return {
       applicantId: user._id,
-      applicantModel: "User",
+      applicantModel: 'User',
       applicantName: user.name || user.username,
-      applicantRole: user.role || "staff",
+      applicantRole: user.role || 'staff',
       user: user._id,
-      employeeId: user.employeeId || "",
-      admissionNumber: user.admissionNumber || "",
-      rollNumber: "",
-      className: "",
-      sectionName: "",
-      classSection: "",
+      employeeId: user.employeeId || '',
+      admissionNumber: user.admissionNumber || '',
+      rollNumber: '',
+      className: '',
+      sectionName: '',
+      classSection: '',
       classRoomId: null,
       sessionId: null,
     };
@@ -331,16 +328,13 @@ export const checkOverlappingLeave = async (
   end.setHours(23, 59, 59, 999);
 
   if (checkFallback()) {
-    const list = FallbackDb.find("leaveRequests") || [];
+    const list = FallbackDb.find('leaveRequests') || [];
     const conflict = list.find((l) => {
-      if (
-        excludeLeaveId &&
-        (l.id === excludeLeaveId || l._id === excludeLeaveId)
-      ) {
+      if (excludeLeaveId && (l.id === excludeLeaveId || l._id === excludeLeaveId)) {
         return false;
       }
       if (String(l.applicantId) !== String(applicantId)) return false;
-      if (l.status !== "approved" && l.status !== "pending") return false;
+      if (l.status !== 'approved' && l.status !== 'pending') return false;
 
       const lStart = new Date(l.startDate);
       lStart.setHours(0, 0, 0, 0);
@@ -354,7 +348,7 @@ export const checkOverlappingLeave = async (
 
   const query = {
     applicantId,
-    status: { $in: ["approved", "pending"] },
+    status: { $in: ['approved', 'pending'] },
     startDate: { $lte: end },
     endDate: { $gte: start },
   };
@@ -375,7 +369,7 @@ export const checkOverlappingLeave = async (
  * @returns {Promise<{ success: boolean, syncedDates?: Array<Date>, syncedAttendanceIds?: Array<any> }>}
  */
 export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
-  if (!leaveRequest || leaveRequest.status !== "approved") {
+  if (!leaveRequest || leaveRequest.status !== 'approved') {
     return { success: false };
   }
 
@@ -395,11 +389,11 @@ export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
     current.setDate(current.getDate() + 1);
   }
 
-  const statusToMark = leaveRequest.isHalfDay ? "half day" : "leave";
+  const statusToMark = leaveRequest.isHalfDay ? 'half day' : 'leave';
   const remarksToMark = `Approved Leave: ${leaveRequest.category} (${leaveRequest.leaveCode})`;
 
   if (checkFallback()) {
-    const attendanceRecords = FallbackDb.find("attendance") || [];
+    const attendanceRecords = FallbackDb.find('attendance') || [];
 
     for (const d of syncedDates) {
       const dStart = new Date(d);
@@ -410,13 +404,13 @@ export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
       const matchingRecords = attendanceRecords.filter((att) => {
         const attDate = new Date(att.date || att.attendanceDate);
         if (attDate < dStart || attDate > dEnd) return false;
-        if (leaveRequest.applicantModel === "Student") {
+        if (leaveRequest.applicantModel === 'Student') {
           return (
-            att.type === "student" &&
+            att.type === 'student' &&
             (!leaveRequest.className || att.className === leaveRequest.className)
           );
         } else {
-          return att.type === "teacher";
+          return att.type === 'teacher';
         }
       });
 
@@ -429,8 +423,7 @@ export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
             String(st.studentId) === String(leaveRequest.applicantId) ||
             String(st.id) === String(leaveRequest.applicantId) ||
             String(st._id) === String(leaveRequest.applicantId) ||
-            (leaveRequest.rollNumber &&
-              String(st.rollNo) === String(leaveRequest.rollNumber))
+            (leaveRequest.rollNumber && String(st.rollNo) === String(leaveRequest.rollNumber))
           ) {
             st.status = statusToMark;
             st.remarks = remarksToMark;
@@ -439,11 +432,11 @@ export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
         });
 
         if (changed) {
-          const present = studentsList.filter((s) => s.status === "present").length;
-          const absent = studentsList.filter((s) => s.status === "absent").length;
-          const late = studentsList.filter((s) => s.status === "late").length;
+          const present = studentsList.filter((s) => s.status === 'present').length;
+          const absent = studentsList.filter((s) => s.status === 'absent').length;
+          const late = studentsList.filter((s) => s.status === 'late').length;
 
-          FallbackDb.update("attendance", att.id || att._id, {
+          FallbackDb.update('attendance', att.id || att._id, {
             students: studentsList,
             records: studentsList,
             attendance: studentsList,
@@ -476,10 +469,10 @@ export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
         { date: { $gte: dStart, $lte: dEnd } },
         { attendanceDate: { $gte: dStart, $lte: dEnd } },
       ],
-      type: leaveRequest.applicantModel === "Student" ? "student" : "teacher",
+      type: leaveRequest.applicantModel === 'Student' ? 'student' : 'teacher',
     };
 
-    if (leaveRequest.applicantModel === "Student") {
+    if (leaveRequest.applicantModel === 'Student') {
       if (leaveRequest.className) matchQuery.className = leaveRequest.className;
     }
 
@@ -494,8 +487,7 @@ export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
           String(st.studentId) === String(leaveRequest.applicantId) ||
           String(st.id) === String(leaveRequest.applicantId) ||
           String(st._id) === String(leaveRequest.applicantId) ||
-          (leaveRequest.rollNumber &&
-            String(st.rollNo) === String(leaveRequest.rollNumber))
+          (leaveRequest.rollNumber && String(st.rollNo) === String(leaveRequest.rollNumber))
         ) {
           st.status = statusToMark;
           st.remarks = remarksToMark;
@@ -507,9 +499,9 @@ export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
         att.students = list;
         att.records = list;
         att.attendance = list;
-        att.present = list.filter((s) => s.status === "present").length;
-        att.absent = list.filter((s) => s.status === "absent").length;
-        att.late = list.filter((s) => s.status === "late").length;
+        att.present = list.filter((s) => s.status === 'present').length;
+        att.absent = list.filter((s) => s.status === 'absent').length;
+        att.late = list.filter((s) => s.status === 'late').length;
         await att.save();
         syncedAttendanceIds.push(att._id);
       }
@@ -530,10 +522,7 @@ export const syncLeaveWithAttendance = async (leaveRequest, reviewerUser) => {
  * @returns {Promise<void>}
  */
 export const reverseAttendanceSync = async (leaveRequest) => {
-  if (
-    !leaveRequest ||
-    !leaveRequest.attendanceSync?.syncedAttendanceIds?.length
-  ) {
+  if (!leaveRequest || !leaveRequest.attendanceSync?.syncedAttendanceIds?.length) {
     return;
   }
 
@@ -541,16 +530,16 @@ export const reverseAttendanceSync = async (leaveRequest) => {
 
   if (checkFallback()) {
     ids.forEach((id) => {
-      const att = FallbackDb.findById("attendance", id);
+      const att = FallbackDb.findById('attendance', id);
       if (att) {
         const list = att.students || att.records || [];
         list.forEach((st) => {
           if (String(st.studentId) === String(leaveRequest.applicantId)) {
-            st.status = "absent";
-            st.remarks = "Leave cancelled/reverted";
+            st.status = 'absent';
+            st.remarks = 'Leave cancelled/reverted';
           }
         });
-        FallbackDb.update("attendance", id, { students: list, records: list });
+        FallbackDb.update('attendance', id, { students: list, records: list });
       }
     });
     return;
@@ -562,8 +551,8 @@ export const reverseAttendanceSync = async (leaveRequest) => {
       const list = att.students || att.records || [];
       list.forEach((st) => {
         if (String(st.studentId) === String(leaveRequest.applicantId)) {
-          st.status = "absent";
-          st.remarks = "Leave cancelled/reverted";
+          st.status = 'absent';
+          st.remarks = 'Leave cancelled/reverted';
         }
       });
       att.students = list;

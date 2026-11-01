@@ -82,3 +82,19 @@ router.post(
 );
 
 export default router;
+  "/salary-structure",
+  authorize(...MANAGEMENT_ROLES),
+  assignSalaryStructure
+);
+
+// Disburse Single Salary
+router.post("/disburse", authorize(...MANAGEMENT_ROLES), disburseSalary);
+
+// Batch Disburse Salaries
+router.post(
+  "/disburse-batch",
+  authorize(...MANAGEMENT_ROLES),
+  disburseBatch
+);
+
+export default router;

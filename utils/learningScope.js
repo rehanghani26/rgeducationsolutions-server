@@ -339,3 +339,24 @@ export const buildScopedMongoFilter = async (
 
   return { _id: null };
 };
+    return { $or: or.filter(Boolean) };
+  }
+
+  if (isStudentRole(role)) {
+    const scoped = classSectionMongoFilterForStudent(
+      await getStudentProfileForUser(req)
+    );
+    if (!hideDraftForLearners) return scoped;
+    return { $and: [scoped, { status: { $ne: "draft" } }] };
+  }
+
+  if (isParentRole(role)) {
+    const children = await getParentChildrenForUser(req);
+    if (!children.length) return { _id: null };
+    const scoped = { $or: children.map(classSectionMongoFilterForStudent) };
+    if (!hideDraftForLearners) return scoped;
+    return { $and: [scoped, { status: { $ne: "draft" } }] };
+  }
+
+  return { _id: null };
+};
