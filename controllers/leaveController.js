@@ -1,6 +1,13 @@
+// 2. External packages
 import mongoose from 'mongoose';
-import LeaveRequest from '../models/LeaveRequest.js';
+
+// 3. Configuration
 import { checkFallback } from '../config/db.js';
+
+// 4. Models
+import LeaveRequest from '../models/LeaveRequest.js';
+
+// 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
 import {
   calculateLeaveDays,
@@ -10,19 +17,32 @@ import {
   syncLeaveWithAttendance,
   reverseAttendanceSync,
 } from '../services/leaveService.js';
+
+// 7. Utilities
 import { logActivity } from '../utils/activityLogger.js';
 import { parsePagination, paginateResult } from '../utils/paginateQuery.js';
+import { isValidObjectId } from '../utils/commonUtil.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendForbidden,
+  sendError
+} from '../utils/responseUtil.js';
 
 /**
- * GET /api/v1/leaves/applicant/:id
- * Universal Dynamic Endpoint: Returns full leave history, pending requests,
- * approval timeline, and stats for any student, teacher, or user ID.
+ * Universal dynamic endpoint returning full leave history, pending requests, approval timeline, and stats.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getApplicantLeaveProfile = async (req, res) => {
   try {
     const { id } = req.params;
     if (!id) {
-      return res.status(400).json({ success: false, message: 'Applicant identifier is required.' });
+      return sendBadRequest(res, 'Applicant identifier is required.');
     }
 
     // Resolve applicant profile
@@ -37,8 +57,7 @@ export const getApplicantLeaveProfile = async (req, res) => {
       };
     }
 
-    // Role-based Access Control Check:
-    // Students can only view their own profile; Teachers can view their own and their classroom students; Admins can view any.
+    // Role-based Access Control Check
     const userRole = String(req.user?.role || '').toLowerCase();
     const isLeadership = ['super-admin', 'school-admin', 'principal', 'director'].includes(userRole);
     const isFaculty = ['teacher', 'head-teacher', 'hod', 'coordinator'].includes(userRole);
@@ -49,10 +68,7 @@ export const getApplicantLeaveProfile = async (req, res) => {
         String(applicant.applicantId) === String(req.user?.profileId || req.user?.id);
 
       if (!isSelf && !isFaculty) {
-        return res.status(403).json({
-          success: false,
-          message: 'You are not authorized to view this applicant’s leave records.',
-        });
+        return sendForbidden(res, 'You are not authorized to view this applicant’s leave records.');
       }
     }
 
@@ -70,7 +86,7 @@ export const getApplicantLeaveProfile = async (req, res) => {
       );
     } else {
       const orConditions = [{ applicantId: applicant.applicantId }];
-      if (mongoose.Types.ObjectId.isValid(id)) {
+      if (isValidObjectId(id)) {
         orConditions.push({ applicantId: id });
       }
       if (applicant.admissionNumber) orConditions.push({ admissionNumber: applicant.admissionNumber });
@@ -112,7 +128,6 @@ export const getApplicantLeaveProfile = async (req, res) => {
         approvedCount += 1;
         history.push(rec);
 
-        // Check if currently on leave today
         const s = new Date(rec.startDate);
         s.setHours(0, 0, 0, 0);
         const e = new Date(rec.endDate);
@@ -130,7 +145,6 @@ export const getApplicantLeaveProfile = async (req, res) => {
     });
 
     const resultPayload = {
-      success: true,
       applicant,
       summary: {
         totalApplications: records.length,
@@ -152,16 +166,18 @@ export const getApplicantLeaveProfile = async (req, res) => {
     };
     resultPayload.data = { ...resultPayload };
 
-    return res.json(resultPayload);
+    return sendSuccess(res, undefined, resultPayload);
   } catch (error) {
-    console.error('getApplicantLeaveProfile error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
 /**
- * GET /api/v1/leaves/my
- * Returns leave requests for current logged in user
+ * Retrieves leave requests for the currently logged in user.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getMyLeaves = async (req, res) => {
   try {
@@ -182,16 +198,18 @@ export const getMyLeaves = async (req, res) => {
       records = await LeaveRequest.find({ $or: orConditions }).sort({ startDate: -1, createdAt: -1 });
     }
 
-    return res.json({ success: true, leaves: records });
+    return sendSuccess(res, undefined, { leaves: records });
   } catch (error) {
-    console.error('getMyLeaves error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
 /**
- * GET /api/v1/leaves/all
- * Central directory for administrators and faculty to view leave applications
+ * Central directory for administrators and faculty to view and filter leave applications.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getAllLeaves = async (req, res) => {
   try {
@@ -240,8 +258,7 @@ export const getAllLeaves = async (req, res) => {
       const total = list.length;
       const data = list.slice(skip, skip + limit);
 
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, {
         leaves: data,
         ...paginateResult(data, total, { page, limit }),
       });
@@ -250,7 +267,7 @@ export const getAllLeaves = async (req, res) => {
     const filter = {};
     if (role && role !== 'all') filter.applicantRole = role;
     if (status && status !== 'all') filter.status = status;
-    if (classRoomId && mongoose.Types.ObjectId.isValid(classRoomId)) filter.classRoomId = classRoomId;
+    if (classRoomId && isValidObjectId(classRoomId)) filter.classRoomId = classRoomId;
     if (className) filter.className = className;
 
     if (date) {
@@ -278,20 +295,21 @@ export const getAllLeaves = async (req, res) => {
       LeaveRequest.countDocuments(filter),
     ]);
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       leaves,
       ...paginateResult(leaves, total, { page, limit }),
     });
   } catch (error) {
-    console.error('getAllLeaves error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
 /**
- * POST /api/v1/leaves/request
- * Submits a new leave request (self or on-behalf)
+ * Submits a new leave request (self or on-behalf).
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const requestLeave = async (req, res) => {
   try {
@@ -307,35 +325,27 @@ export const requestLeave = async (req, res) => {
     } = req.body;
 
     if (!startDate || !endDate || !reason) {
-      return res.status(400).json({
-        success: false,
-        message: 'Start date, end date, and reason are required.',
-      });
+      return sendBadRequest(res, 'Start date, end date, and reason are required.');
     }
 
-    // Target applicant resolution:
-    // If applicantId provided in body (e.g. Admin or ClassTeacher applying on behalf of student/teacher)
-    // otherwise default to authenticated user
     const targetIdentifier = applicantId || req.user?.profileId || req.user?._id || req.user?.id;
     const applicant = await resolveApplicantIdentity(targetIdentifier, req.user);
 
     if (!applicant) {
-      return res.status(404).json({ success: false, message: 'Target applicant identity could not be resolved.' });
+      return sendNotFound(res, 'Target applicant identity could not be resolved.');
     }
 
-    // Calculate dates & check institutional working days
     const calc = calculateLeaveDays(startDate, endDate, Boolean(isHalfDay));
     if (!calc.valid) {
-      return res.status(400).json({ success: false, message: calc.error });
+      return sendBadRequest(res, calc.error);
     }
 
-    // Check for overlapping existing pending or approved requests
     const overlap = await checkOverlappingLeave(applicant.applicantId, startDate, endDate);
     if (overlap) {
-      return res.status(400).json({
-        success: false,
-        message: `An active or pending leave request (${overlap.leaveCode || 'Leave'}) already covers part or all of these dates (${new Date(overlap.startDate).toLocaleDateString()} to ${new Date(overlap.endDate).toLocaleDateString()}).`,
-      });
+      return sendBadRequest(
+        res,
+        `An active or pending leave request (${overlap.leaveCode || 'Leave'}) already covers part or all of these dates (${new Date(overlap.startDate).toLocaleDateString()} to ${new Date(overlap.endDate).toLocaleDateString()}).`
+      );
     }
 
     const leaveCode = await generateLeaveCode();
@@ -389,20 +399,20 @@ export const requestLeave = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.status(201).json({
-      success: true,
-      message: 'Leave application submitted successfully.',
+    return sendCreated(res, 'Leave application submitted successfully.', {
       leave: record,
     });
   } catch (error) {
-    console.error('requestLeave error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
 /**
- * PATCH /api/v1/leaves/:id/review
- * Approves or rejects a leave application and syncs attendance
+ * Reviews (approves or rejects) a leave application and synchronizes classroom attendance.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const reviewLeave = async (req, res) => {
   try {
@@ -410,7 +420,7 @@ export const reviewLeave = async (req, res) => {
     const { status, reviewRemarks = '' } = req.body;
 
     if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid status. Must be approved or rejected.' });
+      return sendBadRequest(res, 'Invalid status. Must be approved or rejected.');
     }
 
     let leave = null;
@@ -418,13 +428,10 @@ export const reviewLeave = async (req, res) => {
     if (checkFallback()) {
       leave = FallbackDb.findById('leaveRequests', id);
       if (!leave) {
-        return res.status(404).json({ success: false, message: 'Leave request not found.' });
+        return sendNotFound(res, 'Leave request not found.');
       }
       if (leave.status !== 'pending') {
-        return res.status(400).json({
-          success: false,
-          message: `Cannot review. Leave is already marked as ${leave.status}.`,
-        });
+        return sendBadRequest(res, `Cannot review. Leave is already marked as ${leave.status}.`);
       }
 
       leave.status = status;
@@ -450,13 +457,10 @@ export const reviewLeave = async (req, res) => {
     } else {
       leave = await LeaveRequest.findById(id);
       if (!leave) {
-        return res.status(404).json({ success: false, message: 'Leave request not found.' });
+        return sendNotFound(res, 'Leave request not found.');
       }
       if (leave.status !== 'pending') {
-        return res.status(400).json({
-          success: false,
-          message: `Cannot review. Leave is already marked as ${leave.status}.`,
-        });
+        return sendBadRequest(res, `Cannot review. Leave is already marked as ${leave.status}.`);
       }
 
       leave.status = status;
@@ -491,20 +495,22 @@ export const reviewLeave = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({
-      success: true,
-      message: `Leave application ${status} successfully.${status === 'approved' ? ' Attendance synchronized.' : ''}`,
-      leave,
-    });
+    return sendSuccess(
+      res,
+      `Leave application ${status} successfully.${status === 'approved' ? ' Attendance synchronized.' : ''}`,
+      { leave }
+    );
   } catch (error) {
-    console.error('reviewLeave error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
 /**
- * DELETE /api/v1/leaves/:id
- * Cancels a pending (or eligible) leave application
+ * Cancels a pending or approved leave application and rolls back synced attendance.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const cancelLeave = async (req, res) => {
   try {
@@ -514,13 +520,12 @@ export const cancelLeave = async (req, res) => {
     if (checkFallback()) {
       leave = FallbackDb.findById('leaveRequests', id);
       if (!leave) {
-        return res.status(404).json({ success: false, message: 'Leave request not found.' });
+        return sendNotFound(res, 'Leave request not found.');
       }
       if (leave.status === 'cancelled') {
-        return res.status(400).json({ success: false, message: 'Leave is already cancelled.' });
+        return sendBadRequest(res, 'Leave is already cancelled.');
       }
 
-      // Reverse attendance if it was approved
       if (leave.status === 'approved') {
         await reverseAttendanceSync(leave);
       }
@@ -530,10 +535,10 @@ export const cancelLeave = async (req, res) => {
     } else {
       leave = await LeaveRequest.findById(id);
       if (!leave) {
-        return res.status(404).json({ success: false, message: 'Leave request not found.' });
+        return sendNotFound(res, 'Leave request not found.');
       }
       if (leave.status === 'cancelled') {
-        return res.status(400).json({ success: false, message: 'Leave is already cancelled.' });
+        return sendBadRequest(res, 'Leave is already cancelled.');
       }
 
       if (leave.status === 'approved') {
@@ -554,27 +559,25 @@ export const cancelLeave = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({
-      success: true,
-      message: 'Leave application cancelled successfully.',
-      leave,
-    });
+    return sendSuccess(res, 'Leave application cancelled successfully.', { leave });
   } catch (error) {
-    console.error('cancelLeave error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
 /**
- * GET /api/v1/leaves/active-on-date
- * Returns approved leaves on a specific date for classroom roster pre-marking
+ * Returns approved leaves active on a specific date for roster pre-marking.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getActiveLeavesOnDate = async (req, res) => {
   try {
     const { date, className, sectionName, classRoomId, type = 'student' } = req.query;
 
     if (!date) {
-      return res.status(400).json({ success: false, message: 'Date parameter is required.' });
+      return sendBadRequest(res, 'Date parameter is required.');
     }
 
     const d = new Date(date);
@@ -615,7 +618,7 @@ export const getActiveLeavesOnDate = async (req, res) => {
 
       if (type === 'student') {
         filter.applicantModel = 'Student';
-        if (classRoomId && mongoose.Types.ObjectId.isValid(classRoomId)) filter.classRoomId = classRoomId;
+        if (classRoomId && isValidObjectId(classRoomId)) filter.classRoomId = classRoomId;
         if (className) filter.className = className;
         if (sectionName) filter.sectionName = sectionName;
       } else {
@@ -625,8 +628,7 @@ export const getActiveLeavesOnDate = async (req, res) => {
       activeLeaves = await LeaveRequest.find(filter);
     }
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       date,
       count: activeLeaves.length,
       leaves: activeLeaves.map((l) => ({
@@ -644,7 +646,6 @@ export const getActiveLeavesOnDate = async (req, res) => {
       })),
     });
   } catch (error) {
-    console.error('getActiveLeavesOnDate error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };

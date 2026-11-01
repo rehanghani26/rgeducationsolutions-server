@@ -86,6 +86,8 @@ export async function processAiChat({
           tool: tc.name,
           status: result.success ? "success" : "error",
           durationMs: result.durationMs,
+          args: tc.arguments,
+          data: result,
         });
         return { call: tc, result };
       })

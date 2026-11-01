@@ -1,12 +1,32 @@
+// 2. External packages
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
+
+// 3. Configuration
+import { checkFallback } from '../config/db.js';
+
+// 4. Models
 import User from '../models/User.js';
 import Teacher from '../models/Teacher.js';
-import { checkFallback } from '../config/db.js';
-import { FallbackDb } from '../services/dbFallback.js';
-import { logActivity } from '../utils/activityLogger.js';
 
-// Standard System Company/Staff Roles Definition (Excludes students and parents)
+// 6. Services
+import { FallbackDb } from '../services/dbFallback.js';
+
+// 7. Utilities
+import { logActivity } from '../utils/activityLogger.js';
+import { normalizeEmail, isValidObjectId } from '../utils/commonUtil.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendForbidden,
+  sendError
+} from '../utils/responseUtil.js';
+
+/**
+ * Standard System Company/Staff Roles Definition.
+ * Excludes student and parent accounts which are managed via student admissions.
+ */
 export const SYSTEM_ROLES = [
   {
     id: 'super-admin',
@@ -92,9 +112,11 @@ export const SYSTEM_ROLES = [
 const EXCLUDED_ROLES = ['student', 'parent'];
 
 /**
- * @desc Get all company roles with live user counts (excludes students/parents)
- * @route GET /api/v1/users/roles
- * @access Private (Admin only)
+ * Retrieves all company roles with active user counts.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getRoles = async (req, res) => {
   try {
@@ -123,20 +145,18 @@ export const getRoles = async (req, res) => {
       userCount: userCounts[role.id] || 0
     }));
 
-    return res.json({
-      success: true,
-      roles: rolesWithCounts
-    });
+    return sendSuccess(res, undefined, { roles: rolesWithCounts });
   } catch (error) {
-    console.error('getRoles error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to retrieve roles' });
+    return sendError(res, 'Failed to retrieve roles', 500, error);
   }
 };
 
 /**
- * @desc Get company users (strictly excludes students)
- * @route GET /api/v1/users
- * @access Private (Admin only)
+ * Retrieves company staff users with filtering and pagination.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getUsers = async (req, res) => {
   try {
@@ -175,8 +195,8 @@ export const getUsers = async (req, res) => {
       }
 
       const total = users.length;
-      const startIndex = (parseInt(page) - 1) * parseInt(limit);
-      const paginatedUsers = users.slice(startIndex, startIndex + parseInt(limit)).map((u) => {
+      const startIndex = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+      const paginatedUsers = users.slice(startIndex, startIndex + parseInt(limit, 10)).map((u) => {
         const { password, ...userWithoutPassword } = u;
         return userWithoutPassword;
       });
@@ -188,11 +208,10 @@ export const getUsers = async (req, res) => {
         roleStats[r] = (roleStats[r] || 0) + 1;
       });
 
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
         users: paginatedUsers,
         roleStats
       });
@@ -224,13 +243,13 @@ export const getUsers = async (req, res) => {
       query.isActive = status === 'true' || status === true || status === 'active';
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
     const [users, total, roleCounts] = await Promise.all([
       User.find(query)
         .select('-password')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit)),
+        .limit(parseInt(limit, 10)),
       User.countDocuments(query),
       User.aggregate([
         { $match: { role: { $nin: EXCLUDED_ROLES } } },
@@ -243,24 +262,24 @@ export const getUsers = async (req, res) => {
       if (rc._id) roleStats[rc._id] = rc.count;
     });
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       total,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
       users,
       roleStats
     });
   } catch (error) {
-    console.error('getUsers error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to retrieve users' });
+    return sendError(res, 'Failed to retrieve users', 500, error);
   }
 };
 
 /**
- * @desc Get user details by ID including personal details and academic assignments
- * @route GET /api/v1/users/:id
- * @access Private (Admin only)
+ * Retrieves user details by ID or username/employee ID, including linked teacher profile.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getUserById = async (req, res) => {
   const { id } = req.params;
@@ -271,15 +290,14 @@ export const getUserById = async (req, res) => {
     if (checkFallback()) {
       user = FallbackDb.findById('users', id);
       if (!user) {
-        return res.status(404).json({ success: false, message: 'User not found' });
+        return sendNotFound(res, 'User not found');
       }
 
       // Check if linked to teacher
       const teacher = FallbackDb.find('teachers')?.find(t => t.user === id || t.id === user.profileId);
       const { password, ...userWithoutPassword } = user;
 
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, {
         user: {
           ...userWithoutPassword,
           teacherProfile: teacher || null
@@ -287,7 +305,7 @@ export const getUserById = async (req, res) => {
       });
     }
 
-    if (mongoose.Types.ObjectId.isValid(id)) {
+    if (isValidObjectId(id)) {
       user = await User.findById(id).select('-password');
     }
     if (!user) {
@@ -295,7 +313,7 @@ export const getUserById = async (req, res) => {
     }
 
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return sendNotFound(res, 'User not found');
     }
 
     // Try to find teacher profile if applicable
@@ -307,27 +325,28 @@ export const getUserById = async (req, res) => {
           ...(user.employeeId ? [{ employeeId: user.employeeId }] : [])
         ]
       });
-    } catch (e) {
-      // ignore
+    } catch {
+      // Non-blocking query failure
     }
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       user: {
         ...user.toObject(),
         teacherProfile
       }
     });
   } catch (error) {
-    console.error('getUserById error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to retrieve user' });
+    return sendError(res, 'Failed to retrieve user', 500, error);
   }
 };
 
 /**
- * @desc Create new user (Super Admin creation is forbidden; only admin, director, principal, teacher, peon, etc.)
- * @route POST /api/v1/users
- * @access Private (Admin only)
+ * Creates a new company staff user.
+ * Super Admin (Director) creation is forbidden; only one account permitted.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const createUser = async (req, res) => {
   const {
@@ -359,36 +378,24 @@ export const createUser = async (req, res) => {
   } = req.body;
 
   if (!username || !email || !password || !name || !role) {
-    return res.status(400).json({
-      success: false,
-      message: 'Name, username, email, password, and role are required'
-    });
+    return sendBadRequest(res, 'Name, username, email, password, and role are required');
   }
 
   const cleanRole = role.toLowerCase().trim();
 
   // RULE: Cannot create Super Admin from User Management
   if (cleanRole === 'super-admin' || cleanRole === 'superadmin' || cleanRole === 'director') {
-    return res.status(403).json({
-      success: false,
-      message: 'Creation of Super Admin (Director) accounts is not permitted. Only 1 Super Admin (Director) exists in the institution.'
-    });
+    return sendForbidden(res, 'Creation of Super Admin (Director) accounts is not permitted. Only 1 Super Admin (Director) exists in the institution.');
   }
 
   // RULE: Cannot create student or parent from User Management
   if (EXCLUDED_ROLES.includes(cleanRole)) {
-    return res.status(400).json({
-      success: false,
-      message: 'Student and Parent accounts cannot be created in User Management. Please use Student Admissions.'
-    });
+    return sendBadRequest(res, 'Student and Parent accounts cannot be created in User Management. Please use Student Admissions.');
   }
 
   const allowedRoles = SYSTEM_ROLES.filter(r => r.canCreate).map(r => r.id);
   if (!allowedRoles.includes(cleanRole)) {
-    return res.status(400).json({
-      success: false,
-      message: `Invalid role '${role}'. Allowed roles are: ${allowedRoles.join(', ')}`
-    });
+    return sendBadRequest(res, `Invalid role '${role}'. Allowed roles are: ${allowedRoles.join(', ')}`);
   }
 
   // RULE: Strictly 1 Principal allowed in the institution
@@ -401,28 +408,27 @@ export const createUser = async (req, res) => {
       existingPrincipal = await User.findOne({ role: 'principal', isActive: true });
     }
     if (existingPrincipal) {
-      return res.status(400).json({
-        success: false,
-        message: `Only 1 Principal is permitted for the institution. ${existingPrincipal.name} is currently assigned as Principal. Please reassign the current Principal first.`
-      });
+      return sendBadRequest(
+        res,
+        `Only 1 Principal is permitted for the institution. ${existingPrincipal.name} is currently assigned as Principal. Please reassign the current Principal first.`
+      );
     }
   }
 
   try {
+    const normalizedUserEmail = normalizeEmail(email);
+
     if (checkFallback()) {
       const existingUser = FallbackDb.findOne('users', { username: username.toLowerCase().trim() }) ||
-                           FallbackDb.findOne('users', { email: email.toLowerCase().trim() });
+                           FallbackDb.findOne('users', { email: normalizedUserEmail });
       if (existingUser) {
-        return res.status(400).json({
-          success: false,
-          message: 'A user with this username or email already exists'
-        });
+        return sendBadRequest(res, 'A user with this username or email already exists');
       }
 
       const newUser = FallbackDb.create('users', {
         name: name.trim(),
         username: username.toLowerCase().trim(),
-        email: email.toLowerCase().trim(),
+        email: normalizedUserEmail,
         password,
         role: cleanRole,
         employeeId: employeeId ? employeeId.trim().toUpperCase() : undefined,
@@ -459,9 +465,7 @@ export const createUser = async (req, res) => {
       });
 
       const { password: _, ...userWithoutPassword } = newUser;
-      return res.status(201).json({
-        success: true,
-        message: `User created successfully as ${cleanRole}`,
+      return sendCreated(res, `User created successfully as ${cleanRole}`, {
         user: userWithoutPassword
       });
     }
@@ -470,22 +474,19 @@ export const createUser = async (req, res) => {
     const existing = await User.findOne({
       $or: [
         { username: username.toLowerCase().trim() },
-        { email: email.toLowerCase().trim() },
+        { email: normalizedUserEmail },
         ...(employeeId ? [{ employeeId: employeeId.trim().toUpperCase() }] : [])
       ]
     });
 
     if (existing) {
-      return res.status(400).json({
-        success: false,
-        message: 'A user with this username, email, or employee ID already exists'
-      });
+      return sendBadRequest(res, 'A user with this username, email, or employee ID already exists');
     }
 
     const userPayload = {
       name: name.trim(),
       username: username.toLowerCase().trim(),
-      email: email.toLowerCase().trim(),
+      email: normalizedUserEmail,
       password,
       role: cleanRole,
       phone: phone ? phone.trim() : undefined,
@@ -529,7 +530,7 @@ export const createUser = async (req, res) => {
           dob: dob || undefined,
           phone: phone || '000-000-0000',
           alternatePhone: alternatePhone || '',
-          email: email.toLowerCase().trim(),
+          email: normalizedUserEmail,
           address: address || '',
           joiningDate: joiningDate || new Date(),
           qualification: qualification || 'B.Ed',
@@ -560,21 +561,20 @@ export const createUser = async (req, res) => {
     const userObj = created.toObject();
     delete userObj.password;
 
-    return res.status(201).json({
-      success: true,
-      message: `User created successfully as ${cleanRole}`,
+    return sendCreated(res, `User created successfully as ${cleanRole}`, {
       user: userObj
     });
   } catch (error) {
-    console.error('createUser error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Failed to create user' });
+    return sendError(res, error.message || 'Failed to create user', 500, error);
   }
 };
 
 /**
- * @desc Update user details, role (promote to Director, Principal, Teacher, Peon, etc.), and manage class teacher duties
- * @route PUT /api/v1/users/:id
- * @access Private (Admin only)
+ * Updates staff user profile, academic duties, or role assignment.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const updateUser = async (req, res) => {
   const { id } = req.params;
@@ -608,7 +608,7 @@ export const updateUser = async (req, res) => {
     const updateData = {};
     const unsetFields = [];
     if (name !== undefined) updateData.name = name.trim();
-    if (email !== undefined) updateData.email = email.toLowerCase().trim();
+    if (email !== undefined) updateData.email = normalizeEmail(email);
     if (employeeId !== undefined) {
       if (employeeId && employeeId.trim()) {
         updateData.employeeId = employeeId.trim().toUpperCase();
@@ -645,7 +645,7 @@ export const updateUser = async (req, res) => {
     }
 
     if (!existingTargetUser) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return sendNotFound(res, 'User not found');
     }
 
     const currentRole = (existingTargetUser.role || '').toLowerCase();
@@ -653,16 +653,10 @@ export const updateUser = async (req, res) => {
     // RULE: Super Admin (Director) role is permanent and cannot be changed or demoted
     if (currentRole === 'super-admin') {
       if (role !== undefined && role.toLowerCase().trim() !== 'super-admin') {
-        return res.status(403).json({
-          success: false,
-          message: 'The Super Admin (Director) role is permanent and cannot be changed or demoted.'
-        });
+        return sendForbidden(res, 'The Super Admin (Director) role is permanent and cannot be changed or demoted.');
       }
       if (isActive !== undefined && !Boolean(isActive)) {
-        return res.status(403).json({
-          success: false,
-          message: 'The Super Admin (Director) account cannot be deactivated.'
-        });
+        return sendForbidden(res, 'The Super Admin (Director) account cannot be deactivated.');
       }
     }
 
@@ -673,18 +667,12 @@ export const updateUser = async (req, res) => {
       // Disallow promoting any user to Super Admin (Director)
       if (cleanRole === 'super-admin' || cleanRole === 'superadmin' || cleanRole === 'director') {
         if (currentRole !== 'super-admin') {
-          return res.status(403).json({
-            success: false,
-            message: 'Cannot promote a user to Super Admin (Director). Only 1 Super Admin (Director) is permitted in the institution.'
-          });
+          return sendForbidden(res, 'Cannot promote a user to Super Admin (Director). Only 1 Super Admin (Director) is permitted in the institution.');
         }
       }
 
       if (EXCLUDED_ROLES.includes(cleanRole)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Cannot assign student or parent role in staff user management'
-        });
+        return sendBadRequest(res, 'Cannot assign student or parent role in staff user management');
       }
 
       // RULE: Strictly 1 Principal allowed in the institution
@@ -707,10 +695,10 @@ export const updateUser = async (req, res) => {
         }
 
         if (existingPrincipal) {
-          return res.status(400).json({
-            success: false,
-            message: `Only 1 Principal is permitted for the institution. ${existingPrincipal.name} is currently assigned as Principal. Please reassign the current Principal first before designating a new one.`
-          });
+          return sendBadRequest(
+            res,
+            `Only 1 Principal is permitted for the institution. ${existingPrincipal.name} is currently assigned as Principal. Please reassign the current Principal first before designating a new one.`
+          );
         }
       }
 
@@ -720,7 +708,7 @@ export const updateUser = async (req, res) => {
     if (checkFallback()) {
       const updated = FallbackDb.update('users', id, updateData);
       if (!updated) {
-        return res.status(404).json({ success: false, message: 'User not found' });
+        return sendNotFound(res, 'User not found');
       }
 
       unsetFields.forEach((field) => {
@@ -737,9 +725,7 @@ export const updateUser = async (req, res) => {
       });
 
       const { password, ...userWithoutPassword } = updated;
-      return res.json({
-        success: true,
-        message: 'User updated successfully',
+      return sendSuccess(res, 'User updated successfully', {
         user: userWithoutPassword
       });
     }
@@ -747,7 +733,7 @@ export const updateUser = async (req, res) => {
     // MongoDB path
     const user = await User.findById(id);
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return sendNotFound(res, 'User not found');
     }
 
     Object.assign(user, updateData);
@@ -775,8 +761,8 @@ export const updateUser = async (req, res) => {
           status: user.isActive ? 'active' : 'inactive'
         }
       );
-    } catch (e) {
-      // non-blocking
+    } catch {
+      // Non-blocking sync failure
     }
 
     await logActivity({
@@ -791,21 +777,20 @@ export const updateUser = async (req, res) => {
     const userObj = user.toObject();
     delete userObj.password;
 
-    return res.json({
-      success: true,
-      message: 'User updated successfully',
+    return sendSuccess(res, 'User updated successfully', {
       user: userObj
     });
   } catch (error) {
-    console.error('updateUser error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Failed to update user' });
+    return sendError(res, error.message || 'Failed to update user', 500, error);
   }
 };
 
 /**
- * @desc Toggle user active/inactive status
- * @route PATCH /api/v1/users/:id/status
- * @access Private (Admin only)
+ * Toggles a user's active/inactive status.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const toggleUserStatus = async (req, res) => {
   const { id } = req.params;
@@ -813,28 +798,22 @@ export const toggleUserStatus = async (req, res) => {
 
   // Prevent self-deactivation
   if (String(id) === String(currentUserId) || id === req.user.username) {
-    return res.status(400).json({
-      success: false,
-      message: 'You cannot deactivate your own administrative account'
-    });
+    return sendBadRequest(res, 'You cannot deactivate your own administrative account');
   }
 
   try {
     if (checkFallback()) {
       const user = FallbackDb.findById('users', id);
       if (!user) {
-        return res.status(404).json({ success: false, message: 'User not found' });
+        return sendNotFound(res, 'User not found');
       }
 
       if ((user.role || '').toLowerCase() === 'super-admin') {
-        return res.status(403).json({
-          success: false,
-          message: 'The Super Admin (Director) account cannot be deactivated.'
-        });
+        return sendForbidden(res, 'The Super Admin (Director) account cannot be deactivated.');
       }
 
       const newStatus = !user.isActive;
-      const updated = FallbackDb.update('users', id, { isActive: newStatus });
+      FallbackDb.update('users', id, { isActive: newStatus });
 
       await logActivity({
         userId: currentUserId,
@@ -845,23 +824,18 @@ export const toggleUserStatus = async (req, res) => {
         userAgent: req.headers['user-agent']
       });
 
-      return res.json({
-        success: true,
-        message: `User ${newStatus ? 'activated' : 'deactivated'} successfully`,
+      return sendSuccess(res, `User ${newStatus ? 'activated' : 'deactivated'} successfully`, {
         isActive: newStatus
       });
     }
 
     const user = await User.findById(id);
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return sendNotFound(res, 'User not found');
     }
 
     if ((user.role || '').toLowerCase() === 'super-admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'The Super Admin (Director) account cannot be deactivated.'
-      });
+      return sendForbidden(res, 'The Super Admin (Director) account cannot be deactivated.');
     }
 
     user.isActive = !user.isActive;
@@ -876,38 +850,34 @@ export const toggleUserStatus = async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    return res.json({
-      success: true,
-      message: `User ${user.isActive ? 'activated' : 'deactivated'} successfully`,
+    return sendSuccess(res, `User ${user.isActive ? 'activated' : 'deactivated'} successfully`, {
       isActive: user.isActive
     });
   } catch (error) {
-    console.error('toggleUserStatus error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to update user status' });
+    return sendError(res, 'Failed to update user status', 500, error);
   }
 };
 
 /**
- * @desc Reset user password
- * @route PATCH /api/v1/users/:id/reset-password
- * @access Private (Admin only)
+ * Resets a user's password and optionally forces password change on next login.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const resetUserPassword = async (req, res) => {
   const { id } = req.params;
   const { newPassword, forcePasswordChange = true } = req.body;
 
   if (!newPassword || newPassword.length < 4) {
-    return res.status(400).json({
-      success: false,
-      message: 'Password must be at least 4 characters long'
-    });
+    return sendBadRequest(res, 'Password must be at least 4 characters long');
   }
 
   try {
     if (checkFallback()) {
       const user = FallbackDb.findById('users', id);
       if (!user) {
-        return res.status(404).json({ success: false, message: 'User not found' });
+        return sendNotFound(res, 'User not found');
       }
 
       FallbackDb.update('users', id, {
@@ -925,15 +895,12 @@ export const resetUserPassword = async (req, res) => {
         userAgent: req.headers['user-agent']
       });
 
-      return res.json({
-        success: true,
-        message: `Password reset successfully for ${user.name}`
-      });
+      return sendSuccess(res, `Password reset successfully for ${user.name}`);
     }
 
     const user = await User.findById(id);
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return sendNotFound(res, 'User not found');
     }
 
     user.password = newPassword;
@@ -949,20 +916,19 @@ export const resetUserPassword = async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    return res.json({
-      success: true,
-      message: `Password reset successfully for ${user.name}`
-    });
+    return sendSuccess(res, `Password reset successfully for ${user.name}`);
   } catch (error) {
-    console.error('resetUserPassword error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to reset password' });
+    return sendError(res, 'Failed to reset password', 500, error);
   }
 };
 
 /**
- * @desc Delete user
- * @route DELETE /api/v1/users/:id
- * @access Private (Admin only)
+ * Deletes a user account.
+ * Super Admin account cannot be deleted; users cannot delete themselves.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const deleteUser = async (req, res) => {
   const { id } = req.params;
@@ -970,24 +936,18 @@ export const deleteUser = async (req, res) => {
 
   // Prevent self-deletion
   if (String(id) === String(currentUserId) || id === req.user.username) {
-    return res.status(400).json({
-      success: false,
-      message: 'You cannot delete your own administrative account'
-    });
+    return sendBadRequest(res, 'You cannot delete your own administrative account');
   }
 
   try {
     if (checkFallback()) {
       const user = FallbackDb.findById('users', id);
       if (!user) {
-        return res.status(404).json({ success: false, message: 'User not found' });
+        return sendNotFound(res, 'User not found');
       }
 
       if ((user.role || '').toLowerCase() === 'super-admin') {
-        return res.status(403).json({
-          success: false,
-          message: 'The Super Admin (Director) account is permanent and cannot be deleted.'
-        });
+        return sendForbidden(res, 'The Super Admin (Director) account is permanent and cannot be deleted.');
       }
 
       FallbackDb.delete('users', id);
@@ -1001,22 +961,16 @@ export const deleteUser = async (req, res) => {
         userAgent: req.headers['user-agent']
       });
 
-      return res.json({
-        success: true,
-        message: `User ${user.name} deleted successfully`
-      });
+      return sendSuccess(res, `User ${user.name} deleted successfully`);
     }
 
     const user = await User.findById(id);
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return sendNotFound(res, 'User not found');
     }
 
     if ((user.role || '').toLowerCase() === 'super-admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'The Super Admin (Director) account is permanent and cannot be deleted.'
-      });
+      return sendForbidden(res, 'The Super Admin (Director) account is permanent and cannot be deleted.');
     }
 
     await User.findByIdAndDelete(id);
@@ -1030,12 +984,8 @@ export const deleteUser = async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    return res.json({
-      success: true,
-      message: `User ${user.name} deleted successfully`
-    });
+    return sendSuccess(res, `User ${user.name} deleted successfully`);
   } catch (error) {
-    console.error('deleteUser error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to delete user' });
+    return sendError(res, 'Failed to delete user', 500, error);
   }
 };

@@ -1,44 +1,65 @@
-import express from 'express';
+// 2. External packages
+import express from "express";
+
+// 5. Middleware
+import { protect } from "../middleware/auth.js";
+import { authorize } from "../middleware/rbac.js";
+
+// 8. Controllers
 import {
-  getOnlineClasses,
-  getOnlineClassById,
-  getOnlineClassActivity,
   createOnlineClass,
-  updateOnlineClass,
   deleteOnlineClass,
+  getOnlineClassActivity,
+  getOnlineClassById,
+  getOnlineClasses,
   joinOnlineClass,
-} from '../controllers/onlineClassController.js';
-import { protect } from '../middleware/auth.js';
-import { authorize } from '../middleware/rbac.js';
+  updateOnlineClass,
+} from "../controllers/onlineClassController.js";
 
 const router = express.Router();
 
 // ─── Read (all authenticated users) ─────────────────────────────────────────
-router.get('/', protect, getOnlineClasses);
-router.get('/:id/activity', protect, getOnlineClassActivity);
-router.get('/:id', protect, getOnlineClassById);
+router.get("/", protect, getOnlineClasses);
+router.get("/:id/activity", protect, getOnlineClassActivity);
+router.get("/:id", protect, getOnlineClassById);
 
 // ─── Write (admin + teaching roles) ─────────────────────────────────────────
 router.post(
-  '/',
+  "/",
   protect,
-  authorize('super-admin', 'school-admin', 'principal', 'teacher', 'head-teacher', 'hod', 'coordinator'),
+  authorize(
+    "super-admin",
+    "school-admin",
+    "principal",
+    "teacher",
+    "head-teacher",
+    "hod",
+    "coordinator"
+  ),
   createOnlineClass
 );
 router.put(
-  '/:id',
+  "/:id",
   protect,
-  authorize('super-admin', 'school-admin', 'principal', 'teacher', 'head-teacher', 'hod', 'coordinator'),
+  authorize(
+    "super-admin",
+    "school-admin",
+    "principal",
+    "teacher",
+    "head-teacher",
+    "hod",
+    "coordinator"
+  ),
   updateOnlineClass
 );
 router.delete(
-  '/:id',
+  "/:id",
   protect,
-  authorize('super-admin', 'school-admin', 'principal'),
+  authorize("super-admin", "school-admin", "principal"),
   deleteOnlineClass
 );
 
 // ─── Student join action ─────────────────────────────────────────────────────
-router.post('/:id/join', protect, authorize('student'), joinOnlineClass);
+router.post("/:id/join", protect, authorize("student"), joinOnlineClass);
 
 export default router;

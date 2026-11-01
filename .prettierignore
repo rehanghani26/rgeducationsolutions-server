@@ -1,0 +1,9 @@
+node_modules
+dist
+build
+coverage
+uploads
+.env
+.env.*
+fallback_db.json
+

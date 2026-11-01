@@ -1,25 +1,51 @@
+// 3. Configuration
+import { checkFallback } from '../config/db.js';
+
+// 4. Models
 import Result from '../models/Result.js';
 import Exam from '../models/Exam.js';
 import Student from '../models/Student.js';
-import { checkFallback } from '../config/db.js';
+
+// 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
+
+// 7. Utilities
 import { parsePagination, paginateResult, paginateArray } from '../utils/paginateQuery.js';
 import { logActivity } from '../utils/activityLogger.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendForbidden,
+  sendError
+} from '../utils/responseUtil.js';
 
-// ─── Helper: grade per subject ────────────────────────────────────────────────
+/**
+ * Calculates grade and grade points for an individual subject score.
+ *
+ * @param {number} obtained - Marks obtained.
+ * @param {number} maxMarks - Total marks for the subject.
+ * @returns {{ grade: string, gradePoint: number }} Calculated grade object.
+ */
 const subjectGrade = (obtained, maxMarks) => {
   const pct = maxMarks > 0 ? (obtained / maxMarks) * 100 : 0;
   if (pct >= 91) return { grade: 'A+', gradePoint: 10.0 };
-  if (pct >= 81) return { grade: 'A',  gradePoint: 9.0 };
+  if (pct >= 81) return { grade: 'A', gradePoint: 9.0 };
   if (pct >= 71) return { grade: 'B+', gradePoint: 8.0 };
-  if (pct >= 61) return { grade: 'B',  gradePoint: 7.0 };
+  if (pct >= 61) return { grade: 'B', gradePoint: 7.0 };
   if (pct >= 51) return { grade: 'C+', gradePoint: 6.0 };
-  if (pct >= 41) return { grade: 'C',  gradePoint: 5.0 };
-  if (pct >= 33) return { grade: 'D',  gradePoint: 4.0 };
+  if (pct >= 41) return { grade: 'C', gradePoint: 5.0 };
+  if (pct >= 33) return { grade: 'D', gradePoint: 4.0 };
   return { grade: 'F', gradePoint: 0.0 };
 };
 
-// ─── Helper: compute result totals ────────────────────────────────────────────
+/**
+ * Computes aggregated scores, GPA, percentage, and passing status across all subject marks.
+ *
+ * @param {Array<Object>} marks - Subject mark records.
+ * @returns {Object} Computed aggregate metrics.
+ */
 const computeResultTotals = (marks) => {
   let totalObtained = 0;
   let totalMaxMarks = 0;
@@ -41,7 +67,13 @@ const computeResultTotals = (marks) => {
   return { enrichedMarks, totalObtained, totalMaxMarks, percentage, grade, gpa, isPassed, failedSubjects };
 };
 
-// ─── Helper: compute ranks within a class for a given exam ────────────────────
+/**
+ * Recomputes student rank order within a classroom for an examination.
+ *
+ * @param {string} examId - Examination ID.
+ * @param {string} classId - Classroom or class code ID.
+ * @returns {Promise<void>}
+ */
 const recomputeRanks = async (examId, classId) => {
   try {
     const results = await Result.find({ examId, classId }).sort({ percentage: -1 });
@@ -54,7 +86,13 @@ const recomputeRanks = async (examId, classId) => {
   }
 };
 
-// ─── GET /results ─────────────────────────────────────────────────────────────
+/**
+ * Retrieves paginated examination results with multi-attribute filtering.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getResults = async (req, res) => {
   try {
     const { page, limit, skip } = parsePagination(req.query);
@@ -63,7 +101,7 @@ export const getResults = async (req, res) => {
     if (checkFallback()) {
       const list = FallbackDb.find('results') || [];
       const result = paginateArray(list, { page, limit });
-      return res.json({ success: true, results: result.data, pagination: result.pagination });
+      return sendSuccess(res, undefined, { results: result.data, pagination: result.pagination });
     }
 
     const filter = {};
@@ -77,25 +115,29 @@ export const getResults = async (req, res) => {
       Result.countDocuments(filter),
     ]);
 
-    return res.json({ success: true, results, ...paginateResult(results, total, { page, limit }) });
+    return sendSuccess(res, undefined, { results, ...paginateResult(results, total, { page, limit }) });
   } catch (err) {
-    console.error('getResults error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
-// ─── GET /results/student/:studentId — student history ────────────────────────
+/**
+ * Retrieves historical exam results for a specific student.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getStudentResults = async (req, res) => {
   try {
     const { studentId } = req.params;
     const { status } = req.query;
 
     if (checkFallback()) {
-      return res.json({ success: true, results: [] });
+      return sendSuccess(res, undefined, { results: [] });
     }
 
     const filter = { studentId };
-    // Students can only see published results
     if (req.user?.role === 'student') filter.status = 'published';
     else if (status) filter.status = status;
 
@@ -103,38 +145,48 @@ export const getStudentResults = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate('examId', 'name term session date');
 
-    return res.json({ success: true, results });
+    return sendSuccess(res, undefined, { results });
   } catch (err) {
-    console.error('getStudentResults error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
-// ─── GET /results/exam/:examId/student/:studentId ─────────────────────────────
+/**
+ * Retrieves a student's result for a specific examination.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getStudentExamResult = async (req, res) => {
   try {
     const { examId, studentId } = req.params;
 
     if (checkFallback()) {
-      return res.json({ success: true, result: null });
+      return sendSuccess(res, undefined, { result: null });
     }
 
     const result = await Result.findOne({ examId, studentId })
       .populate('examId', 'name term session date subjectSchedule');
 
-    if (!result) return res.status(404).json({ success: false, message: 'Result not found' });
+    if (!result) return sendNotFound(res, 'Result not found');
     if (req.user?.role === 'student' && result.status !== 'published') {
-      return res.status(403).json({ success: false, message: 'Result not published yet' });
+      return sendForbidden(res, 'Result not published yet');
     }
 
-    return res.json({ success: true, result });
+    return sendSuccess(res, undefined, { result });
   } catch (err) {
-    console.error('getStudentExamResult error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
-// ─── GET /results/exam/:examId/class/:classId — class result sheet ────────────
+/**
+ * Retrieves class result sheet and student completion status for an examination.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getClassResults = async (req, res) => {
   try {
     const { examId, classId } = req.params;
@@ -174,7 +226,7 @@ export const getClassResults = async (req, res) => {
       }
 
       const allFallbackStudents = FallbackDb.find('students') || [];
-      let filteredStudents = allFallbackStudents.filter((s) => {
+      const filteredStudents = allFallbackStudents.filter((s) => {
         const matchesClass = !targetClassStr ||
           String(s.classId) === String(classId) ||
           String(s.classId) === String(targetClassStr) ||
@@ -195,8 +247,7 @@ export const getClassResults = async (req, res) => {
       const existingIds = results.map((r) => String(r.studentId));
       const studentsWithoutResult = filteredStudents.filter((s) => !existingIds.includes(String(s._id)));
 
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, {
         results,
         exam,
         allStudents: filteredStudents,
@@ -225,7 +276,6 @@ export const getClassResults = async (req, res) => {
       Exam.findById(examId),
     ]);
 
-    // Student query with flexible class identification
     const studentFilter = {
       status: { $in: ['active', 'Active', undefined] },
     };
@@ -255,28 +305,33 @@ export const getClassResults = async (req, res) => {
       (s) => !existingStudentIds.includes(s._id.toString())
     );
 
-    return res.json({ success: true, results, exam, allStudents, studentsWithoutResult });
+    return sendSuccess(res, undefined, { results, exam, allStudents, studentsWithoutResult });
   } catch (err) {
-    console.error('getClassResults error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
-// ─── GET /results/stats/:examId — analytics ───────────────────────────────────
+/**
+ * Retrieves aggregate analytical performance metrics for an exam.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getExamStats = async (req, res) => {
   try {
     const { examId } = req.params;
     const { classId } = req.query;
 
     if (checkFallback()) {
-      return res.json({ success: true, stats: {} });
+      return sendSuccess(res, undefined, { stats: {} });
     }
 
     const filter = { examId, status: 'published' };
     if (classId) filter.classId = classId;
 
     const results = await Result.find(filter);
-    if (!results.length) return res.json({ success: true, stats: { total: 0 } });
+    if (!results.length) return sendSuccess(res, undefined, { stats: { total: 0 } });
 
     const total = results.length;
     const passed = results.filter((r) => r.isPassed).length;
@@ -295,32 +350,35 @@ export const getExamStats = async (req, res) => {
       return acc;
     }, {});
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       stats: { total, passed, failed, passPercentage: parseFloat(((passed / total) * 100).toFixed(1)), avgPercentage, toppers, gradeDistribution },
     });
   } catch (err) {
-    console.error('getExamStats error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
-// ─── POST /results/bulk — bulk upsert by teacher ──────────────────────────────
+/**
+ * Bulk upserts student marks and triggers rank recomputation.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const bulkUpsertResults = async (req, res) => {
   try {
     const { examId, classId, className, section, resultsData } = req.body;
-    // resultsData: [{ studentId, studentName, admissionNumber, rollNumber, marks: [{subjectName, subjectCode, obtained, maxMarks, passMarks}] }]
 
     if (!examId || !classId || !resultsData?.length) {
-      return res.status(400).json({ success: false, message: 'examId, classId, and resultsData are required' });
+      return sendBadRequest(res, 'examId, classId, and resultsData are required');
     }
 
     if (checkFallback()) {
-      return res.json({ success: true, message: 'Results saved (fallback mode)', saved: resultsData.length });
+      return sendSuccess(res, 'Results saved (fallback mode)', { saved: resultsData.length });
     }
 
     const exam = await Exam.findById(examId);
-    if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
+    if (!exam) return sendNotFound(res, 'Exam not found');
 
     const savedResults = [];
 
@@ -361,7 +419,6 @@ export const bulkUpsertResults = async (req, res) => {
       savedResults.push(saved);
     }
 
-    // Recompute ranks for this class+exam
     await recomputeRanks(examId, classId);
 
     await logActivity({
@@ -374,23 +431,26 @@ export const bulkUpsertResults = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.status(201).json({
-      success: true,
-      message: `Results saved for ${savedResults.length} students (draft)`,
+    return sendCreated(res, `Results saved for ${savedResults.length} students (draft)`, {
       saved: savedResults.length,
     });
   } catch (err) {
-    console.error('bulkUpsertResults error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── PUT /results/exam/:examId/class/:classId/publish ─────────────────────────
+/**
+ * Publishes draft examination results making them visible to students and parents.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const publishResults = async (req, res) => {
   try {
     const { examId, classId } = req.params;
-
     const { section } = req.query;
+
     if (checkFallback()) {
       const allResults = FallbackDb.find('results') || [];
       allResults.forEach((r) => {
@@ -401,7 +461,7 @@ export const publishResults = async (req, res) => {
           }
         }
       });
-      return res.json({ success: true, message: 'Results published successfully' });
+      return sendSuccess(res, 'Results published successfully');
     }
 
     const filter = {
@@ -435,24 +495,29 @@ export const publishResults = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({ success: true, message: `Published ${updated.modifiedCount} results`, published: updated.modifiedCount });
+    return sendSuccess(res, `Published ${updated.modifiedCount} results`, { published: updated.modifiedCount });
   } catch (err) {
-    console.error('publishResults error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── PUT /results/:id — update single result ──────────────────────────────────
+/**
+ * Updates an individual student's examination result record.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const updateResult = async (req, res) => {
   try {
     const { id } = req.params;
 
     if (checkFallback()) {
-      return res.json({ success: true, message: 'Result updated (fallback)' });
+      return sendSuccess(res, 'Result updated (fallback)');
     }
 
     const existing = await Result.findById(id);
-    if (!existing) return res.status(404).json({ success: false, message: 'Result not found' });
+    if (!existing) return sendNotFound(res, 'Result not found');
 
     const marks = req.body.marks || existing.marks;
     const { enrichedMarks, totalObtained, totalMaxMarks, percentage, grade, gpa, isPassed, failedSubjects } = computeResultTotals(marks);
@@ -471,28 +536,32 @@ export const updateResult = async (req, res) => {
 
     await recomputeRanks(existing.examId, existing.classId);
 
-    return res.json({ success: true, message: 'Result updated', result });
+    return sendSuccess(res, 'Result updated', { result });
   } catch (err) {
-    console.error('updateResult error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── DELETE /results/:id ──────────────────────────────────────────────────────
+/**
+ * Deletes an individual student's examination result record.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const deleteResult = async (req, res) => {
   try {
     const { id } = req.params;
 
     if (checkFallback()) {
-      return res.json({ success: true, message: 'Result deleted (fallback)' });
+      return sendSuccess(res, 'Result deleted (fallback)');
     }
 
     const result = await Result.findByIdAndDelete(id);
-    if (!result) return res.status(404).json({ success: false, message: 'Result not found' });
+    if (!result) return sendNotFound(res, 'Result not found');
 
-    return res.json({ success: true, message: 'Result deleted' });
+    return sendSuccess(res, 'Result deleted');
   } catch (err) {
-    console.error('deleteResult error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };

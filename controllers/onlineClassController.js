@@ -1,9 +1,19 @@
+// 2. External packages
 import mongoose from 'mongoose';
-import OnlineClass from '../models/OnlineClass.js';
+
+// 3. Configuration
 import { checkFallback } from '../config/db.js';
+
+// 4. Models
+import OnlineClass from '../models/OnlineClass.js';
+
+// 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
+
+// 7. Utilities
 import { parsePagination, buildSearchFilter, paginateResult } from '../utils/paginateQuery.js';
 import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
+import { dateOnly, isValidObjectId } from '../utils/commonUtil.js';
 import {
   buildScopedMongoFilter,
   filterRecordsForUser,
@@ -15,6 +25,13 @@ import {
   isAdminRole,
   isTeacherRole,
 } from '../utils/learningScope.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from '../utils/responseUtil.js';
 
 const ONLINE_CLASS_SEED = [
   {
@@ -61,6 +78,11 @@ const ONLINE_CLASS_SEED = [
   },
 ];
 
+/**
+ * Seeds fallback database with default virtual classroom sessions if none exist.
+ *
+ * @returns {Array<Object>} Online classes list.
+ */
 const seedFallbackOnlineClasses = () => {
   const current = FallbackDb.find('onlineClasses') || [];
   if (current.length) return current;
@@ -68,15 +90,21 @@ const seedFallbackOnlineClasses = () => {
   return FallbackDb.find('onlineClasses') || [];
 };
 
-const dateOnly = (value) => {
-  if (!value) return '';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10);
-  return parsed.toISOString().slice(0, 10);
-};
-
+/**
+ * Normalizes string for case-insensitive comparison.
+ *
+ * @param {string} value - Raw string.
+ * @returns {string} Lowercase trimmed string.
+ */
 const normalizeText = (value) => String(value || '').trim().toLowerCase();
 
+/**
+ * Sorts array of online class objects by date or string field.
+ *
+ * @param {Array<Object>} items - Array of records.
+ * @param {string} [sort='-scheduledDate'] - Sort direction and field name.
+ * @returns {Array<Object>} Sorted records.
+ */
 const sortRecords = (items, sort = '-scheduledDate') => {
   const desc = sort.startsWith('-');
   const field = desc ? sort.slice(1) : sort;
@@ -91,6 +119,13 @@ const sortRecords = (items, sort = '-scheduledDate') => {
   });
 };
 
+/**
+ * Applies search and category filters to fallback online classes in-memory.
+ *
+ * @param {Array<Object>} items - Array of records.
+ * @param {Object} query - Express query object.
+ * @returns {Array<Object>} Filtered records.
+ */
 const applyFallbackFilters = (items, query) => {
   const { search = '', status = '', className = '', sectionName = '', date = '' } = query;
   let filtered = [...items];
@@ -111,6 +146,12 @@ const applyFallbackFilters = (items, query) => {
   return filtered;
 };
 
+/**
+ * Aggregates analytical statistics for online classes.
+ *
+ * @param {Array<Object>} items - Array of online classes.
+ * @returns {Object} Metric counts.
+ */
 const buildOnlineClassStats = (items) => {
   const today = new Date().toISOString().slice(0, 10);
   return {
@@ -123,6 +164,13 @@ const buildOnlineClassStats = (items) => {
   };
 };
 
+/**
+ * Builds MongoDB scoped query filter for online classes.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {Object} query - Query parameters.
+ * @returns {Promise<{ scopedFilter: Object, filter: Object }>}
+ */
 const buildMongoQueryFilter = async (req, query) => {
   const scopedFilter = await buildScopedMongoFilter(req, {
     teacherField: 'teacher',
@@ -149,6 +197,12 @@ const buildMongoQueryFilter = async (req, query) => {
   };
 };
 
+/**
+ * Filters and sanitizes attached learning resources.
+ *
+ * @param {Array<Object>} [resources=[]] - Input resources.
+ * @returns {Array<Object>} Cleaned resources.
+ */
 const cleanResources = (resources = []) => (
   Array.isArray(resources)
     ? resources
@@ -161,6 +215,15 @@ const cleanResources = (resources = []) => (
     : []
 );
 
+/**
+ * Builds create or update payload with actor identity.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {Object} data - Body data.
+ * @param {Object} [options] - Options object.
+ * @param {boolean} [options.partial=false] - Whether this is a partial update.
+ * @returns {Promise<Object>}
+ */
 const buildPayload = async (req, data, { partial = false } = {}) => {
   const role = getRole(req);
   const teacher = isTeacherRole(role) ? await getTeacherProfileForUser(req) : null;
@@ -223,12 +286,25 @@ const buildPayload = async (req, data, { partial = false } = {}) => {
   };
 };
 
+/**
+ * Validates required fields on an online class payload.
+ *
+ * @param {Object} payload - Input payload.
+ * @returns {string} Error message or empty string.
+ */
 const validatePayload = (payload) => {
   const required = ['title', 'subject', 'className', 'scheduledDate', 'startTime', 'endTime', 'meetingLink'];
   const missing = required.filter((field) => !payload[field]);
   return missing.length ? `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required` : '';
 };
 
+/**
+ * Asserts user authorization to view a specific online class record.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {Object} record - Record to inspect.
+ * @returns {Promise<boolean>}
+ */
 const requireVisibleRecord = async (req, record) => {
   const role = getRole(req);
   if (!record) return false;
@@ -237,6 +313,13 @@ const requireVisibleRecord = async (req, record) => {
   return visible.length > 0;
 };
 
+/**
+ * Retrieves paginated online class schedules with scope authorization.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getOnlineClasses = async (req, res) => {
   try {
     const { page, limit, skip, sort } = parsePagination(req.query);
@@ -246,8 +329,7 @@ export const getOnlineClasses = async (req, res) => {
       const filtered = applyFallbackFilters(scoped, req.query);
       const ordered = sortRecords(filtered, sort);
       const data = ordered.slice((page - 1) * limit, page * limit);
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, {
         onlineClasses: data,
         stats: buildOnlineClassStats(filtered),
         ...paginateResult(data, filtered.length, { page, limit }),
@@ -276,8 +358,7 @@ export const getOnlineClasses = async (req, res) => {
       ]),
     ]);
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       onlineClasses,
       stats: {
         total: statsCounts[0],
@@ -289,50 +370,68 @@ export const getOnlineClasses = async (req, res) => {
       ...paginateResult(onlineClasses, total, { page, limit }),
     });
   } catch (error) {
-    console.error('getOnlineClasses error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves a single online class session by ID.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getOnlineClassById = async (req, res) => {
   try {
     const { id } = req.params;
     let onlineClass = null;
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       onlineClass = FallbackDb.findById('onlineClasses', id);
       if (!(await requireVisibleRecord(req, onlineClass))) {
-        return res.status(404).json({ success: false, message: 'Online class not found' });
+        return sendNotFound(res, 'Online class not found');
       }
     } else {
       const scoped = await buildScopedMongoFilter(req, { teacherField: 'teacher', teacherUserField: 'teacherUser' });
       onlineClass = await OnlineClass.findOne(Object.keys(scoped).length ? { $and: [{ _id: id }, scoped] } : { _id: id });
     }
 
-    if (!onlineClass) return res.status(404).json({ success: false, message: 'Online class not found' });
-    return res.json({ success: true, onlineClass });
+    if (!onlineClass) return sendNotFound(res, 'Online class not found');
+    return sendSuccess(res, undefined, { onlineClass });
   } catch (error) {
-    console.error('getOnlineClassById error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves activity audit logs for an online class session.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getOnlineClassActivity = async (req, res) => {
   try {
     const logs = await getRecordActivity('online-classes', req.params.id);
-    return res.json({ success: true, logs });
+    return sendSuccess(res, undefined, { logs });
   } catch (error) {
-    console.error('getOnlineClassActivity error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Schedules a new virtual online class.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const createOnlineClass = async (req, res) => {
   try {
     const payload = await buildPayload(req, req.body);
     const validationError = validatePayload(payload);
     if (validationError) {
-      return res.status(400).json({ success: false, message: validationError });
+      return sendBadRequest(res, validationError);
     }
 
     payload.createdBy = getUserId(req);
@@ -351,13 +450,19 @@ export const createOnlineClass = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.status(201).json({ success: true, message: 'Online class scheduled', onlineClass });
+    return sendCreated(res, 'Online class scheduled', { onlineClass });
   } catch (error) {
-    console.error('createOnlineClass error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Updates details of a scheduled online class session.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const updateOnlineClass = async (req, res) => {
   try {
     const { id } = req.params;
@@ -367,16 +472,16 @@ export const updateOnlineClass = async (req, res) => {
     let current = null;
     let onlineClass = null;
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       current = FallbackDb.findById('onlineClasses', id);
       if (!(await requireVisibleRecord(req, current))) {
-        return res.status(404).json({ success: false, message: 'Online class not found' });
+        return sendNotFound(res, 'Online class not found');
       }
       onlineClass = FallbackDb.update('onlineClasses', id, payload);
     } else {
       const scoped = await buildScopedMongoFilter(req, { teacherField: 'teacher', teacherUserField: 'teacherUser' });
       current = await OnlineClass.findOne(Object.keys(scoped).length ? { $and: [{ _id: id }, scoped] } : { _id: id });
-      if (!current) return res.status(404).json({ success: false, message: 'Online class not found' });
+      if (!current) return sendNotFound(res, 'Online class not found');
       onlineClass = await OnlineClass.findByIdAndUpdate(id, payload, { new: true, runValidators: true });
     }
 
@@ -390,20 +495,26 @@ export const updateOnlineClass = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({ success: true, message: 'Online class updated', onlineClass });
+    return sendSuccess(res, 'Online class updated', { onlineClass });
   } catch (error) {
-    console.error('updateOnlineClass error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Deletes a scheduled online class session.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const deleteOnlineClass = async (req, res) => {
   try {
     const { id } = req.params;
     let deleted = false;
     let title = id;
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       const record = FallbackDb.findById('onlineClasses', id);
       title = record?.title || id;
       deleted = FallbackDb.delete('onlineClasses', id);
@@ -416,7 +527,7 @@ export const deleteOnlineClass = async (req, res) => {
       }
     }
 
-    if (!deleted) return res.status(404).json({ success: false, message: 'Online class not found' });
+    if (!deleted) return sendNotFound(res, 'Online class not found');
 
     await logActivity({
       userId: getUserId(req),
@@ -428,22 +539,28 @@ export const deleteOnlineClass = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({ success: true, message: 'Online class deleted' });
+    return sendSuccess(res, 'Online class deleted');
   } catch (error) {
-    console.error('deleteOnlineClass error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Records student attendance for joining an online virtual session.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const joinOnlineClass = async (req, res) => {
   try {
     const { id } = req.params;
     const student = await getStudentProfileForUser(req);
-    if (!student) return res.status(404).json({ success: false, message: 'Student profile not found' });
+    if (!student) return sendNotFound(res, 'Student profile not found');
 
     let onlineClass = null;
     const submissionIdentity = {
-      student: mongoose.Types.ObjectId.isValid(String(getRecordId(student))) ? getRecordId(student) : undefined,
+      student: isValidObjectId(String(getRecordId(student))) ? getRecordId(student) : undefined,
       studentId: String(getRecordId(student)),
       studentName: student.name || req.user?.name,
       admissionNumber: student.admissionNumber,
@@ -451,10 +568,10 @@ export const joinOnlineClass = async (req, res) => {
       status: 'attended',
     };
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       onlineClass = FallbackDb.findById('onlineClasses', id);
       if (!(await requireVisibleRecord(req, onlineClass))) {
-        return res.status(404).json({ success: false, message: 'Online class not found' });
+        return sendNotFound(res, 'Online class not found');
       }
       const attendance = [...(onlineClass.attendance || [])];
       const existingIndex = attendance.findIndex((item) =>
@@ -474,7 +591,7 @@ export const joinOnlineClass = async (req, res) => {
     } else {
       const scoped = await buildScopedMongoFilter(req, { teacherField: 'teacher', teacherUserField: 'teacherUser' });
       onlineClass = await OnlineClass.findOne(Object.keys(scoped).length ? { $and: [{ _id: id }, scoped] } : { _id: id });
-      if (!onlineClass) return res.status(404).json({ success: false, message: 'Online class not found' });
+      if (!onlineClass) return sendNotFound(res, 'Online class not found');
 
       const existing = onlineClass.attendance.find((item) =>
         String(item.studentId || item.student || item.admissionNumber) === String(submissionIdentity.studentId) ||
@@ -499,14 +616,11 @@ export const joinOnlineClass = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({
-      success: true,
-      message: 'Attendance marked',
+    return sendSuccess(res, 'Attendance marked', {
       onlineClass,
       meetingLink: onlineClass.meetingLink,
     });
   } catch (error) {
-    console.error('joinOnlineClass error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };

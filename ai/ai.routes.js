@@ -1,28 +1,29 @@
+// 2. External packages
+import express from "express";
+
+// 5. Middleware
+import { protect } from "../middleware/auth.js";
+
+// 8. Other internal modules (Controllers)
+import { chatController, healthController } from "./ai.controller.js";
+
 /**
  * @file ai.routes.js
- * @description Express router for AI endpoints.
- *
- * All routes are protected by the existing JWT auth middleware.
- * The AI never bypasses authentication.
+ * @description Express router for AI endpoints. Protected by JWT auth middleware.
  */
-
-import express from 'express';
-import { chatController, healthController } from './ai.controller.js';
-import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
 /**
  * GET /api/v1/ai/health
- * @description AI health check & active provider status. Requires valid JWT.
+ * @desc AI health check & active provider status.
  */
-router.get('/health', protect, healthController);
+router.get("/health", protect, healthController);
 
 /**
  * POST /api/v1/ai/chat
- * @description Main AI chat endpoint. Requires valid JWT.
- * @body { message: string, conversationHistory?: array }
+ * @desc Main AI chat endpoint with function calling.
  */
-router.post('/chat', protect, chatController);
+router.post("/chat", protect, chatController);
 
 export default router;

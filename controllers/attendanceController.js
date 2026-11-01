@@ -1,21 +1,41 @@
+// 2. External packages
 import mongoose from "mongoose";
+
+// 3. Configuration
+import { checkFallback } from "../config/db.js";
+
+// 4. Models
 import Attendance from "../models/Attendance.js";
 import Student from "../models/Student.js";
 import Teacher from "../models/Teacher.js";
 import Class from "../models/Class.js";
-import { checkFallback } from "../config/db.js";
+
+// 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
-import {
-  parsePagination,
-  paginateResult,
-  paginateArray,
-} from "../utils/paginateQuery.js";
+
+// 7. Utilities
+import { parsePagination, paginateResult } from "../utils/paginateQuery.js";
 import { logActivity } from "../utils/activityLogger.js";
+import { escapeRegex, isValidObjectId } from "../utils/commonUtil.js";
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from "../utils/responseUtil.js";
 
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
+/**
+ * Parses query parameters into a normalized start/end date range.
+ *
+ * @param {Object} params - Date query parameters.
+ * @param {string} [params.date] - Exact date string.
+ * @param {string} [params.startDate] - Start date of range.
+ * @param {string} [params.endDate] - End date of range.
+ * @param {string|number} [params.month] - Month filter.
+ * @param {string|number} [params.year] - Year filter.
+ * @returns {{ start: Date, end: Date }|null} Normalized date range or null.
+ */
 function parseDateRange({ date, startDate, endDate, month, year }) {
   // 1. Single Specific Day
   if (date) {
@@ -95,6 +115,12 @@ function parseDateRange({ date, startDate, endDate, month, year }) {
   return null;
 }
 
+/**
+ * Builds MongoDB query filter from attendance request parameters.
+ *
+ * @param {Object} query - Express query object.
+ * @returns {Object} Mongoose filter object.
+ */
 function buildMongoFilter(query) {
   const {
     classId,
@@ -166,6 +192,13 @@ function buildMongoFilter(query) {
   return filter;
 }
 
+/**
+ * Filters fallback attendance records in-memory based on query parameters.
+ *
+ * @param {Array<Object>} list - Array of attendance records.
+ * @param {Object} query - Express query object.
+ * @returns {Array<Object>} Filtered attendance records.
+ */
 function filterFallbackList(list, query) {
   const {
     classId,
@@ -231,6 +264,12 @@ function filterFallbackList(list, query) {
   });
 }
 
+/**
+ * Extracts distinct months, classes, and sections available across attendance records.
+ *
+ * @param {Array<Object>} [records=[]] - Array of attendance records.
+ * @returns {{ months: Array<string>, classes: Array<string>, sections: Array<string> }} Filter metadata.
+ */
 function extractAvailableFilters(records = []) {
   const monthMap = new Map();
   const classSet = new Set();
@@ -271,6 +310,13 @@ function extractAvailableFilters(records = []) {
   };
 }
 
+/**
+ * Retrieves paginated attendance logs with dynamic filter extraction.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getAttendanceRecords = async (req, res) => {
   try {
     const { page, limit, skip } = parsePagination(req.query);
@@ -286,8 +332,7 @@ export const getAttendanceRecords = async (req, res) => {
       const data = filtered.slice(skip, skip + limit);
       const availableFilters = extractAvailableFilters(list);
 
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, {
         records: data,
         availableFilters,
         ...paginateResult(data, total, { page, limit }),
@@ -312,16 +357,14 @@ export const getAttendanceRecords = async (req, res) => {
 
     const availableFilters = extractAvailableFilters(allForFilters);
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       records,
       availableFilters,
       ...paginateResult(records, total, { page, limit }),
     });
   } catch (error) {
     console.error("getAttendanceRecords error:", error);
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       records: [],
       availableFilters: { months: [], classes: [], sections: [] },
       page: 1,
@@ -332,6 +375,13 @@ export const getAttendanceRecords = async (req, res) => {
   }
 };
 
+/**
+ * Retrieves a single attendance roster by ID.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getAttendanceById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -339,7 +389,7 @@ export const getAttendanceById = async (req, res) => {
     if (checkFallback()) {
       record = FallbackDb.findById("attendance", id);
     } else {
-      if (mongoose.Types.ObjectId.isValid(id)) {
+      if (isValidObjectId(id)) {
         record = await Attendance.findById(id).populate("classId", "name code");
       }
       if (!record) {
@@ -347,17 +397,20 @@ export const getAttendanceById = async (req, res) => {
       }
     }
 
-    if (!record)
-      return res
-        .status(404)
-        .json({ success: false, message: "Attendance record not found" });
-    return res.json({ success: true, record });
+    if (!record) return sendNotFound(res, "Attendance record not found");
+    return sendSuccess(res, undefined, { record });
   } catch (error) {
-    console.error("getAttendanceById error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500, error);
   }
 };
 
+/**
+ * Submits or updates daily attendance roster for a classroom.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const createAttendance = async (req, res) => {
   try {
     const {
@@ -377,28 +430,20 @@ export const createAttendance = async (req, res) => {
     } = req.body;
     const rawList = students || attendance || records || [];
     if (!rawList.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Students attendance list is required",
-      });
+      return sendBadRequest(res, "Students attendance list is required");
     }
 
     const inputDate = date || attendanceDate || new Date();
     const attDateObj = new Date(inputDate);
     if (isNaN(attDateObj.getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: "A valid attendance date is required",
-      });
+      return sendBadRequest(res, "A valid attendance date is required");
     }
 
-    // Normalized start/end of the chosen attendance date (supports past, present)
     const startOfDay = new Date(attDateObj);
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(attDateObj);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // Exact timestamp when the teacher/admin is recording/submitting this attendance
     const takenAt = attendanceTakenDate
       ? new Date(attendanceTakenDate)
       : new Date();
@@ -465,7 +510,6 @@ export const createAttendance = async (req, res) => {
 
     let record;
     if (checkFallback()) {
-      // Check fallback DB for existing record on that date & class
       const existing = (FallbackDb.find("attendance") || []).find((a) => {
         const d = new Date(a.date || a.attendanceDate);
         return (
@@ -481,7 +525,6 @@ export const createAttendance = async (req, res) => {
         record = FallbackDb.create("attendance", attendancePayload);
       }
     } else {
-      // Find if an attendance record already exists for this date, type, class & section
       const matchCriteria = {
         $or: [
           { date: { $gte: startOfDay, $lte: endOfDay } },
@@ -505,7 +548,6 @@ export const createAttendance = async (req, res) => {
       const existingRecord = await Attendance.findOne(matchCriteria);
 
       if (existingRecord) {
-        // Update existing attendance record instead of throwing E11000 duplicate key error
         existingRecord.date = startOfDay;
         existingRecord.attendanceDate = startOfDay;
         existingRecord.attendanceTakenDate = takenAt;
@@ -541,9 +583,7 @@ export const createAttendance = async (req, res) => {
       userAgent: req.headers["user-agent"],
     });
 
-    return res
-      .status(201)
-      .json({ success: true, message: "Attendance recorded successfully", record });
+    return sendCreated(res, "Attendance recorded successfully", { record });
   } catch (error) {
     console.error("createAttendance error:", error);
 
@@ -583,30 +623,30 @@ export const createAttendance = async (req, res) => {
         );
 
         if (updated) {
-          return res.status(200).json({
-            success: true,
-            message: "Attendance updated successfully",
-            record: updated,
-          });
+          return sendSuccess(res, "Attendance updated successfully", { record: updated });
         }
       } catch (upsertErr) {
         console.error("Upsert fallback error:", upsertErr);
       }
     }
 
-    return res
-      .status(500)
-      .json({ success: false, message: error.message || "Server error" });
+    return sendError(res, error.message || "Server error", 500, error);
   }
 };
 
+/**
+ * Retrieves aggregate attendance statistics for institution or specific class.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getAttendanceStats = async (req, res) => {
   try {
     const isTeacher = req.query.type === "teacher";
     const cls = req.query.class || req.query.className || req.query.classId;
     const sec = req.query.section || req.query.sectionName || req.query.sectionId;
 
-    // 1. Total Members Enrolled in School (or Filtered Class / Section)
     let totalMembersCount = 0;
     let totalClassesCount = 10;
 
@@ -655,7 +695,6 @@ export const getAttendanceStats = async (req, res) => {
       }
     }
 
-    // 2. Attendance Records matching active filters
     let records = [];
     if (checkFallback()) {
       const list = FallbackDb.find("attendance") || [];
@@ -665,7 +704,6 @@ export const getAttendanceStats = async (req, res) => {
       records = await Attendance.find(filter);
     }
 
-    // 3. Today's Date Records specifically for Today Stats
     const todayStr = new Date().toISOString().split("T")[0];
     let todayRecords = [];
     if (checkFallback()) {
@@ -718,7 +756,6 @@ export const getAttendanceStats = async (req, res) => {
       if (cKey) todayMarkedClasses.add(cKey);
     });
 
-    // 4. Calculate Filtered Totals
     let present = 0;
     let absent = 0;
     let late = 0;
@@ -763,7 +800,6 @@ export const getAttendanceStats = async (req, res) => {
       totalMembersInRecords += t;
     });
 
-    // Fallback baseline total if database empty
     if (!totalMembersCount) {
       const maxInSession = Math.max(
         ...records.map((r) => r.total || (r.students || []).length || 0),
@@ -772,7 +808,6 @@ export const getAttendanceStats = async (req, res) => {
       totalMembersCount = maxInSession > 0 ? maxInSession : 450;
     }
 
-    // Not Taken: number of sections/classes with attendance pending today
     const notTakenClasses = Math.max(0, totalClassesCount - todayMarkedClasses.size);
 
     const divisor = totalMembersInRecords || (present + absent + late + leave);
@@ -783,8 +818,7 @@ export const getAttendanceStats = async (req, res) => {
           ? Math.round((todayPresent / (todayPresent + todayAbsent)) * 100)
           : 93;
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       stats: {
         totalStudents: totalMembersCount,
         todayPresent: todayPresent || (req.query.date ? present : 391),
@@ -805,27 +839,29 @@ export const getAttendanceStats = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("getAttendanceStats error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500, error);
   }
 };
 
+/**
+ * Retrieves attendance logs and compliance statistics for a specific student.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getStudentAttendance = async (req, res) => {
   try {
     const studentId = req.params.studentId || req.query.studentId;
     if (!studentId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Student ID is required" });
+      return sendBadRequest(res, "Student ID is required");
     }
 
     const { date, startDate, endDate, year, month, status } = req.query;
 
-    // Build Date Filter Condition
     let dateFilter = null;
 
     if (date) {
-      // Specific single date
       const d = new Date(date);
       if (!isNaN(d.getTime())) {
         const start = new Date(d);
@@ -835,7 +871,6 @@ export const getStudentAttendance = async (req, res) => {
         dateFilter = { start, end };
       }
     } else if (startDate || endDate) {
-      // Date range
       const start = startDate ? new Date(startDate) : new Date(0);
       start.setHours(0, 0, 0, 0);
       const end = endDate ? new Date(endDate) : new Date();
@@ -844,7 +879,6 @@ export const getStudentAttendance = async (req, res) => {
         dateFilter = { start, end };
       }
     } else if (year || month) {
-      // Year & Month filter
       const targetYear = parseInt(year, 10) || new Date().getFullYear();
       if (month) {
         const targetMonth = parseInt(month, 10);
@@ -858,7 +892,7 @@ export const getStudentAttendance = async (req, res) => {
       }
     }
 
-    let logs = [];
+    const logs = [];
     if (checkFallback()) {
       const allRecords = FallbackDb.find("attendance") || [];
       allRecords.forEach((att) => {
@@ -922,10 +956,10 @@ export const getStudentAttendance = async (req, res) => {
       const queryFilter = {
         $or: [
           { "students.studentId": studentId },
-          { "records.memberId": mongoose.Types.ObjectId.isValid(studentId) ? studentId : null },
+          { "records.memberId": isValidObjectId(studentId) ? studentId : null },
           { "records.studentId": studentId },
           { "attendance.studentId": studentId },
-          { "students._id": mongoose.Types.ObjectId.isValid(studentId) ? studentId : null },
+          { "students._id": isValidObjectId(studentId) ? studentId : null },
         ],
       };
 
@@ -997,7 +1031,6 @@ export const getStudentAttendance = async (req, res) => {
       });
     }
 
-    // Sort logs descending by session date
     logs.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const presentCount = logs.filter(
@@ -1017,15 +1050,13 @@ export const getStudentAttendance = async (req, res) => {
     ).length;
 
     const totalDays = logs.length;
-    // Authorized leave days do not penalize compliance
     const denominator = Math.max(1, totalDays - leaveCount);
     const effectivePresent = presentCount + halfDayCount * 0.5;
     const percentage = totalDays
       ? `${Math.min(100, Math.round((effectivePresent / denominator) * 100))}%`
       : "0%";
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       studentId,
       filter: {
         date: date || null,
@@ -1047,18 +1078,24 @@ export const getStudentAttendance = async (req, res) => {
       logs,
     });
   } catch (error) {
-    console.error("getStudentAttendance error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500, error);
   }
 };
 
+/**
+ * Retrieves attendance logs and compliance metrics for the currently logged in user.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getMyAttendance = async (req, res) => {
   try {
     const role = req.user?.role || "student";
     const userId = req.user?._id?.toString() || req.user?.id?.toString() || req.user?.studentId;
     const userName = req.user?.name || req.user?.username;
 
-    let logs = [];
+    const logs = [];
     let rawRecords = [];
 
     if (checkFallback()) {
@@ -1103,7 +1140,6 @@ export const getMyAttendance = async (req, res) => {
       }
     });
 
-    // Sort logs by date descending
     logs.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const presentCount = logs.filter((l) => l.status.toLowerCase() === "present").length;
@@ -1116,8 +1152,7 @@ export const getMyAttendance = async (req, res) => {
       ? `${((effectiveDays / totalDays) * 100).toFixed(1)}%`
       : "N/A";
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       userRole: role,
       summary: {
         totalDays,
@@ -1130,7 +1165,6 @@ export const getMyAttendance = async (req, res) => {
       logs,
     });
   } catch (error) {
-    console.error("getMyAttendance error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500, error);
   }
 };

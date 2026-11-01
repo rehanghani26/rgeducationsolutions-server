@@ -1,0 +1,23 @@
+{
+  "env": {
+    "node": true,
+    "es2022": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "no-console": "off",
+    "eqeqeq": ["error", "smart"],
+    "curly": ["error", "multi-line"]
+  },
+  "ignorePatterns": [
+    "node_modules/",
+    "uploads/",
+    "dist/",
+    "coverage/"
+  ]
+}
+

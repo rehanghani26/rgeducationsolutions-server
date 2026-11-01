@@ -1,66 +1,103 @@
-import Student from '../models/Student.js';
-import Teacher from '../models/Teacher.js';
-import Attendance from '../models/Attendance.js';
-import Fee from '../models/Fee.js';
-import Expense from '../models/Expense.js';
-import Inventory from '../models/Inventory.js';
-import Subject from '../models/Subject.js';
-import Exam from '../models/Exam.js';
-import Notification from '../models/Notification.js';
-import Result from '../models/Result.js';
-import Library from '../models/Library.js';
+// 2. External packages
+import mongoose from "mongoose";
 
-import mongoose from 'mongoose';
-import { checkFallback } from '../config/db.js';
-import { FallbackDb } from '../services/dbFallback.js';
+// 3. Configuration
+import { checkFallback } from "../config/db.js";
 
+// 4. Models
+import Attendance from "../models/Attendance.js";
+import Class from "../models/Class.js";
+import Exam from "../models/Exam.js";
+import Expense from "../models/Expense.js";
+import Fee from "../models/Fee.js";
+import Inventory from "../models/Inventory.js";
+import Library from "../models/Library.js";
+import Notification from "../models/Notification.js";
+import Result from "../models/Result.js";
+import Student from "../models/Student.js";
+import Subject from "../models/Subject.js";
+import Teacher from "../models/Teacher.js";
+
+// 6. Services
+import { FallbackDb } from "../services/dbFallback.js";
+
+// 7. Utilities
+import {
+  sendError,
+  sendNotFound,
+  sendSuccess,
+} from "../utils/responseUtil.js";
+
+/**
+ * @file dashboardController.js
+ * @description Role-aware metrics, analytical KPIs, and charts for executive, faculty, and student dashboards.
+ */
+
+/**
+ * Retrieves role-based statistics (Admin, Faculty, Student).
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const getStats = async (req, res) => {
   try {
     let stats = {};
     const { role, id, profileId } = req.user;
 
     if (checkFallback()) {
-      if (role === 'student') {
-        const student = FallbackDb.findOne('students', { user: id }) || FallbackDb.findById('students', profileId);
+      if (role === "student") {
+        const student =
+          FallbackDb.findOne("students", { user: id }) ||
+          FallbackDb.findById("students", profileId);
         if (!student) {
-          return res.status(404).json({ success: false, message: 'Student profile not found' });
+          return sendNotFound(res, "Student profile not found");
         }
-        const classDetails = FallbackDb.findById('classes', student.classId);
-        const sectionDetails = FallbackDb.findById('sections', student.sectionId);
-        let classTeacherName = '—';
+        const classDetails = FallbackDb.findById("classes", student.classId);
+        const sectionDetails = FallbackDb.findById("sections", student.sectionId);
+        let classTeacherName = "—";
         if (sectionDetails?.classTeacher) {
-          const ct = FallbackDb.findById('teachers', sectionDetails.classTeacher);
+          const ct = FallbackDb.findById("teachers", sectionDetails.classTeacher);
           if (ct) classTeacherName = ct.name;
         }
 
         // Attendance rate
-        const allAttendance = FallbackDb.find('attendance') || [];
-        const classAttendance = allAttendance.filter(a => a.classId === student.classId);
+        const allAttendance = FallbackDb.find("attendance") || [];
+        const classAttendance = allAttendance.filter(
+          (a) => a.classId === student.classId
+        );
         let presentCount = 0;
         let absentCount = 0;
-        classAttendance.forEach(att => {
-          const record = att.records.find(r => r.memberId === student.id);
+        classAttendance.forEach((att) => {
+          const record = (att.records || []).find((r) => r.memberId === student.id);
           if (record) {
-            if (record.status === 'present') presentCount++;
-            else if (record.status === 'absent') absentCount++;
+            if (record.status === "present") presentCount++;
+            else if (record.status === "absent") absentCount++;
           }
         });
         const totalDays = presentCount + absentCount;
-        const attendanceRate = totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 95;
+        const attendanceRate =
+          totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 95;
 
-        // Fee
-        const fee = FallbackDb.findOne('fees', { studentId: student.id }) || { amountPaid: 0, amountPending: 5000, status: 'unpaid' };
-        const upcomingExams = (FallbackDb.find('exams') || []).filter(e => e.status === 'upcoming');
-        const libraryIssues = FallbackDb.find('library') || [];
-        const booksIssued = libraryIssues.filter(l => l.studentId === student.id && !l.returnDate).length;
+        const fee = FallbackDb.findOne("fees", { studentId: student.id }) || {
+          amountPaid: 0,
+          amountPending: 5000,
+          status: "unpaid",
+        };
+        const upcomingExams = (FallbackDb.find("exams") || []).filter(
+          (e) => e.status === "upcoming"
+        );
+        const libraryIssues = FallbackDb.find("library") || [];
+        const booksIssued = libraryIssues.filter(
+          (l) => l.studentId === student.id && !l.returnDate
+        ).length;
 
         stats = {
-          role: 'student',
+          role: "student",
           studentName: student.name,
           rollNumber: student.rollNumber,
           admissionNumber: student.admissionNumber,
-          className: classDetails?.name || '—',
-          sectionName: sectionDetails?.name || '—',
+          className: classDetails?.name || "—",
+          sectionName: sectionDetails?.name || "—",
           classTeacher: classTeacherName,
           attendanceRate: `${attendanceRate}%`,
           daysPresent: presentCount || 18,
@@ -71,25 +108,33 @@ export const getStats = async (req, res) => {
           feeStatus: fee.status,
           upcomingExamsCount: upcomingExams.length,
           booksIssued,
-          activeCourses: (FallbackDb.find('subjects') || []).length
+          activeCourses: (FallbackDb.find("subjects") || []).length,
         };
-      } else if (['teacher', 'head-teacher', 'hod', 'coordinator'].includes(role)) {
-        const teacher = FallbackDb.findOne('teachers', { user: id }) || FallbackDb.findById('teachers', profileId);
+      } else if (
+        ["teacher", "head-teacher", "hod", "coordinator"].includes(role)
+      ) {
+        const teacher =
+          FallbackDb.findOne("teachers", { user: id }) ||
+          FallbackDb.findById("teachers", profileId);
         if (!teacher) {
-          return res.status(404).json({ success: false, message: 'Teacher profile not found' });
+          return sendNotFound(res, "Teacher profile not found");
         }
         const classesCount = (teacher.classesAssigned || []).length;
         const subjectsCount = (teacher.subjectsAssigned || []).length;
 
         const leaves = teacher.leaves || [];
-        const pendingLeaves = leaves.filter(l => l.status === 'pending').length;
-        const approvedLeaves = leaves.filter(l => l.status === 'approved').length;
+        const pendingLeaves = leaves.filter((l) => l.status === "pending").length;
+        const approvedLeaves = leaves.filter((l) => l.status === "approved").length;
 
-        const section = FallbackDb.findOne('sections', { classTeacher: teacher.id });
-        const classTeacherOf = section ? `${FallbackDb.findById('classes', section.classId)?.name || ''} - ${section.name}` : 'No';
+        const section = FallbackDb.findOne("sections", {
+          classTeacher: teacher.id,
+        });
+        const classTeacherOf = section
+          ? `${FallbackDb.findById("classes", section.classId)?.name || ""} - ${section.name}`
+          : "No";
 
         stats = {
-          role: 'teacher',
+          role: "teacher",
           teacherName: teacher.name,
           employeeId: teacher.employeeId,
           designation: teacher.designation,
@@ -101,43 +146,55 @@ export const getStats = async (req, res) => {
           pendingLeaves,
           approvedLeaves,
           classTeacherOf,
-          upcomingExams: (FallbackDb.find('exams') || []).filter(e => e.status === 'upcoming').length,
-          notificationsCount: FallbackDb.find('notifications').length
+          upcomingExams: (FallbackDb.find("exams") || []).filter(
+            (e) => e.status === "upcoming"
+          ).length,
+          notificationsCount: FallbackDb.find("notifications").length,
         };
       } else {
-        // Fallback Database Global Admin stats
-        const students = FallbackDb.find('students');
-        const teachers = FallbackDb.find('teachers');
-        const classes = FallbackDb.find('classes');
-        const fees = FallbackDb.find('fees');
-        const expenses = FallbackDb.find('expenses');
-        const inventory = FallbackDb.find('inventory');
-        const subjects = FallbackDb.find('subjects');
-        const exams = FallbackDb.find('exams');
-        const attendance = FallbackDb.find('attendance');
+        const students = FallbackDb.find("students");
+        const teachers = FallbackDb.find("teachers");
+        const classes = FallbackDb.find("classes");
+        const fees = FallbackDb.find("fees");
+        const expenses = FallbackDb.find("expenses");
+        const inventory = FallbackDb.find("inventory");
+        const subjects = FallbackDb.find("subjects");
+        const exams = FallbackDb.find("exams");
+        const attendance = FallbackDb.find("attendance");
 
         const totalStudents = students.length;
         const totalTeachers = teachers.length;
         const totalClasses = classes.length;
         const totalStaff = totalTeachers + 5;
 
-        const today = new Date().toISOString().split('T')[0];
-        const todayLog = attendance.find(a => a.date === today) || attendance[0];
+        const today = new Date().toISOString().split("T")[0];
+        const todayLog =
+          attendance.find((a) => a.date === today) || attendance[0];
         let todayAttendanceRate = 92;
-        if (todayLog && todayLog.records.length > 0) {
-          const presentCount = todayLog.records.filter(r => r.status === 'present').length;
-          todayAttendanceRate = Math.round((presentCount / todayLog.records.length) * 100);
+        if (todayLog && todayLog.records && todayLog.records.length > 0) {
+          const presentCount = todayLog.records.filter(
+            (r) => r.status === "present"
+          ).length;
+          todayAttendanceRate = Math.round(
+            (presentCount / todayLog.records.length) * 100
+          );
         }
 
-        const feeCollectionToday = fees.reduce((acc, f) => acc + (f.amountPaid > 0 ? f.amountPaid * 0.05 : 0), 2500);
+        const feeCollectionToday = fees.reduce(
+          (acc, f) => acc + (f.amountPaid > 0 ? f.amountPaid * 0.05 : 0),
+          2500
+        );
         const pendingFees = fees.reduce((acc, f) => acc + f.amountPending, 0);
         const schoolExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
-        const inventoryValue = inventory.reduce((acc, item) => acc + (item.quantity * item.price), 0);
+        const inventoryValue = inventory.reduce(
+          (acc, item) => acc + item.quantity * item.price,
+          0
+        );
         const activeCourses = subjects.length;
-        const upcomingExams = exams.filter(e => e.status === 'upcoming').length;
+        const upcomingExams = exams.filter((e) => e.status === "upcoming").length;
 
         stats = {
-          role: 'admin',
+          role: "admin",
           totalStudents,
           totalTeachers,
           totalClasses,
@@ -149,58 +206,76 @@ export const getStats = async (req, res) => {
           inventoryValue,
           activeCourses,
           upcomingExams,
-          notificationsCount: FallbackDb.find('notifications').length
+          notificationsCount: FallbackDb.find("notifications").length,
         };
       }
     } else {
-      // MongoDB stats
-      if (role === 'student') {
-        let student = await Student.findOne({ user: id }).populate('classId').populate('sectionId');
+      // MongoDB mode
+      if (role === "student") {
+        let student = await Student.findOne({ user: id })
+          .populate("classId")
+          .populate("sectionId");
         if (!student && profileId) {
-          student = await Student.findById(profileId).populate('classId').populate('sectionId');
+          student = await Student.findById(profileId)
+            .populate("classId")
+            .populate("sectionId");
         }
         if (!student) {
-          return res.status(404).json({ success: false, message: 'Student profile not found' });
+          return sendNotFound(res, "Student profile not found");
         }
 
-        let classTeacherName = '—';
+        let classTeacherName = "—";
         if (student.sectionId && student.sectionId.classTeacher) {
           const ct = await Teacher.findById(student.sectionId.classTeacher);
           if (ct) classTeacherName = ct.name;
         }
 
-        const attendanceLogs = await Attendance.find({ classId: student.classId });
+        const attendanceLogs = await Attendance.find({
+          classId: student.classId,
+        });
         let presentCount = 0;
         let absentCount = 0;
-        attendanceLogs.forEach(log => {
-          const record = log.records.find(r => r.memberId.toString() === student._id.toString());
+        attendanceLogs.forEach((log) => {
+          const record = (log.records || []).find(
+            (r) => r.memberId.toString() === student._id.toString()
+          );
           if (record) {
-            if (record.status === 'present') presentCount++;
-            else if (record.status === 'absent') absentCount++;
+            if (record.status === "present") presentCount++;
+            else if (record.status === "absent") absentCount++;
           }
         });
         const totalDays = presentCount + absentCount;
-        const attendanceRate = totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 95;
+        const attendanceRate =
+          totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 95;
 
-        const fee = await Fee.findOne({ studentId: student._id }) || { amountPaid: 0, amountPending: 5000, status: 'unpaid' };
-        const upcomingExamsCount = await Exam.countDocuments({ status: 'upcoming' });
-        
+        const fee = (await Fee.findOne({ studentId: student._id })) || {
+          amountPaid: 0,
+          amountPending: 5000,
+          status: "unpaid",
+        };
+        const upcomingExamsCount = await Exam.countDocuments({
+          status: "upcoming",
+        });
+
         let booksIssued = 0;
         try {
-          booksIssued = await Library.countDocuments({ studentId: student._id, returnDate: null });
+          booksIssued = await Library.countDocuments({
+            studentId: student._id,
+            returnDate: null,
+          });
         } catch (e) {
-          console.warn('Library count documents failed', e);
+          console.warn("Library count documents failed", e);
         }
-        
+
         const activeCourses = await Subject.countDocuments();
 
         stats = {
-          role: 'student',
+          role: "student",
           studentName: student.name,
           rollNumber: student.rollNumber,
           admissionNumber: student.admissionNumber,
-          className: student.classId?.name || '—',
-          sectionName: student.sectionId?.name || '—',
+          className: student.classId?.name || "—",
+          sectionName: student.sectionId?.name || "—",
           classTeacher: classTeacherName,
           attendanceRate: `${attendanceRate}%`,
           daysPresent: presentCount || 24,
@@ -211,40 +286,46 @@ export const getStats = async (req, res) => {
           feeStatus: fee.status,
           upcomingExamsCount,
           booksIssued,
-          activeCourses
+          activeCourses,
         };
-      } else if (['teacher', 'head-teacher', 'hod', 'coordinator'].includes(role)) {
+      } else if (
+        ["teacher", "head-teacher", "hod", "coordinator"].includes(role)
+      ) {
         let teacher = await Teacher.findOne({ user: id });
         if (!teacher && profileId) {
           teacher = await Teacher.findById(profileId);
         }
         if (!teacher) {
-          return res.status(404).json({ success: false, message: 'Teacher profile not found' });
+          return sendNotFound(res, "Teacher profile not found");
         }
 
         const classesCount = (teacher.classesAssigned || []).length;
         const subjectsCount = (teacher.subjectsAssigned || []).length;
 
         const leaves = teacher.leaves || [];
-        const pendingLeaves = leaves.filter(l => l.status === 'pending').length;
-        const approvedLeaves = leaves.filter(l => l.status === 'approved').length;
+        const pendingLeaves = leaves.filter((l) => l.status === "pending").length;
+        const approvedLeaves = leaves.filter((l) => l.status === "approved").length;
 
-        let classTeacherOf = 'No';
+        let classTeacherOf = "No";
         try {
-          const SectionModel = mongoose.model('Section');
-          const section = await SectionModel.findOne({ classTeacher: teacher._id }).populate('classId');
+          const SectionModel = mongoose.model("Section");
+          const section = await SectionModel.findOne({
+            classTeacher: teacher._id,
+          }).populate("classId");
           if (section) {
-            classTeacherOf = `${section.classId?.name || ''} - ${section.name}`;
+            classTeacherOf = `${section.classId?.name || ""} - ${section.name}`;
           }
         } catch (e) {
-          console.warn('Section model check failed', e);
+          console.warn("Section model check failed", e);
         }
 
-        const upcomingExams = await Exam.countDocuments({ status: 'upcoming' });
+        const upcomingExams = await Exam.countDocuments({
+          status: "upcoming",
+        });
         const notificationsCount = await Notification.countDocuments();
 
         stats = {
-          role: 'teacher',
+          role: "teacher",
           teacherName: teacher.name,
           employeeId: teacher.employeeId,
           designation: teacher.designation,
@@ -257,13 +338,12 @@ export const getStats = async (req, res) => {
           approvedLeaves,
           classTeacherOf,
           upcomingExams,
-          notificationsCount
+          notificationsCount,
         };
       } else {
-        // Global Admin stats
         const totalStudents = await Student.countDocuments();
         const totalTeachers = await Teacher.countDocuments();
-        const totalClasses = await Class.countDocuments();
+        const totalClasses = await Class.countDocuments().catch(() => 0);
         const totalStaff = totalTeachers;
 
         const today = new Date();
@@ -271,27 +351,40 @@ export const getStats = async (req, res) => {
         const todayLog = await Attendance.findOne({ date: { $gte: today } });
         let todayAttendance = "N/A";
         if (todayLog && todayLog.records && todayLog.records.length > 0) {
-          const presentCount = todayLog.records.filter(r => r.status === 'present').length;
+          const presentCount = todayLog.records.filter(
+            (r) => r.status === "present"
+          ).length;
           todayAttendance = `${Math.round((presentCount / todayLog.records.length) * 100)}%`;
         }
 
         const allFees = await Fee.find();
-        const pendingFees = allFees.reduce((acc, f) => acc + (f.amountPending || 0), 0);
+        const pendingFees = allFees.reduce(
+          (acc, f) => acc + (f.amountPending || 0),
+          0
+        );
         const todayFeeCollection = allFees
-          .filter(f => f.updatedAt && new Date(f.updatedAt) >= today)
+          .filter((f) => f.updatedAt && new Date(f.updatedAt) >= today)
           .reduce((acc, f) => acc + (f.amountPaid || 0), 0);
         const allExpenses = await Expense.find();
-        const schoolExpenses = allExpenses.reduce((acc, e) => acc + (e.amount || 0), 0);
+        const schoolExpenses = allExpenses.reduce(
+          (acc, e) => acc + (e.amount || 0),
+          0
+        );
 
         const allInventory = await Inventory.find();
-        const inventoryValue = allInventory.reduce((acc, item) => acc + ((item.quantity || 0) * (item.price || 0)), 0);
+        const inventoryValue = allInventory.reduce(
+          (acc, item) => acc + (item.quantity || 0) * (item.price || 0),
+          0
+        );
 
         const activeCourses = await Subject.countDocuments();
-        const upcomingExams = await Exam.countDocuments({ status: 'upcoming' });
+        const upcomingExams = await Exam.countDocuments({
+          status: "upcoming",
+        });
         const notificationsCount = await Notification.countDocuments();
 
         stats = {
-          role: 'admin',
+          role: "admin",
           totalStudents,
           totalTeachers,
           totalClasses,
@@ -303,68 +396,79 @@ export const getStats = async (req, res) => {
           inventoryValue,
           activeCourses,
           upcomingExams,
-          notificationsCount
+          notificationsCount,
         };
       }
     }
 
-    return res.json({ success: true, stats });
+    return sendSuccess(res, undefined, null, 200, { stats });
   } catch (error) {
-    console.error('Error fetching dashboard stats:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Error fetching dashboard stats:", error);
+    return sendError(res, "Server error", 500);
   }
 };
 
+/**
+ * Retrieves dynamic charts and trend data.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const getCharts = async (req, res) => {
   try {
     const { role, id, profileId } = req.user;
 
-    if (role === 'student') {
+    if (role === "student") {
       let recentGrades = [];
       let timetable = [];
       let upcomingExamsList = [];
 
       if (checkFallback()) {
-        const student = FallbackDb.findOne('students', { user: id }) || FallbackDb.findById('students', profileId);
+        const student =
+          FallbackDb.findOne("students", { user: id }) ||
+          FallbackDb.findById("students", profileId);
         if (student) {
-          const results = FallbackDb.find('results') || [];
-          const studentResults = results.filter(r => r.studentId === student.id);
-          studentResults.forEach(r => {
-            r.marks.forEach(m => {
-              const sub = FallbackDb.findById('subjects', m.subjectId);
+          const results = FallbackDb.find("results") || [];
+          const studentResults = results.filter(
+            (r) => r.studentId === student.id
+          );
+          studentResults.forEach((r) => {
+            (r.marks || []).forEach((m) => {
+              const sub = FallbackDb.findById("subjects", m.subjectId);
               recentGrades.push({
-                name: sub ? sub.name : 'Subject',
+                name: sub ? sub.name : "Subject",
                 obtained: m.obtained,
-                total: m.total
+                total: m.total,
               });
             });
           });
-          upcomingExamsList = FallbackDb.find('exams') || [];
+          upcomingExamsList = FallbackDb.find("exams") || [];
         }
       } else {
         let student = await Student.findOne({ user: id });
         if (!student && profileId) student = await Student.findById(profileId);
         if (student) {
           try {
-            const results = await Result.find({ studentId: student._id }).populate('marks.subjectId');
-            results.forEach(r => {
-              r.marks.forEach(m => {
+            const results = await Result.find({ studentId: student._id }).populate(
+              "marks.subjectId"
+            );
+            results.forEach((r) => {
+              (r.marks || []).forEach((m) => {
                 recentGrades.push({
-                  name: m.subjectId?.name || 'Subject',
+                  name: m.subjectId?.name || "Subject",
                   obtained: m.obtained,
-                  total: m.total
+                  total: m.total,
                 });
               });
             });
           } catch (e) {
-            console.error('Grades mongo load failed', e);
+            console.error("Grades mongo load failed", e);
           }
           upcomingExamsList = await Exam.find().limit(5);
         }
       }
 
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, null, 200, {
         data: {
           recentGrades,
           timetable,
@@ -375,8 +479,9 @@ export const getCharts = async (req, res) => {
           libraryReading: [],
         },
       });
+    }
 
-    } else if (['teacher', 'head-teacher', 'hod', 'coordinator'].includes(role)) {
+    if (["teacher", "head-teacher", "hod", "coordinator"].includes(role)) {
       let approvedCount = 0;
       let pendingCount = 0;
       let rejectedCount = 0;
@@ -384,51 +489,63 @@ export const getCharts = async (req, res) => {
       let timetable = [];
 
       if (checkFallback()) {
-        const teacher = FallbackDb.findOne('teachers', { user: id }) || FallbackDb.findById('teachers', profileId);
+        const teacher =
+          FallbackDb.findOne("teachers", { user: id }) ||
+          FallbackDb.findById("teachers", profileId);
         if (teacher) {
           leavesList = teacher.leaves || [];
-          pendingCount = leavesList.filter(l => l.status === 'pending').length;
-          approvedCount = leavesList.filter(l => l.status === 'approved').length;
-          rejectedCount = leavesList.filter(l => l.status === 'rejected').length;
+          pendingCount = leavesList.filter((l) => l.status === "pending").length;
+          approvedCount = leavesList.filter(
+            (l) => l.status === "approved"
+          ).length;
+          rejectedCount = leavesList.filter(
+            (l) => l.status === "rejected"
+          ).length;
         }
       } else {
         let teacher = await Teacher.findOne({ user: id });
         if (!teacher && profileId) teacher = await Teacher.findById(profileId);
         if (teacher) {
           leavesList = teacher.leaves || [];
-          pendingCount = leavesList.filter(l => l.status === 'pending').length;
-          approvedCount = leavesList.filter(l => l.status === 'approved').length;
-          rejectedCount = leavesList.filter(l => l.status === 'rejected').length;
+          pendingCount = leavesList.filter((l) => l.status === "pending").length;
+          approvedCount = leavesList.filter(
+            (l) => l.status === "approved"
+          ).length;
+          rejectedCount = leavesList.filter(
+            (l) => l.status === "rejected"
+          ).length;
         }
       }
 
       const leaveStatus = [
-        { name: 'Approved', value: approvedCount },
-        { name: 'Pending', value: pendingCount },
-        { name: 'Rejected', value: rejectedCount }
-      ].filter(x => x.value > 0);
+        { name: "Approved", value: approvedCount },
+        { name: "Pending", value: pendingCount },
+        { name: "Rejected", value: rejectedCount },
+      ].filter((x) => x.value > 0);
 
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, null, 200, {
         data: {
           leaveStatus,
           timetable,
           classAttendance: [],
-          leavesList
-        }
+          leavesList,
+        },
       });
     }
 
-    // Real Admin Charts (calculated or empty when no records)
+    // Admin Charts
     let expenseCategory = [];
     try {
       const expenses = await Expense.find();
       const catMap = {};
-      expenses.forEach(e => {
-        const c = e.category || 'Other';
+      expenses.forEach((e) => {
+        const c = e.category || "Other";
         catMap[c] = (catMap[c] || 0) + (e.amount || 0);
       });
-      expenseCategory = Object.entries(catMap).map(([name, value]) => ({ name, value }));
+      expenseCategory = Object.entries(catMap).map(([name, value]) => ({
+        name,
+        value,
+      }));
     } catch {
       expenseCategory = [];
     }
@@ -437,31 +554,39 @@ export const getCharts = async (req, res) => {
     try {
       const inventory = await Inventory.find();
       const invMap = {};
-      inventory.forEach(i => {
-        const c = i.category || 'General';
-        invMap[c] = (invMap[c] || 0) + ((i.quantity || 0) * (i.price || 0));
+      inventory.forEach((i) => {
+        const c = i.category || "General";
+        invMap[c] = (invMap[c] || 0) + (i.quantity || 0) * (i.price || 0);
       });
-      inventoryCategory = Object.entries(invMap).map(([name, value]) => ({ name, value }));
+      inventoryCategory = Object.entries(invMap).map(([name, value]) => ({
+        name,
+        value,
+      }));
     } catch {
       inventoryCategory = [];
     }
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, null, 200, {
       data: {
         studentGrowth: [],
         feeCollection: [],
         attendanceRate: [],
         expenseCategory,
-        inventoryCategory
-      }
+        inventoryCategory,
+      },
     });
   } catch (error) {
-    console.error('Error fetching dashboard charts:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Error fetching dashboard charts:", error);
+    return sendError(res, "Server error", 500);
   }
 };
 
+/**
+ * Retrieves aggregate analytical telemetry on student enrollments, attendance averages, and gender stats.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const getStudentsAnalytics = async (req, res) => {
   try {
     let totalStudents = 0;
@@ -481,116 +606,157 @@ export const getStudentsAnalytics = async (req, res) => {
     if (checkFallback()) {
       const students = FallbackDb.find("students") || [];
       totalStudents = students.length;
-      activeStudents = students.filter(s => s.status === "active" || s.status === "Active" || !s.status).length;
+      activeStudents = students.filter(
+        (s) => s.status === "active" || s.status === "Active" || !s.status
+      ).length;
       inactiveStudents = totalStudents - activeStudents;
 
-      // Gender distribution
-      students.forEach(s => {
+      students.forEach((s) => {
         const g = (s.gender || "Male").toLowerCase();
         if (g.startsWith("f")) genderStats.Female++;
         else if (g.startsWith("m")) genderStats.Male++;
         else genderStats.Other++;
       });
 
-      // Class distribution map
       const classMap = {};
-      students.forEach(s => {
+      students.forEach((s) => {
         const clsName = s.class || s.className || "Unassigned";
         if (clsName && clsName !== "null" && clsName !== "undefined") {
           classMap[clsName] = (classMap[clsName] || 0) + 1;
         }
       });
-      classDistribution = Object.entries(classMap).map(([name, count]) => ({ name, count }));
-
-      // Recently admitted
-      recentlyAdmittedStudents = students.slice(-6).reverse().map(s => ({
-        id: s.id || s._id,
-        name: s.name || `${s.firstName || 'Student'} ${s.lastName || ''}`.trim(),
-        admissionNumber: s.admissionNumber || "N/A",
-        class: s.class || s.className || "N/A",
-        section: s.section || s.sectionName || "N/A",
-        createdAt: s.createdAt || new Date().toISOString(),
-        gender: s.gender || "Male",
+      classDistribution = Object.entries(classMap).map(([name, count]) => ({
+        name,
+        count,
       }));
 
-      // Dynamic Growth trend (past 6 months)
+      recentlyAdmittedStudents = students
+        .slice(-6)
+        .reverse()
+        .map((s) => ({
+          id: s.id || s._id,
+          name:
+            s.name || `${s.firstName || "Student"} ${s.lastName || ""}`.trim(),
+          admissionNumber: s.admissionNumber || "N/A",
+          class: s.class || s.className || "N/A",
+          section: s.section || s.sectionName || "N/A",
+          createdAt: s.createdAt || new Date().toISOString(),
+          gender: s.gender || "Male",
+        }));
+
       const now = new Date();
       for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
-        const monthName = d.toLocaleString('en-US', { month: 'short' });
-        const enrolled = students.filter(s => new Date(s.createdAt || Date.now()) <= d).length;
+        const d = new Date(
+          now.getFullYear(),
+          now.getMonth() - i + 1,
+          0,
+          23,
+          59,
+          59
+        );
+        const monthName = d.toLocaleString("en-US", { month: "short" });
+        const enrolled = students.filter(
+          (s) => new Date(s.createdAt || Date.now()) <= d
+        ).length;
         enrollmentGrowth.push({ month: monthName, enrolled });
       }
 
-      newAdmissionsCount = students.filter(s => new Date(s.createdAt || Date.now()) >= thirtyDaysAgo).length;
-
+      newAdmissionsCount = students.filter(
+        (s) => new Date(s.createdAt || Date.now()) >= thirtyDaysAgo
+      ).length;
     } else {
       totalStudents = await Student.countDocuments();
       activeStudents = await Student.countDocuments({ status: "active" });
       inactiveStudents = totalStudents - activeStudents;
 
-      // Gender distribution
       const maleCount = await Student.countDocuments({ gender: /^male$/i });
       const femaleCount = await Student.countDocuments({ gender: /^female$/i });
       const otherCount = Math.max(0, totalStudents - (maleCount + femaleCount));
       genderStats = { Male: maleCount, Female: femaleCount, Other: otherCount };
 
-      // Recently admitted
       const recentDocs = await Student.find()
         .sort({ createdAt: -1 })
         .limit(6)
         .populate("classId")
         .populate("sectionId");
 
-      recentlyAdmittedStudents = recentDocs.map(s => {
+      recentlyAdmittedStudents = recentDocs.map((s) => {
         const rawCls = s.classId?.name || s.class || s.className;
         const rawSec = s.sectionId?.name || s.section || s.sectionName;
         return {
           id: s._id,
-          name: s.name || `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Student',
+          name:
+            s.name ||
+            `${s.firstName || ""} ${s.lastName || ""}`.trim() ||
+            "Student",
           admissionNumber: s.admissionNumber || "N/A",
-          class: rawCls && rawCls !== "null" && rawCls !== "undefined" ? rawCls : "N/A",
-          section: rawSec && rawSec !== "null" && rawSec !== "undefined" ? rawSec : "N/A",
+          class:
+            rawCls && rawCls !== "null" && rawCls !== "undefined"
+              ? rawCls
+              : "N/A",
+          section:
+            rawSec && rawSec !== "null" && rawSec !== "undefined"
+              ? rawSec
+              : "N/A",
           createdAt: s.createdAt,
           gender: s.gender || "Male",
         };
       });
 
-      // Class distribution aggregation
-      const allStudents = await Student.find().populate("classId", "name").select("class className classId");
+      const allStudents = await Student.find()
+        .populate("classId", "name")
+        .select("class className classId");
       const classMap = {};
-      allStudents.forEach(s => {
-        const clsName = s.classId?.name || s.class || s.className || "Unassigned";
+      allStudents.forEach((s) => {
+        const clsName =
+          s.classId?.name || s.class || s.className || "Unassigned";
         if (clsName && clsName !== "null" && clsName !== "undefined") {
           classMap[clsName] = (classMap[clsName] || 0) + 1;
         }
       });
-      classDistribution = Object.entries(classMap).map(([name, count]) => ({ name, count }));
+      classDistribution = Object.entries(classMap).map(([name, count]) => ({
+        name,
+        count,
+      }));
 
-      // New admissions in last 30 days
-      newAdmissionsCount = await Student.countDocuments({ createdAt: { $gte: thirtyDaysAgo } });
+      newAdmissionsCount = await Student.countDocuments({
+        createdAt: { $gte: thirtyDaysAgo },
+      });
 
-      // Dynamic Growth trend over past 6 months based on actual createdAt
       const now = new Date();
       for (let i = 5; i >= 0; i--) {
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
-        const monthName = endOfMonth.toLocaleString('en-US', { month: 'short' });
-        const enrolled = await Student.countDocuments({ createdAt: { $lte: endOfMonth } });
+        const endOfMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() - i + 1,
+          0,
+          23,
+          59,
+          59
+        );
+        const monthName = endOfMonth.toLocaleString("en-US", {
+          month: "short",
+        });
+        const enrolled = await Student.countDocuments({
+          createdAt: { $lte: endOfMonth },
+        });
         enrollmentGrowth.push({ month: monthName, enrolled });
       }
 
-      // Real Attendance Calculations if attendance records exist
-      const attendanceLogs = await Attendance.find({ type: "student" }).limit(100);
+      const attendanceLogs = await Attendance.find({
+        type: "student",
+      }).limit(100);
       if (attendanceLogs.length > 0) {
         let totalRecords = 0;
         let presentRecords = 0;
         const classAttMap = {};
 
-        attendanceLogs.forEach(att => {
+        attendanceLogs.forEach((att) => {
           const clsName = att.classId?.name || "General";
-          if (!classAttMap[clsName]) classAttMap[clsName] = { present: 0, total: 0 };
+          if (!classAttMap[clsName]) {
+            classAttMap[clsName] = { present: 0, total: 0 };
+          }
 
-          (att.records || []).forEach(r => {
+          (att.records || []).forEach((r) => {
             totalRecords++;
             classAttMap[clsName].total++;
             if (r.status === "present") {
@@ -605,15 +771,19 @@ export const getStudentsAnalytics = async (req, res) => {
           dailyAttendanceAvg = `${avg}%`;
         }
 
-        attendanceByClass = Object.entries(classAttMap).map(([cls, data]) => ({
-          class: cls,
-          rate: data.total > 0 ? Math.round((data.present / data.total) * 100) : 0,
-        }));
+        attendanceByClass = Object.entries(classAttMap).map(
+          ([cls, data]) => ({
+            class: cls,
+            rate:
+              data.total > 0
+                ? Math.round((data.present / data.total) * 100)
+                : 0,
+          })
+        );
       }
     }
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, null, 200, {
       data: {
         totalStudents,
         activeStudents,
@@ -630,6 +800,6 @@ export const getStudentsAnalytics = async (req, res) => {
     });
   } catch (error) {
     console.error("getStudentsAnalytics error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500);
   }
 };

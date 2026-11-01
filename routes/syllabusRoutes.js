@@ -1,12 +1,17 @@
+// 2. External packages
 import express from "express";
+
+// 5. Middleware
+import { protect } from "../middleware/auth.js";
+import { authorize } from "../middleware/rbac.js";
+
+// 8. Controllers
 import {
   getAllSyllabus,
   getSyllabusByClass,
-  upsertClassSyllabus,
   resetClassSyllabus,
+  upsertClassSyllabus,
 } from "../controllers/syllabusController.js";
-import { protect } from "../middleware/auth.js";
-import { authorize } from "../middleware/rbac.js";
 
 const router = express.Router();
 
@@ -30,7 +35,17 @@ router.get("/", protect, getAllSyllabus);
 router.get("/:classId", protect, getSyllabusByClass);
 
 // Staff can configure/update class syllabus & reset to standard
-router.put("/:classId", protect, authorize(...STAFF_ROLES), upsertClassSyllabus);
-router.post("/:classId/reset", protect, authorize(...STAFF_ROLES), resetClassSyllabus);
+router.put(
+  "/:classId",
+  protect,
+  authorize(...STAFF_ROLES),
+  upsertClassSyllabus
+);
+router.post(
+  "/:classId/reset",
+  protect,
+  authorize(...STAFF_ROLES),
+  resetClassSyllabus
+);
 
 export default router;

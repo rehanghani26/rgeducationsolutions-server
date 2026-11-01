@@ -1,23 +1,47 @@
-import express from 'express';
+// 2. External packages
+import express from "express";
+
+// 5. Middleware
+import { protect } from "../middleware/auth.js";
+import { authorize } from "../middleware/rbac.js";
+
+// 8. Controllers
 import {
-  getAcademicSessions,
-  createAcademicSession,
   activateAcademicSession,
-  updateAcademicSession,
+  createAcademicSession,
   deleteAcademicSession,
+  getAcademicSessions,
   getActiveSession,
-} from '../controllers/sessionController.js';
-import { protect } from '../middleware/auth.js';
-import { authorize } from '../middleware/rbac.js';
+  updateAcademicSession,
+} from "../controllers/sessionController.js";
 
 const router = express.Router();
 
-router.get('/', protect, getAcademicSessions);
-// Fast single-record endpoint — must be declared before /:id to avoid route collision
-router.get('/active', protect, getActiveSession);
-router.post('/', protect, authorize('super-admin', 'school-admin', 'principal', 'admin'), createAcademicSession);
-router.patch('/:id/activate', protect, authorize('super-admin', 'school-admin', 'principal', 'admin'), activateAcademicSession);
-router.put('/:id', protect, authorize('super-admin', 'school-admin', 'principal', 'admin'), updateAcademicSession);
-router.delete('/:id', protect, authorize('super-admin', 'school-admin', 'principal', 'admin'), deleteAcademicSession);
+router.get("/", protect, getAcademicSessions);
+router.get("/active", protect, getActiveSession);
+router.post(
+  "/",
+  protect,
+  authorize("super-admin", "school-admin", "principal", "admin"),
+  createAcademicSession
+);
+router.patch(
+  "/:id/activate",
+  protect,
+  authorize("super-admin", "school-admin", "principal", "admin"),
+  activateAcademicSession
+);
+router.put(
+  "/:id",
+  protect,
+  authorize("super-admin", "school-admin", "principal", "admin"),
+  updateAcademicSession
+);
+router.delete(
+  "/:id",
+  protect,
+  authorize("super-admin", "school-admin", "principal", "admin"),
+  deleteAcademicSession
+);
 
 export default router;

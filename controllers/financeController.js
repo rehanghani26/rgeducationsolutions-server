@@ -1,11 +1,32 @@
+// 3. Configuration
+import { checkFallback } from '../config/db.js';
+
+// 4. Models
 import Fee from '../models/Fee.js';
 import Expense from '../models/Expense.js';
 import Student from '../models/Student.js';
-import { checkFallback } from '../config/db.js';
-import { FallbackDb } from '../services/dbFallback.js';
-import { parsePagination, buildSearchFilter, paginateResult, paginateArray } from '../utils/paginateQuery.js';
-import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
 
+// 6. Services
+import { FallbackDb } from '../services/dbFallback.js';
+
+// 7. Utilities
+import { parsePagination, paginateResult } from '../utils/paginateQuery.js';
+import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
+import { escapeRegex } from '../utils/commonUtil.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from '../utils/responseUtil.js';
+
+/**
+ * Enriches fallback fee records with student profile details.
+ *
+ * @param {Object} fee - Fee record.
+ * @returns {Object} Fee record with populated student details.
+ */
 const enrichFee = (fee) => {
   if (checkFallback()) {
     const stud = FallbackDb.findById('students', fee.studentId);
@@ -14,6 +35,13 @@ const enrichFee = (fee) => {
   return fee;
 };
 
+/**
+ * Retrieves paginated fee records with student population and search filtering.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getFees = async (req, res) => {
   try {
     const { page, limit, skip, sort, search, status } = parsePagination(req.query);
@@ -30,7 +58,10 @@ export const getFees = async (req, res) => {
       if (status) list = list.filter((f) => f.status === status);
       const total = list.length;
       const data = list.slice(skip, skip + limit);
-      return res.json({ success: true, fees: data, ...paginateResult(data, total, { page, limit }) });
+      return sendSuccess(res, undefined, {
+        fees: data,
+        ...paginateResult(data, total, { page, limit })
+      });
     }
 
     const filter = {};
@@ -47,7 +78,7 @@ export const getFees = async (req, res) => {
       .limit(limit);
 
     if (search) {
-      const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const regex = new RegExp(escapeRegex(search), 'i');
       const allFees = await Fee.find(filter).populate('studentId', 'name admissionNumber');
       const matched = allFees.filter((f) =>
         regex.test(f.studentId?.name || '') ||
@@ -56,17 +87,29 @@ export const getFees = async (req, res) => {
       );
       const total = matched.length;
       fees = matched.slice(skip, skip + limit);
-      return res.json({ success: true, fees, ...paginateResult(fees, total, { page, limit }) });
+      return sendSuccess(res, undefined, {
+        fees,
+        ...paginateResult(fees, total, { page, limit })
+      });
     }
 
     const total = await Fee.countDocuments(filter);
-    return res.json({ success: true, fees, ...paginateResult(fees, total, { page, limit }) });
+    return sendSuccess(res, undefined, {
+      fees,
+      ...paginateResult(fees, total, { page, limit })
+    });
   } catch (error) {
-    console.error('getFees error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves a single fee record by ID.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getFeeById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -79,25 +122,37 @@ export const getFeeById = async (req, res) => {
       fee = await Fee.findById(id).populate('studentId');
     }
 
-    if (!fee) return res.status(404).json({ success: false, message: 'Fee record not found' });
-    return res.json({ success: true, fee });
+    if (!fee) return sendNotFound(res, 'Fee record not found');
+    return sendSuccess(res, undefined, { fee });
   } catch (error) {
-    console.error('getFeeById error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves activity logs for a specific fee record.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getFeeActivity = async (req, res) => {
   try {
     const { id } = req.params;
     const logs = await getRecordActivity('finance', id);
-    return res.json({ success: true, logs, loginHistory: [] });
+    return sendSuccess(res, undefined, { logs, loginHistory: [] });
   } catch (error) {
-    console.error('getFeeActivity error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Updates fee details (amount pending, due date, status).
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const updateFee = async (req, res) => {
   try {
     const { id } = req.params;
@@ -115,7 +170,7 @@ export const updateFee = async (req, res) => {
       fee = await Fee.findByIdAndUpdate(id, update, { new: true }).populate('studentId');
     }
 
-    if (!fee) return res.status(404).json({ success: false, message: 'Fee record not found' });
+    if (!fee) return sendNotFound(res, 'Fee record not found');
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
@@ -127,20 +182,26 @@ export const updateFee = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({ success: true, message: 'Fee record updated', fee });
+    return sendSuccess(res, 'Fee record updated', { fee });
   } catch (error) {
-    console.error('updateFee error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Records a student fee collection / transaction.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const collectFee = async (req, res) => {
   try {
     const { studentId, feeId, amount, method, reference } = req.body;
     const paidAmount = Number(amount);
 
     if (isNaN(paidAmount) || paidAmount <= 0) {
-      return res.status(400).json({ success: false, message: 'Please provide a valid payment amount' });
+      return sendBadRequest(res, 'Please provide a valid payment amount');
     }
 
     let targetStudentId = studentId;
@@ -160,14 +221,14 @@ export const collectFee = async (req, res) => {
       }
 
       if (!resolvedStudentId) {
-        return res.status(404).json({ success: false, message: 'Student profile not found for logged in user' });
+        return sendNotFound(res, 'Student profile not found for logged in user');
       }
       targetStudentId = resolvedStudentId;
       targetFeeId = undefined; // Force student lookup by studentId rather than arbitrary feeId
     }
 
     if (!targetStudentId && !targetFeeId) {
-      return res.status(400).json({ success: false, message: 'Student ID or Fee ID is required' });
+      return sendBadRequest(res, 'Student ID or Fee ID is required');
     }
 
     let feeRecord = null;
@@ -213,7 +274,7 @@ export const collectFee = async (req, res) => {
 
       if (!feeRecord) {
         const studentObj = await Student.findById(targetStudentId);
-        if (!studentObj) return res.status(404).json({ success: false, message: 'Student record not found' });
+        if (!studentObj) return sendNotFound(res, 'Student record not found');
 
         feeRecord = new Fee({
           studentId: targetStudentId,
@@ -249,13 +310,19 @@ export const collectFee = async (req, res) => {
       metadata: { amount: paidAmount, method: method || 'Online', reference },
     });
 
-    return res.json({ success: true, message: 'Payment recorded successfully', fee: feeRecord });
+    return sendSuccess(res, 'Payment recorded successfully', { fee: feeRecord });
   } catch (error) {
-    console.error('collectFee error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves paginated organizational expenses.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getExpenses = async (req, res) => {
   try {
     const { page, limit, skip } = parsePagination(req.query);
@@ -265,7 +332,10 @@ export const getExpenses = async (req, res) => {
       list.sort((a, b) => new Date(b.date) - new Date(a.date));
       const total = list.length;
       const data = list.slice(skip, skip + limit);
-      return res.json({ success: true, expenses: data, ...paginateResult(data, total, { page, limit }) });
+      return sendSuccess(res, undefined, {
+        expenses: data,
+        ...paginateResult(data, total, { page, limit })
+      });
     }
 
     const [expenses, total] = await Promise.all([
@@ -273,13 +343,22 @@ export const getExpenses = async (req, res) => {
       Expense.countDocuments(),
     ]);
 
-    return res.json({ success: true, expenses, ...paginateResult(expenses, total, { page, limit }) });
+    return sendSuccess(res, undefined, {
+      expenses,
+      ...paginateResult(expenses, total, { page, limit })
+    });
   } catch (error) {
-    console.error('getExpenses error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Creates and logs a new operational expense.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const createExpense = async (req, res) => {
   try {
     const data = req.body;
@@ -308,13 +387,19 @@ export const createExpense = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.status(201).json({ success: true, message: 'Expense logged successfully', expense: newRecord });
+    return sendCreated(res, 'Expense logged successfully', { expense: newRecord });
   } catch (error) {
-    console.error('createExpense error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Exports all fee records as CSV.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const exportFees = async (req, res) => {
   try {
     let fees = [];
@@ -336,7 +421,6 @@ export const exportFees = async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename=fees.csv');
     return res.send(csv);
   } catch (error) {
-    console.error('exportFees error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };

@@ -1,53 +1,61 @@
-import "dotenv/config";
-import express from "express";
-import cors from "cors";
-import cookieParser from "cookie-parser";
-import morgan from "morgan";
-import helmet from "helmet";
-import dotenv from "dotenv";
+// 1. Node.js built-in modules
 import path from "path";
 import { fileURLToPath } from "url";
 
+// 2. External packages
+import cookieParser from "cookie-parser";
+import cors from "cors";
+import dotenv from "dotenv";
+import express from "express";
+import helmet from "helmet";
+import morgan from "morgan";
+
+// 3. Configuration
 import { connectDB, getDbState, reconnectDB } from "./config/db.js";
 
-// Routers
-import authRoutes from "./routes/authRoutes.js";
-import dashboardRoutes from "./routes/dashboardRoutes.js";
-import studentRoutes from "./routes/studentRoutes.js";
-import teacherRoutes from "./routes/teacherRoutes.js";
-import inventoryRoutes from "./routes/inventoryRoutes.js";
-import financeRoutes from "./routes/financeRoutes.js";
-import erpRoutes from "./routes/erpRoutes.js";
-import companyRoutes from "./routes/companyRoutes.js";
-import auditLogRoutes from "./routes/auditLogRoutes.js";
-import examRoutes from "./routes/examRoutes.js";
-import attendanceRoutes from "./routes/attendanceRoutes.js";
-import periodRoutes from "./routes/periodRoutes.js";
-import sessionRoutes from "./routes/sessionRoutes.js";
-import onlineClassRoutes from "./routes/onlineClassRoutes.js";
-import homeworkRoutes from "./routes/homeworkRoutes.js";
-import portalRoutes from "./routes/portalRoutes.js";
-import userRoutes from "./routes/userRoutes.js";
-import profileRoutes from "./routes/profileRoutes.js";
-import aiRoutes from "./ai/ai.routes.js";
-import resultRoutes from "./routes/resultRoutes.js";
-import syllabusRoutes from "./routes/syllabusRoutes.js";
-import documentRoutes from "./routes/documentRoutes.js";
-import setupRoutes from "./routes/setupRoutes.js";
-import classRoutes from "./routes/classRoutes.js"; // ← ClassRoom module
-import leaveRoutes from "./routes/leaveRoutes.js"; // ← Universal Leave Management module
+// 5. Middleware
 import { auditMiddleware } from "./middleware/auditLog.js";
+import { errorHandler } from "./middleware/errorHandler.js";
+
+// 8. Other internal modules (Routes)
+import aiRoutes from "./ai/ai.routes.js";
+import attendanceRoutes from "./routes/attendanceRoutes.js";
+import auditLogRoutes from "./routes/auditLogRoutes.js";
+import authRoutes from "./routes/authRoutes.js";
+import budgetRoutes from "./routes/budgetRoutes.js";
+import classRoutes from "./routes/classRoutes.js";
+import companyRoutes from "./routes/companyRoutes.js";
+import dashboardRoutes from "./routes/dashboardRoutes.js";
+import documentRoutes from "./routes/documentRoutes.js";
+import erpRoutes from "./routes/erpRoutes.js";
+import examRoutes from "./routes/examRoutes.js";
+import financeRoutes from "./routes/financeRoutes.js";
+import homeworkRoutes from "./routes/homeworkRoutes.js";
+import inventoryRoutes from "./routes/inventoryRoutes.js";
+import leaveRoutes from "./routes/leaveRoutes.js";
+import onlineClassRoutes from "./routes/onlineClassRoutes.js";
+import payrollRoutes from "./routes/payrollRoutes.js";
+import periodRoutes from "./routes/periodRoutes.js";
+import portalRoutes from "./routes/portalRoutes.js";
+import profileRoutes from "./routes/profileRoutes.js";
+import resultRoutes from "./routes/resultRoutes.js";
+import sessionRoutes from "./routes/sessionRoutes.js";
+import setupRoutes from "./routes/setupRoutes.js";
+import studentRoutes from "./routes/studentRoutes.js";
+import syllabusRoutes from "./routes/syllabusRoutes.js";
+import teacherRoutes from "./routes/teacherRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Setup environment configs
+// Setup environment configurations
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Apply middlewears
+// Apply global middlewares
 app.use(
   helmet({
     contentSecurityPolicy: false, // Allow easy integration in development
@@ -89,7 +97,7 @@ connectDB();
 // Audit logging for authenticated API requests
 app.use("/api/v1", auditMiddleware);
 
-// Register Api Routes
+// Register API Routes
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
 app.use("/api/v1/students", studentRoutes);
@@ -98,6 +106,7 @@ app.use("/api/v1/teachers", teacherRoutes);
 app.use("/api/v1/inventory", inventoryRoutes);
 app.use("/api/v1/finance", financeRoutes);
 app.use("/api/v1/erp", erpRoutes);
+
 app.use("/api/v1/company", companyRoutes);
 app.use("/api/v1/audit-logs", auditLogRoutes);
 app.use("/api/v1/exams", examRoutes);
@@ -118,14 +127,20 @@ app.use("/api/v1/results", resultRoutes);
 app.use("/api/v1/syllabus", syllabusRoutes);
 app.use("/api/v1/documents", documentRoutes);
 app.use("/api/v1/setup", setupRoutes);
-app.use("/api/v1/classes", classRoutes); // ← ClassRoom module
-app.use(["/api/v1/leaves", "/api/leaves"], leaveRoutes); // ← Universal Leave Management module
+
+app.use("/api/v1/classes", classRoutes); // ClassRoom module
+app.use(["/api/v1/leaves", "/api/leaves"], leaveRoutes); // Universal Leave Management module
 
 // Forward notices endpoints to ERP notice board routes
 app.use(["/api/v1/notices", "/api/notices"], (req, res, next) => {
   req.url = `/notices${req.url === "/" ? "" : req.url}`;
   return erpRoutes(req, res, next);
 });
+
+app.use("/api/v1/budget", budgetRoutes);
+app.use("/api/budget", budgetRoutes);
+app.use("/api/v1/payroll", payrollRoutes);
+app.use("/api/payroll", payrollRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
@@ -152,17 +167,10 @@ app.all("/api/reconnect-db", async (req, res) => {
   });
 });
 
-// Error handling handler
-app.use((err, req, res, next) => {
-  console.error("Unhandled Server Error:", err);
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || "Internal Server Error",
-    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
-  });
-});
+// Centralized error handling middleware
+app.use(errorHandler);
 
-// Start listening
+// Start server listening
 app.listen(PORT, () => {
   console.log(
     `🚀 RGES Server running on port ${PORT} in ${process.env.NODE_ENV || "development"} mode`

@@ -1,39 +1,60 @@
-import express from 'express';
+// 2. External packages
+import express from "express";
+
+// 5. Middleware
+import { protect } from "../middleware/auth.js";
+import { authorize } from "../middleware/rbac.js";
+
+// 8. Controllers
 import {
-  getApplicantLeaveProfile,
-  getMyLeaves,
-  getAllLeaves,
-  requestLeave,
-  reviewLeave,
   cancelLeave,
   getActiveLeavesOnDate,
-} from '../controllers/leaveController.js';
-import { protect } from '../middleware/auth.js';
-import { authorize } from '../middleware/rbac.js';
+  getAllLeaves,
+  getApplicantLeaveProfile,
+  getMyLeaves,
+  requestLeave,
+  reviewLeave,
+} from "../controllers/leaveController.js";
 
 const router = express.Router();
 
 // ─── Public within Authenticated Session ───
-router.get('/my', protect, getMyLeaves);
-router.post('/request', protect, requestLeave);
-router.get('/applicant/:id', protect, getApplicantLeaveProfile);
-router.delete('/:id', protect, cancelLeave);
+router.get("/my", protect, getMyLeaves);
+router.post("/request", protect, requestLeave);
+router.get("/applicant/:id", protect, getApplicantLeaveProfile);
+router.delete("/:id", protect, cancelLeave);
 
 // ─── Roster Active Leaves for Attendance Taking ───
-router.get('/active-on-date', protect, getActiveLeavesOnDate);
+router.get("/active-on-date", protect, getActiveLeavesOnDate);
 
 // ─── Administrative & Review Endpoints ───
 router.get(
-  '/all',
+  "/all",
   protect,
-  authorize('super-admin', 'school-admin', 'principal', 'director', 'teacher', 'head-teacher', 'hod', 'coordinator'),
+  authorize(
+    "super-admin",
+    "school-admin",
+    "principal",
+    "director",
+    "teacher",
+    "head-teacher",
+    "hod",
+    "coordinator"
+  ),
   getAllLeaves
 );
 
 router.patch(
-  '/:id/review',
+  "/:id/review",
   protect,
-  authorize('super-admin', 'school-admin', 'principal', 'director', 'teacher', 'head-teacher'),
+  authorize(
+    "super-admin",
+    "school-admin",
+    "principal",
+    "director",
+    "teacher",
+    "head-teacher"
+  ),
   reviewLeave
 );
 

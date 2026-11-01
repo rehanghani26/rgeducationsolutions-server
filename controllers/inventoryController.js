@@ -1,10 +1,30 @@
+// 3. Configuration
+import { checkFallback } from '../config/db.js';
+
+// 4. Models
 import Inventory from '../models/Inventory.js';
 import Vendor from '../models/Vendor.js';
-import { checkFallback } from '../config/db.js';
+
+// 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
+
+// 7. Utilities
 import { parsePagination, buildSearchFilter, paginateResult } from '../utils/paginateQuery.js';
 import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from '../utils/responseUtil.js';
 
+/**
+ * Enriches a fallback inventory item with vendor profile details.
+ *
+ * @param {Object} item - Inventory item.
+ * @returns {Object} Enriched inventory item.
+ */
 const enrichItem = (item) => {
   if (checkFallback()) {
     const vend = FallbackDb.findById('vendors', item.vendorId);
@@ -13,6 +33,13 @@ const enrichItem = (item) => {
   return item;
 };
 
+/**
+ * Retrieves paginated inventory stock with category and low-stock filtering.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getInventory = async (req, res) => {
   try {
     const { page, limit, skip, sort, search, status } = parsePagination(req.query);
@@ -31,7 +58,7 @@ export const getInventory = async (req, res) => {
       if (status === 'low-stock') list = list.filter((item) => item.quantity <= item.minStockLevel);
       const total = list.length;
       const data = list.slice(skip, skip + limit);
-      return res.json({ success: true, inventory: data, ...paginateResult(data, total, { page, limit }) });
+      return sendSuccess(res, undefined, { inventory: data, ...paginateResult(data, total, { page, limit }) });
     }
 
     const filter = { ...buildSearchFilter(search, searchFields) };
@@ -49,13 +76,19 @@ export const getInventory = async (req, res) => {
       Inventory.countDocuments(filter),
     ]);
 
-    return res.json({ success: true, inventory, ...paginateResult(inventory, total, { page, limit }) });
+    return sendSuccess(res, undefined, { inventory, ...paginateResult(inventory, total, { page, limit }) });
   } catch (error) {
-    console.error('getInventory error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves a single inventory item by ID.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getInventoryById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -68,25 +101,37 @@ export const getInventoryById = async (req, res) => {
       item = await Inventory.findById(id).populate('vendorId');
     }
 
-    if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
-    return res.json({ success: true, item });
+    if (!item) return sendNotFound(res, 'Item not found');
+    return sendSuccess(res, undefined, { item });
   } catch (error) {
-    console.error('getInventoryById error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves audit activity logs for an inventory item.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getInventoryActivity = async (req, res) => {
   try {
     const { id } = req.params;
     const logs = await getRecordActivity('inventory', id);
-    return res.json({ success: true, logs, loginHistory: [] });
+    return sendSuccess(res, undefined, { logs, loginHistory: [] });
   } catch (error) {
-    console.error('getInventoryActivity error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Updates details of an inventory item.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const updateInventoryItem = async (req, res) => {
   try {
     const { id } = req.params;
@@ -102,7 +147,7 @@ export const updateInventoryItem = async (req, res) => {
       updatedItem = await Inventory.findByIdAndUpdate(id, data, { new: true }).populate('vendorId');
     }
 
-    if (!updatedItem) return res.status(404).json({ success: false, message: 'Item not found' });
+    if (!updatedItem) return sendNotFound(res, 'Item not found');
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
@@ -114,13 +159,19 @@ export const updateInventoryItem = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({ success: true, message: 'Item updated successfully', item: updatedItem });
+    return sendSuccess(res, 'Item updated successfully', { item: updatedItem });
   } catch (error) {
-    console.error('updateInventoryItem error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Creates a new inventory stock record.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const createInventoryItem = async (req, res) => {
   try {
     const data = req.body;
@@ -152,33 +203,39 @@ export const createInventoryItem = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.status(201).json({ success: true, message: 'Inventory item created successfully', item: newRecord });
+    return sendCreated(res, 'Inventory item created successfully', { item: newRecord });
   } catch (error) {
-    console.error('createInventoryItem error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Adjusts quantity of stock in or out.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const adjustStock = async (req, res) => {
   try {
-    const { id, type, quantity } = req.body; // type: 'in' or 'out'
+    const { id, type, quantity } = req.body;
     const qtyChange = Number(quantity);
 
     if (!id || !type || isNaN(qtyChange)) {
-      return res.status(400).json({ success: false, message: 'Please provide valid item ID, type (in/out) and quantity.' });
+      return sendBadRequest(res, 'Please provide valid item ID, type (in/out) and quantity.');
     }
 
     let updatedItem = null;
 
     if (checkFallback()) {
       const item = FallbackDb.findById('inventory', id);
-      if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+      if (!item) return sendNotFound(res, 'Item not found');
 
       const newQty = type === 'in' ? item.quantity + qtyChange : Math.max(0, item.quantity - qtyChange);
       updatedItem = FallbackDb.update('inventory', id, { quantity: newQty });
     } else {
       const item = await Inventory.findById(id);
-      if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+      if (!item) return sendNotFound(res, 'Item not found');
 
       item.quantity = type === 'in' ? item.quantity + qtyChange : Math.max(0, item.quantity - qtyChange);
       updatedItem = await item.save();
@@ -195,13 +252,19 @@ export const adjustStock = async (req, res) => {
       metadata: { type, quantity: qtyChange, newQuantity: updatedItem.quantity },
     });
 
-    return res.json({ success: true, message: 'Stock level adjusted successfully', item: updatedItem });
+    return sendSuccess(res, 'Stock level adjusted successfully', { item: updatedItem });
   } catch (error) {
-    console.error('adjustStock error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves list of items running below minimum stock threshold.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getAlerts = async (req, res) => {
   try {
     let alertItems = [];
@@ -214,13 +277,19 @@ export const getAlerts = async (req, res) => {
       }).populate('vendorId');
     }
 
-    return res.json({ success: true, count: alertItems.length, alerts: alertItems });
+    return sendSuccess(res, undefined, { count: alertItems.length, alerts: alertItems });
   } catch (error) {
-    console.error('getAlerts error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves all registered suppliers/vendors.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getVendors = async (req, res) => {
   try {
     let list = [];
@@ -229,13 +298,19 @@ export const getVendors = async (req, res) => {
     } else {
       list = await Vendor.find();
     }
-    return res.json({ success: true, count: list.length, vendors: list });
+    return sendSuccess(res, undefined, { count: list.length, vendors: list });
   } catch (error) {
-    console.error('getVendors error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Registers a new supplier/vendor.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const createVendor = async (req, res) => {
   try {
     const data = req.body;
@@ -254,9 +329,8 @@ export const createVendor = async (req, res) => {
       newRecord = await vendor.save();
     }
 
-    return res.status(201).json({ success: true, message: 'Vendor added successfully', vendor: newRecord });
+    return sendCreated(res, 'Vendor added successfully', { vendor: newRecord });
   } catch (error) {
-    console.error('createVendor error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };

@@ -71,13 +71,24 @@ export function buildSystemPrompt(user, currentDate, activeSession = null) {
   - **Step 2**: Master Period & Bell Schedule (prayer, lunch, class periods)
   - **Step 3**: Class Timetable Builder (teacher, subject, and room mappings)
 
-### 👨‍🎓 Students
-- List, search, filter students by class/section/status
-- Count students (total, per class, per section)
-- Create new student enrollments (collect: name, class, section, parent, contact)
-- Update student information
-- Delete students (requires confirmation)
-- View student profiles with academic history
+### 👨‍🎓 Students, ID Cards & Student Leaves (Full Capability)
+- **getStudents**: Filter by class, section, status (active/inactive/passout), gender (Male/Female), blood group (A+, B+, O+, AB+), roll number, or search query.
+- **getStudentById**: Inspect complete student profile dossier.
+- **getStudentIdCard**: Generate & preview student ID card with school branding and selectable card templates (classic, modern-blue, academic, premium, vertical). Always invoke this when the user asks for a student ID card.
+- **updateStudentIdCardData**: Update ID card fields (name, roll, class, section, bloodGroup, photo, contact, address) and immediately refresh the card.
+- **getStudentLeaves**: View student leave applications, approval status (pending/approved/rejected), and dates.
+- **applyStudentLeave**: Submit leave application for student (medical, casual, family event) with dates and reason.
+- **reviewStudentLeave**: Approve or reject a student's pending leave application.
+- **getStudentComprehensiveReport**: 360-degree overview of a student: profile, attendance %, leave history, fees due, and card preview.
+- **updateStudent**: Update any student field (contact, parent, address, status, photo).
+- **createStudent**: Enroll new student.
+- **deleteStudent**: Delete student (always ask user for confirmation).
+
+
+
+
+
+
 
 ### 👩‍🏫 Teachers & Staff
 - List all teachers with department, contact, subjects

@@ -1,59 +1,101 @@
-import fs from "fs";
-import path from "path";
-import mongoose from "mongoose";
-import Student from "../models/Student.js";
-import User from "../models/User.js";
-import Parent from "../models/Parent.js";
-import Otp from "../models/Otp.js";
-import { checkFallback } from "../config/db.js";
-import { FallbackDb } from "../services/dbFallback.js";
-import { configureCloudinary } from "../config/cloudinary.js"; // kept for legacy URL detection only
-import { sendStudentOtpEmail } from "../services/emailService.js";
+// 1. Node.js built-in modules
+import fs from 'fs';
+import path from 'path';
+
+// 2. External packages
+import mongoose from 'mongoose';
+
+// 3. Configuration
+import { checkFallback } from '../config/db.js';
+import { configureCloudinary } from '../config/cloudinary.js';
 import {
   uploadToS3,
   generateS3Key,
   getPresignedUrl,
   resolveFileUrl,
-  isS3Key,
-} from "../config/s3.js";
+  isS3Key
+} from '../config/s3.js';
+
+// 4. Models
+import AcademicSession from '../models/AcademicSession.js';
+import ClassRoom from '../models/ClassRoom.js';
+import Otp from '../models/Otp.js';
+import Parent from '../models/Parent.js';
+import Student from '../models/Student.js';
+import StudentSessionHistory from '../models/StudentSessionHistory.js';
+import User from '../models/User.js';
+
+// 6. Services
+import { FallbackDb } from '../services/dbFallback.js';
+import { sendStudentOtpEmail } from '../services/emailService.js';
+
+// 7. Utilities
+import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
+import {
+  normalizeEmail,
+  formatFullName,
+  generateSecurePassword
+} from '../utils/commonUtil.js';
 import {
   parsePagination,
-  buildSearchFilter,
   paginateResult,
-  paginateArray,
-} from "../utils/paginateQuery.js";
-import { logActivity, getRecordActivity } from "../utils/activityLogger.js";
-import AcademicSession from "../models/AcademicSession.js";
-import StudentSessionHistory from "../models/StudentSessionHistory.js";
-import ClassRoom from "../models/ClassRoom.js";
+  paginateArray
+} from '../utils/paginateQuery.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from '../utils/responseUtil.js';
+
+// ─── Default Permission Constants ─────────────────────────────────────────────
 
 const DEFAULT_STUDENT_PERMISSIONS = [
-  "dashboard",
-  "academics",
-  "timetable",
-  "reports",
-  "communication",
-];
-const DEFAULT_PARENT_PERMISSIONS = [
-  "dashboard",
-  "student-management",
-  "fee",
-  "communication",
+  'dashboard',
+  'academics',
+  'timetable',
+  'reports',
+  'communication'
 ];
 
-const normalizeEmail = (email = "") => email.trim().toLowerCase();
-const normalizeAdmissionNumber = (admissionNumber = "") =>
+const DEFAULT_PARENT_PERMISSIONS = [
+  'dashboard',
+  'student-management',
+  'fee',
+  'communication'
+];
+
+/**
+ * Standardize admission number format.
+ *
+ * @param {string} admissionNumber - Raw admission number string.
+ * @returns {string} Trimmed uppercase admission number.
+ */
+const normalizeAdmissionNumber = (admissionNumber = '') =>
   admissionNumber.trim().toUpperCase();
-const fullName = (data) =>
-  data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim();
+
+/**
+ * Generate temporary random credentials for new students.
+ *
+ * @returns {string} Formatted secure temporary password.
+ */
 const generateRandomPassword = () =>
   `Std@${Math.random().toString(36).slice(2, 8)}${Math.floor(100 + Math.random() * 900)}`;
+
+/**
+ * Generate temporary random credentials for newly provisioned parents.
+ *
+ * @returns {string} Formatted secure temporary parent password.
+ */
 const generateParentPassword = () =>
   `Par@${Math.random().toString(36).slice(2, 8)}${Math.floor(100 + Math.random() * 900)}`;
 
 /**
- * Generate globally unique admission number: STD-2026-0001
+ * Generate globally unique admission number: STD-YYYY-XXXX.
  * Checks both MongoDB and FallbackDb.
+ *
+ * @returns {Promise<string>} Next unique sequential admission number.
  */
 const getNextAdmissionNumber = async () => {
   const year = new Date().getFullYear();
@@ -63,28 +105,31 @@ const getNextAdmissionNumber = async () => {
   let lastNum = 0;
 
   if (checkFallback()) {
-    const nums = FallbackDb.find("students")
+    const nums = FallbackDb.find('students')
       .map((s) => s.admissionNumber)
-      .filter((id) => pattern.test(id || ""))
-      .map((id) => Number(id.replace(prefix, "")))
+      .filter((id) => pattern.test(id || ''))
+      .map((id) => Number(id.replace(prefix, '')))
       .filter((n) => !isNaN(n));
     lastNum = nums.length ? Math.max(...nums) : 0;
   } else {
     const last = await Student.findOne({ admissionNumber: pattern })
       .sort({ admissionNumber: -1 })
-      .select("admissionNumber");
+      .select('admissionNumber');
     if (last?.admissionNumber) {
-      lastNum = Number(last.admissionNumber.replace(prefix, "")) || 0;
+      lastNum = Number(last.admissionNumber.replace(prefix, '')) || 0;
     }
   }
 
-  return `${prefix}${String(lastNum + 1).padStart(4, "0")}`;
+  return `${prefix}${String(lastNum + 1).padStart(4, '0')}`;
 };
 
 /**
- * Get the next roll number for a given classId + sectionId.
+ * Get the next sequential roll number for a given classId + sectionId.
  * Roll numbers restart from 1 per section per academic year.
- * Finds the max existing roll number in that class+section, returns max+1.
+ *
+ * @param {string} classId - Class identifier.
+ * @param {string} sectionId - Section identifier.
+ * @returns {Promise<number>} Next available roll number.
  */
 const getNextRollNumber = async (classId, sectionId) => {
   if (!classId || !sectionId) {
@@ -92,13 +137,13 @@ const getNextRollNumber = async (classId, sectionId) => {
   }
 
   const year = new Date().getFullYear();
-  const month = new Date().getMonth(); // 0-indexed
+  const month = new Date().getMonth();
   const academicYear = month >= 3
     ? `${year}-${String(year + 1).slice(-2)}`
     : `${year - 1}-${String(year).slice(-2)}`;
 
   if (checkFallback()) {
-    const existing = FallbackDb.find("students").filter(
+    const existing = FallbackDb.find('students').filter(
       (s) =>
         String(s.classId) === String(classId) &&
         String(s.sectionId) === String(sectionId) &&
@@ -108,66 +153,69 @@ const getNextRollNumber = async (classId, sectionId) => {
       ? Math.max(...existing.map((s) => Number(s.rollNumber) || 0))
       : 0;
     return maxRoll + 1;
-  } else {
-    const last = await Student.findOne({
-      classId: String(classId),
-      sectionId: String(sectionId),
-      academicYear,
-      rollNumber: { $ne: null },
-    })
-      .sort({ rollNumber: -1 })
-      .select("rollNumber");
-    return (Number(last?.rollNumber) || 0) + 1;
   }
+
+  const last = await Student.findOne({
+    classId: String(classId),
+    sectionId: String(sectionId),
+    academicYear,
+    rollNumber: { $ne: null }
+  })
+    .sort({ rollNumber: -1 })
+    .select('rollNumber');
+
+  return (Number(last?.rollNumber) || 0) + 1;
 };
 
 const BACKEND_CLASS_OPTIONS = [
-  { id: "cls-nur", name: "Nursery" },
-  { id: "cls-lkg", name: "LKG" },
-  { id: "cls-ukg", name: "UKG" },
-  { id: "cls-1",   name: "Class 1" },
-  { id: "cls-2",   name: "Class 2" },
-  { id: "cls-3",   name: "Class 3" },
-  { id: "cls-4",   name: "Class 4" },
-  { id: "cls-5",   name: "Class 5" },
-  { id: "cls-6",   name: "Class 6" },
-  { id: "cls-7",   name: "Class 7" },
-  { id: "cls-8",   name: "Class 8" },
-  { id: "cls-9",   name: "Class 9" },
-  { id: "cls-10",  name: "Class 10" },
-  { id: "cls-11",  name: "Class 11" },
-  { id: "cls-12",  name: "Class 12" },
+  { id: 'cls-nur', name: 'Nursery' },
+  { id: 'cls-lkg', name: 'LKG' },
+  { id: 'cls-ukg', name: 'UKG' },
+  { id: 'cls-1',   name: 'Class 1' },
+  { id: 'cls-2',   name: 'Class 2' },
+  { id: 'cls-3',   name: 'Class 3' },
+  { id: 'cls-4',   name: 'Class 4' },
+  { id: 'cls-5',   name: 'Class 5' },
+  { id: 'cls-6',   name: 'Class 6' },
+  { id: 'cls-7',   name: 'Class 7' },
+  { id: 'cls-8',   name: 'Class 8' },
+  { id: 'cls-9',   name: 'Class 9' },
+  { id: 'cls-10',  name: 'Class 10' },
+  { id: 'cls-11',  name: 'Class 11' },
+  { id: 'cls-12',  name: 'Class 12' }
 ];
 
 const BACKEND_SECTION_OPTIONS = [
-  { id: "sec-a", name: "Section A" },
-  { id: "sec-b", name: "Section B" },
-  { id: "sec-c", name: "Section C" },
-  { id: "sec-d", name: "Section D" },
-  { id: "sec-e", name: "Section E" },
-  { id: "sec-f", name: "Section F" },
-  { id: "sec-g", name: "Section G" },
+  { id: 'sec-a', name: 'Section A' },
+  { id: 'sec-b', name: 'Section B' },
+  { id: 'sec-c', name: 'Section C' },
+  { id: 'sec-d', name: 'Section D' },
+  { id: 'sec-e', name: 'Section E' },
+  { id: 'sec-f', name: 'Section F' },
+  { id: 'sec-g', name: 'Section G' }
 ];
 
+/**
+ * Resolve canonical class definition from freeform string or object.
+ *
+ * @param {string|Object} val - Raw class query parameter or body field.
+ * @returns {Object|null} Matching class definition.
+ */
 const resolveClass = (val) => {
   if (!val) return null;
-  if (typeof val === "object") {
-    val = val.name || val.id || "";
-  }
-  if (!val || val === "N/A" || val === "null" || val === "undefined") return null;
-  const str = String(val).trim().toLowerCase();
+  let target = typeof val === 'object' ? val.name || val.id || '' : val;
+  if (!target || target === 'N/A' || target === 'null' || target === 'undefined') return null;
+  const str = String(target).trim().toLowerCase();
 
-  // 1. Direct match with id or name
   let found = BACKEND_CLASS_OPTIONS.find(
     (c) => c.id.toLowerCase() === str || c.name.toLowerCase() === str
   );
   if (found) return found;
 
-  // 2. Normalized match e.g. "cls-10", "class 10", "grade 10", "10" -> "10"
-  const norm = str.replace(/^(cls-|class\s*|grade\s*)/i, "").trim();
+  const norm = str.replace(/^(cls-|class\s*|grade\s*)/i, '').trim();
   found = BACKEND_CLASS_OPTIONS.find((c) => {
-    const cIdNum = c.id.replace("cls-", "");
-    const cNameNum = c.name.toLowerCase().replace("class ", "");
+    const cIdNum = c.id.replace('cls-', '');
+    const cNameNum = c.name.toLowerCase().replace('class ', '');
     return (
       cIdNum === norm ||
       cNameNum === norm ||
@@ -179,25 +227,27 @@ const resolveClass = (val) => {
   return found || null;
 };
 
+/**
+ * Resolve canonical section definition from freeform string or object.
+ *
+ * @param {string|Object} val - Raw section input.
+ * @returns {Object|null} Matching section definition.
+ */
 const resolveSection = (val) => {
   if (!val) return null;
-  if (typeof val === "object") {
-    val = val.name || val.id || "";
-  }
-  if (!val || val === "N/A" || val === "null" || val === "undefined") return null;
-  const str = String(val).trim().toLowerCase();
+  let target = typeof val === 'object' ? val.name || val.id || '' : val;
+  if (!target || target === 'N/A' || target === 'null' || target === 'undefined') return null;
+  const str = String(target).trim().toLowerCase();
 
-  // 1. Direct match with id or name
   let found = BACKEND_SECTION_OPTIONS.find(
     (s) => s.id.toLowerCase() === str || s.name.toLowerCase() === str
   );
   if (found) return found;
 
-  // 2. Normalized match e.g. "sec-a", "section a", "a" -> "a"
-  const norm = str.replace(/^(sec-|section\s*)/i, "").trim();
+  const norm = str.replace(/^(sec-|section\s*)/i, '').trim();
   found = BACKEND_SECTION_OPTIONS.find((s) => {
-    const sIdCode = s.id.replace("sec-", "");
-    const sNameCode = s.name.toLowerCase().replace("section ", "");
+    const sIdCode = s.id.replace('sec-', '');
+    const sNameCode = s.name.toLowerCase().replace('section ', '');
     return (
       sIdCode === norm ||
       sNameCode === norm ||
@@ -209,8 +259,13 @@ const resolveSection = (val) => {
   return found || null;
 };
 
+/**
+ * Construct and normalize student registration payload with auto-generated identifiers.
+ *
+ * @param {Object} data - Raw request payload.
+ * @returns {Promise<Object>} Normalized student model payload.
+ */
 const buildStudentPayload = async (data) => {
-  // Always auto-generate admission number - ignore any provided value
   const admissionNumber = await getNextAdmissionNumber();
 
   const matchedClass = resolveClass(data.class || data.classId || data.className);
@@ -219,12 +274,11 @@ const buildStudentPayload = async (data) => {
   const resolvedClassId = matchedClass ? matchedClass.id : (data.classId || null);
   const resolvedSectionId = matchedSection ? matchedSection.id : (data.sectionId || null);
 
-  // Auto-assign roll number: unique per classId + sectionId, sequential from 1
   const rollNumber = await getNextRollNumber(resolvedClassId, resolvedSectionId);
 
-  const name = fullName(data) || `Student ${admissionNumber}`;
+  const name = formatFullName(data) || `Student ${admissionNumber}`;
   const email = normalizeEmail(
-    data.email || `${admissionNumber.toLowerCase().replace(/-/g, ".")}@school.local`
+    data.email || `${admissionNumber.toLowerCase().replace(/-/g, '.')}@school.local`
   );
 
   const year = new Date().getFullYear();
@@ -235,14 +289,14 @@ const buildStudentPayload = async (data) => {
 
   return {
     ...data,
-    firstName: data.firstName || name.split(" ")[0] || "Student",
-    lastName: data.lastName || name.split(" ").slice(1).join(" ") || "",
+    firstName: data.firstName || name.split(' ')[0] || 'Student',
+    lastName: data.lastName || name.split(' ').slice(1).join(' ') || '',
     name,
     email,
-    admissionNumber,          // Always auto-generated, globally unique
-    rollNumber,               // Auto-assigned per class+section, starts at 1
+    admissionNumber,
+    rollNumber,
     academicYear,
-    gender: data.gender || "Male",
+    gender: data.gender || 'Male',
     dob: data.dob || data.dateOfBirth || undefined,
     bloodGroup: data.bloodGroup || undefined,
     classId: resolvedClassId,
@@ -251,76 +305,47 @@ const buildStudentPayload = async (data) => {
     section: matchedSection ? matchedSection.name : (data.section || null),
     className: matchedClass ? matchedClass.name : (data.className || null),
     sectionName: matchedSection ? matchedSection.name : (data.sectionName || null),
-    contactNumber: data.contactNumber || data.phone || data.parentContact || "",
-    alternatePhone: data.alternatePhone || "",
-    address: data.address || "",
+    contactNumber: data.contactNumber || data.phone || data.parentContact || '',
+    alternatePhone: data.alternatePhone || '',
+    address: data.address || '',
     parentName: data.parentName || `Guardian of ${name}`,
-    parentContact: data.parentContact || data.contactNumber || "",
-    parentEmail: data.parentEmail || "",
-    aadhaarNumber: data.aadhaarNumber ? String(data.aadhaarNumber).trim() : "",
-    photo: data.photo || data.imagesRef?.img || data.studentImg || "",
-    aadhaarDocument: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || "",
+    parentContact: data.parentContact || data.contactNumber || '',
+    parentEmail: data.parentEmail || '',
+    aadhaarNumber: data.aadhaarNumber ? String(data.aadhaarNumber).trim() : '',
+    photo: data.photo || data.imagesRef?.img || data.studentImg || '',
+    aadhaarDocument: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || '',
     imagesRef: {
-      id: data.imagesRef?.id || data.photoId || (data.photo || data.imagesRef?.img ? `img_${Date.now()}` : ""),
-      img: data.photo || data.imagesRef?.img || data.studentImg || "",
+      id: data.imagesRef?.id || data.photoId || (data.photo || data.imagesRef?.img ? `img_${Date.now()}` : ''),
+      img: data.photo || data.imagesRef?.img || data.studentImg || ''
     },
     AdharRef: {
-      id: data.AdharRef?.id || data.aadhaarRef?.id || (data.aadhaarDocument || data.AdharRef?.pdf ? `doc_${Date.now()}` : ""),
-      pdf: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || "",
+      id: data.AdharRef?.id || data.aadhaarRef?.id || (data.aadhaarDocument || data.AdharRef?.pdf ? `doc_${Date.now()}` : ''),
+      pdf: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || ''
     },
     joiningDate: data.joiningDate || new Date(),
     permissions:
       Array.isArray(data.permissions) && data.permissions.length
         ? data.permissions
         : DEFAULT_STUDENT_PERMISSIONS,
-    status: data.status || "active",
-    role: "student",
+    status: data.status || 'active',
+    role: 'student',
     forcePasswordChange: Boolean(data.forcePasswordChange),
     twoFactorEnabled: Boolean(data.twoFactorEnabled),
-    loginRestriction: data.loginRestriction || "none",
+    loginRestriction: data.loginRestriction || 'none',
     documents: data.documents || [],
     academicHistory: data.academicHistory || [],
-    isEmailVerified: Boolean(data.isEmailVerified),
+    isEmailVerified: Boolean(data.isEmailVerified)
   };
 };
 
-const syncUserFromStudent = async ({ student, password, existingUser }) => {
-  const userData = {
-    username: student.admissionNumber.toLowerCase(),
-    admissionNumber: student.admissionNumber,
-    email: student.email,
-    password,
-    tempPassword: password,
-    role: "student",
-    permissions: student.permissions || DEFAULT_STUDENT_PERMISSIONS,
-    name: student.name,
-    photo: student.photo || student.imagesRef?.img || "",
-    avatar: student.photo || student.imagesRef?.img || "",
-    imagesRef: student.imagesRef || { id: "", img: student.photo || "" },
-    profileId: student._id,
-    isActive: student.status === "active",
-    forcePasswordChange: Boolean(student.forcePasswordChange),
-    accountExpiryDate: student.accountExpiryDate,
-    loginRestriction: student.loginRestriction || "none",
-    twoFactorEnabled: Boolean(student.twoFactorEnabled),
-    isEmailVerified: Boolean(student.isEmailVerified),
-  };
-
-  if (existingUser) {
-    Object.assign(existingUser, {
-      ...userData,
-      password: existingUser.password,
-    });
-    if (password) {
-      existingUser.password = password;
-      existingUser.tempPassword = password;
-    }
-    return existingUser.save();
-  }
-
-  return User.create(userData);
-};
-
+/**
+ * Link or provision parent account during student onboarding.
+ *
+ * @param {Object} payload - Student onboarding payload.
+ * @param {string} studentId - Student identifier.
+ * @param {string} studentPassword - Student password for reference.
+ * @returns {Promise<Object>} Linked parent ID and account metadata.
+ */
 const createOrLinkParent = async (payload, studentId, studentPassword) => {
   const parentEmail = normalizeEmail(
     payload.parentEmail || `${payload.parentContact}@parent.school.local`
@@ -330,50 +355,50 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
 
   if (checkFallback()) {
     let parent =
-      FallbackDb.findOne("parents", { phone: payload.parentContact }) ||
+      FallbackDb.findOne('parents', { phone: payload.parentContact }) ||
       (payload.parentEmail
-        ? FallbackDb.findOne("parents", { email: parentEmail })
+        ? FallbackDb.findOne('parents', { email: parentEmail })
         : null);
 
     if (!parent) {
-      const parentUser = FallbackDb.create("users", {
+      const parentUser = FallbackDb.create('users', {
         username: `par_${payload.parentContact}`,
         email: parentEmail,
         password: parentPassword,
-        role: "parent",
+        role: 'parent',
         permissions: DEFAULT_PARENT_PERMISSIONS,
         name: payload.parentName,
         isActive: true,
-        forcePasswordChange: true,
+        forcePasswordChange: true
       });
-      parent = FallbackDb.create("parents", {
+      parent = FallbackDb.create('parents', {
         user: parentUser.id,
         name: payload.parentName,
         phone: payload.parentContact,
         email: parentEmail,
         children: [studentId],
-        status: "active",
+        status: 'active'
       });
-      FallbackDb.update("users", parentUser.id, { profileId: parent.id });
+      FallbackDb.update('users', parentUser.id, { profileId: parent.id });
       parentAccount = {
         email: parentEmail,
         temporaryPassword: parentPassword,
-        created: true,
+        created: true
       };
     } else {
       const children = [...new Set([...(parent.children || []), studentId])];
-      FallbackDb.update("parents", parent.id, { children });
+      FallbackDb.update('parents', parent.id, { children });
       parentAccount = { email: parent.email, created: false };
     }
-    FallbackDb.update("students", studentId, { parentId: parent.id });
+    FallbackDb.update('students', studentId, { parentId: parent.id });
     return { parentId: parent.id, parentAccount };
   }
 
   let parent = await Parent.findOne({
     $or: [
       { phone: payload.parentContact },
-      ...(payload.parentEmail ? [{ email: parentEmail }] : []),
-    ],
+      ...(payload.parentEmail ? [{ email: parentEmail }] : [])
+    ]
   });
 
   if (!parent) {
@@ -381,11 +406,11 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
       username: `par_${payload.parentContact}`,
       email: parentEmail,
       password: parentPassword,
-      role: "parent",
+      role: 'parent',
       permissions: DEFAULT_PARENT_PERMISSIONS,
       name: payload.parentName,
       isActive: true,
-      forcePasswordChange: true,
+      forcePasswordChange: true
     });
     parent = await Parent.create({
       user: parentUser._id,
@@ -393,14 +418,14 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
       phone: payload.parentContact,
       email: parentEmail,
       children: [studentId],
-      status: "active",
+      status: 'active'
     });
     parentUser.profileId = parent._id;
     await parentUser.save();
     parentAccount = {
       email: parentEmail,
       temporaryPassword: parentPassword,
-      created: true,
+      created: true
     };
   } else {
     if (!parent.children.includes(studentId)) {
@@ -414,6 +439,12 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
   return { parentId: parent._id, parentAccount };
 };
 
+/**
+ * Enrich student record with canonical class, section, and parent details.
+ *
+ * @param {Object} stud - Raw database student record.
+ * @returns {Object|null} Enriched student plain object.
+ */
 const enrichStudent = (stud) => {
   if (!stud) return null;
   const s = stud.toObject ? stud.toObject() : stud;
@@ -423,10 +454,10 @@ const enrichStudent = (stud) => {
 
   const className = matchedClass
     ? matchedClass.name
-    : (s.class && s.class !== "null" && s.class !== "undefined" ? s.class : (s.className || "N/A"));
+    : (s.class && s.class !== 'null' && s.class !== 'undefined' ? s.class : (s.className || 'N/A'));
   const sectionName = matchedSection
     ? matchedSection.name
-    : (s.section && s.section !== "null" && s.section !== "undefined" ? s.section : (s.sectionName || "N/A"));
+    : (s.section && s.section !== 'null' && s.section !== 'undefined' ? s.section : (s.sectionName || 'N/A'));
 
   const classId = s.classId || (matchedClass ? matchedClass.id : null);
   const sectionId = s.sectionId || (matchedSection ? matchedSection.id : null);
@@ -442,21 +473,16 @@ const enrichStudent = (stud) => {
     classDetails: { id: classId, name: className },
     sectionDetails: { id: sectionId, name: sectionName },
     parentDetails: s.parentId
-      ? (typeof s.parentId === "object" ? s.parentId : FallbackDb.findById("parents", s.parentId))
-      : null,
+      ? (typeof s.parentId === 'object' ? s.parentId : FallbackDb.findById('parents', s.parentId))
+      : null
   };
 };
 
 /**
- * Resolve S3 keys stored in a student's imagesRef / AdharRef / photo / aadhaarDocument
- * to fresh presigned URLs (1-hour TTL).
+ * Resolve S3 keys stored in a student record to fresh presigned URLs.
  *
- * - S3 keys  → presigned URL
- * - Cloudinary URLs / local /uploads/ paths → pass through unchanged
- * - Called after enrichStudent so it receives a plain object.
- *
- * @param {object} student  Plain student object (already passed through enrichStudent)
- * @returns {Promise<object>}  Same object with URL fields resolved
+ * @param {Object} student - Plain student object.
+ * @returns {Promise<Object>} Student object with resolved URLs.
  */
 const resolveStudentFileUrls = async (student) => {
   if (!student) return student;
@@ -465,7 +491,7 @@ const resolveStudentFileUrls = async (student) => {
     resolveFileUrl(student.photo, 3600),
     resolveFileUrl(student.aadhaarDocument, 3600),
     resolveFileUrl(student.imagesRef?.img, 3600),
-    resolveFileUrl(student.AdharRef?.pdf, 3600),
+    resolveFileUrl(student.AdharRef?.pdf, 3600)
   ]);
 
   return {
@@ -474,45 +500,46 @@ const resolveStudentFileUrls = async (student) => {
     aadhaarDocument: aadhaarUrl,
     imagesRef: {
       id: student.imagesRef?.id || '',
-      img: imagesRefImg,
+      img: imagesRefImg
     },
     AdharRef: {
       id: student.AdharRef?.id || '',
-      pdf: adharRefPdf,
-    },
+      pdf: adharRefPdf
+    }
   };
 };
 
+/**
+ * Fetch paginated students with search, status, class, and section filters.
+ *
+ * @route GET /api/students
+ */
 export const getStudents = async (req, res) => {
   try {
-    const { page, limit, skip, sort, search, status } = parsePagination(
-      req.query
-    );
+    const { page, limit, skip, sort, search, status } = parsePagination(req.query);
     const searchFields = [
-      "name",
-      "admissionNumber",
-      "rollNumber",
-      "email",
-      "parentName",
-      "contactNumber",
+      'name',
+      'admissionNumber',
+      'rollNumber',
+      'email',
+      'parentName',
+      'contactNumber'
     ];
 
-    // Parse class and section query params
     const queryClassRaw = req.query.className || req.query.class || req.query.classId;
     const querySectionRaw = req.query.sectionName || req.query.section || req.query.sectionId;
 
     let parsedClassStr = queryClassRaw ? String(queryClassRaw).trim() : null;
     let parsedSectionStr = querySectionRaw ? String(querySectionRaw).trim() : null;
 
-    // If combined format like "Class 12 - Section A", split into class and section
-    if (parsedClassStr && parsedClassStr.includes("-")) {
+    if (parsedClassStr && parsedClassStr.includes('-')) {
       const parts = parsedClassStr.split(/\s*[-–—|]\s*/);
       if (parts.length >= 2) {
         const potentialClass = parts[0].trim();
         const potentialSec = parts[1].trim();
         if (resolveClass(potentialClass)) {
           parsedClassStr = potentialClass;
-          if (!parsedSectionStr || parsedSectionStr === "All" || parsedSectionStr === "all") {
+          if (!parsedSectionStr || parsedSectionStr === 'All' || parsedSectionStr === 'all') {
             if (/^(sec-|section\s*)/i.test(potentialSec) || /^[a-g]$/i.test(potentialSec)) {
               parsedSectionStr = potentialSec;
             }
@@ -522,33 +549,32 @@ export const getStudents = async (req, res) => {
     }
 
     const targetClass = resolveClass(parsedClassStr);
-    const targetSection = (parsedSectionStr && parsedSectionStr.toLowerCase() !== "all")
+    const targetSection = (parsedSectionStr && parsedSectionStr.toLowerCase() !== 'all')
       ? resolveSection(parsedSectionStr)
       : null;
 
     if (checkFallback()) {
-      let list = FallbackDb.find("students").map(enrichStudent);
+      let list = FallbackDb.find('students').map(enrichStudent);
 
-      const userRole = (req.user?.role || "").toLowerCase();
-      if (userRole === "student") {
-        const studentId = String(req.user.profileId || req.user._id || req.user.id || "");
-        const adm = String(req.user.admissionNumber || "").toLowerCase();
+      const userRole = (req.user?.role || '').toLowerCase();
+      if (userRole === 'student') {
+        const studentId = String(req.user.profileId || req.user._id || req.user.id || '');
+        const adm = String(req.user.admissionNumber || '').toLowerCase();
         list = list.filter(
           (s) =>
             String(s.id || s._id) === studentId ||
             String(s.user) === String(req.user._id) ||
-            (adm && String(s.admissionNumber || "").toLowerCase() === adm)
+            (adm && String(s.admissionNumber || '').toLowerCase() === adm)
         );
-      } else if (userRole === "parent") {
-        const parentId = String(req.user.profileId || req.user._id || req.user.id || "");
+      } else if (userRole === 'parent') {
+        const parentId = String(req.user.profileId || req.user._id || req.user.id || '');
         const parent =
-          FallbackDb.findById("parents", parentId) ||
-          FallbackDb.findOne("parents", { user: req.user._id });
+          FallbackDb.findById('parents', parentId) ||
+          FallbackDb.findOne('parents', { user: req.user._id });
         const childIds = (parent?.children || []).map(String);
         list = list.filter((s) => childIds.includes(String(s.id || s._id)));
       }
 
-      // Auto-populate sample students if fallback list has no students for this target class
       if (targetClass) {
         const hasStudentsInClass = list.some((s) => {
           const matched = resolveClass(s.class || s.classId || s.className);
@@ -556,43 +582,43 @@ export const getStudents = async (req, res) => {
         });
 
         if (!hasStudentsInClass) {
-          const clsNum = targetClass.id.replace("cls-", "");
+          const clsNum = targetClass.id.replace('cls-', '');
           const dummyTemplates = [
-            { name: "Aarav Sharma", gender: "Male", parentName: "Rajesh Sharma", contactNumber: "9876543001" },
-            { name: "Ananya Patel", gender: "Female", parentName: "Vikram Patel", contactNumber: "9876543002" },
-            { name: "Rohan Verma", gender: "Male", parentName: "Sanjay Verma", contactNumber: "9876543003" },
-            { name: "Priya Singh", gender: "Female", parentName: "Amit Singh", contactNumber: "9876543004" },
-            { name: "Kabir Mehta", gender: "Male", parentName: "Deepak Mehta", contactNumber: "9876543005" },
-            { name: "Diya Mukherjee", gender: "Female", parentName: "Debashis Mukherjee", contactNumber: "9876543006" },
-            { name: "Aditya Nair", gender: "Male", parentName: "Suresh Nair", contactNumber: "9876543007" },
-            { name: "Isha Gupta", gender: "Female", parentName: "Manoj Gupta", contactNumber: "9876543008" },
+            { name: 'Aarav Sharma', gender: 'Male', parentName: 'Rajesh Sharma', contactNumber: '9876543001' },
+            { name: 'Ananya Patel', gender: 'Female', parentName: 'Vikram Patel', contactNumber: '9876543002' },
+            { name: 'Rohan Verma', gender: 'Male', parentName: 'Sanjay Verma', contactNumber: '9876543003' },
+            { name: 'Priya Singh', gender: 'Female', parentName: 'Amit Singh', contactNumber: '9876543004' },
+            { name: 'Kabir Mehta', gender: 'Male', parentName: 'Deepak Mehta', contactNumber: '9876543005' },
+            { name: 'Diya Mukherjee', gender: 'Female', parentName: 'Debashis Mukherjee', contactNumber: '9876543006' },
+            { name: 'Aditya Nair', gender: 'Male', parentName: 'Suresh Nair', contactNumber: '9876543007' },
+            { name: 'Isha Gupta', gender: 'Female', parentName: 'Manoj Gupta', contactNumber: '9876543008' }
           ];
 
           dummyTemplates.forEach((tpl, idx) => {
-            const secName = idx % 2 === 0 ? "Section A" : (targetSection ? targetSection.name : "Section D");
-            const secId = secName === "Section A" ? "sec-a" : "sec-d";
+            const secName = idx % 2 === 0 ? 'Section A' : (targetSection ? targetSection.name : 'Section D');
+            const secId = secName === 'Section A' ? 'sec-a' : 'sec-d';
             const newStudent = {
               id: `fallback-stu-${clsNum}-${idx + 1}`,
               name: tpl.name,
-              firstName: tpl.name.split(" ")[0],
-              lastName: tpl.name.split(" ")[1] || "",
+              firstName: tpl.name.split(' ')[0],
+              lastName: tpl.name.split(' ')[1] || '',
               rollNumber: idx + 1,
-              admissionNumber: `STD-2026-${clsNum}-${String(idx + 1).padStart(3, "0")}`,
+              admissionNumber: `STD-2026-${clsNum}-${String(idx + 1).padStart(3, '0')}`,
               classId: targetClass.id,
               className: targetClass.name,
               class: targetClass.name,
               sectionId: secId,
               sectionName: secName,
               section: secName,
-              email: `${tpl.name.toLowerCase().replace(/\s+/g, ".")}@school.edu`,
+              email: `${tpl.name.toLowerCase().replace(/\s+/g, '.')}@school.edu`,
               gender: tpl.gender,
               parentName: tpl.parentName,
               contactNumber: tpl.contactNumber,
-              status: "active",
+              status: 'active'
             };
-            FallbackDb.create("students", newStudent);
+            FallbackDb.create('students', newStudent);
           });
-          list = FallbackDb.find("students").map(enrichStudent);
+          list = FallbackDb.find('students').map(enrichStudent);
         }
       }
 
@@ -615,18 +641,18 @@ export const getStudents = async (req, res) => {
         limit,
         search,
         status,
-        searchFields,
+        searchFields
       });
-      // Resolve S3 presigned URLs for all student file references
+
       const resolved = await Promise.all(result.data.map(resolveStudentFileUrls));
       return res.json({ success: true, students: resolved, ...result, data: resolved });
     }
 
     // MongoDB Mode
     const conditions = [];
+    const userRole = (req.user?.role || '').toLowerCase();
 
-    const userRole = (req.user?.role || "").toLowerCase();
-    if (userRole === "student") {
+    if (userRole === 'student') {
       const orClauses = [{ user: req.user._id }];
       if (req.user.profileId && mongoose.Types.ObjectId.isValid(req.user.profileId)) {
         orClauses.push({ _id: req.user.profileId });
@@ -635,24 +661,26 @@ export const getStudents = async (req, res) => {
         orClauses.push({ admissionNumber: req.user.admissionNumber });
       }
       conditions.push({ $or: orClauses });
-    } else if (userRole === "parent") {
+    } else if (userRole === 'parent') {
       let childIds = [];
       try {
         const parent = await Parent.findOne({
           $or: [
             ...(req.user.profileId && mongoose.Types.ObjectId.isValid(req.user.profileId) ? [{ _id: req.user.profileId }] : []),
-            { user: req.user._id },
-          ],
+            { user: req.user._id }
+          ]
         });
         if (parent?.children?.length) {
           childIds = parent.children;
         }
-      } catch (e) {}
+      } catch (e) {
+        // Ignored fallback
+      }
       conditions.push({ _id: { $in: childIds } });
     }
 
     if (search) {
-      const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       const orClauses = [
         { name: regex },
         { firstName: regex },
@@ -660,10 +688,10 @@ export const getStudents = async (req, res) => {
         { admissionNumber: regex },
         { email: regex },
         { parentName: regex },
-        { contactNumber: regex },
+        { contactNumber: regex }
       ];
       const numVal = Number(search);
-      if (!isNaN(numVal) && search.trim() !== "") {
+      if (!isNaN(numVal) && search.trim() !== '') {
         orClauses.push({ rollNumber: numVal });
       }
       conditions.push({ $or: orClauses });
@@ -674,8 +702,8 @@ export const getStudents = async (req, res) => {
     }
 
     if (targetClass) {
-      const classRegex = new RegExp(`^${targetClass.name}$`, "i");
-      const classPrefixRegex = new RegExp(`^${targetClass.name}\\b`, "i");
+      const classRegex = new RegExp(`^${targetClass.name}$`, 'i');
+      const classPrefixRegex = new RegExp(`^${targetClass.name}\\b`, 'i');
       conditions.push({
         $or: [
           { classId: targetClass.id },
@@ -683,23 +711,23 @@ export const getStudents = async (req, res) => {
           { class: classRegex },
           { class: classPrefixRegex },
           { className: classPrefixRegex },
-          { classId: targetClass.name },
-        ],
+          { classId: targetClass.name }
+        ]
       });
     }
 
     if (targetSection) {
-      const secRegex = new RegExp(`^${targetSection.name}$`, "i");
-      const secCode = targetSection.id.replace("sec-", "");
-      const secCodeRegex = new RegExp(`^${secCode}$`, "i");
+      const secRegex = new RegExp(`^${targetSection.name}$`, 'i');
+      const secCode = targetSection.id.replace('sec-', '');
+      const secCodeRegex = new RegExp(`^${secCode}$`, 'i');
       conditions.push({
         $or: [
           { sectionId: targetSection.id },
           { sectionName: secRegex },
           { section: secRegex },
           { section: secCodeRegex },
-          { sectionId: targetSection.name },
-        ],
+          { sectionId: targetSection.name }
+        ]
       });
     }
 
@@ -710,36 +738,39 @@ export const getStudents = async (req, res) => {
       : {};
 
     const sortObj = {};
-    const sortField = sort.startsWith("-") ? sort.slice(1) : sort;
-    sortObj[sortField] = sort.startsWith("-") ? -1 : 1;
+    const sortField = sort.startsWith('-') ? sort.slice(1) : sort;
+    sortObj[sortField] = sort.startsWith('-') ? -1 : 1;
 
-    let [students, total] = await Promise.all([
+    const [students, total] = await Promise.all([
       Student.find(filter)
-        .populate("classId", "name code")
-        .populate("sectionId", "name")
-        .populate("user", "username email role permissions isActive lastLogin")
-        .populate("parentId", "name phone email")
+        .populate('classId', 'name code')
+        .populate('sectionId', 'name')
+        .populate('user', 'username email role permissions isActive lastLogin')
+        .populate('parentId', 'name phone email')
         .sort(sortObj)
         .skip(skip)
         .limit(limit),
-      Student.countDocuments(filter),
+      Student.countDocuments(filter)
     ]);
 
-    // Resolve S3 presigned URLs for all student file references
     const resolvedStudents = await Promise.all(students.map(enrichStudent).map(resolveStudentFileUrls));
 
     return res.json({
       success: true,
       students: resolvedStudents,
       data: resolvedStudents,
-      ...paginateResult(resolvedStudents, total, { page, limit }),
+      ...paginateResult(resolvedStudents, total, { page, limit })
     });
   } catch (error) {
-    console.error("getStudents error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieve detailed student information by ID or admission number.
+ *
+ * @route GET /api/students/:id
+ */
 export const getStudentById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -747,142 +778,129 @@ export const getStudentById = async (req, res) => {
 
     if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
       student =
-        FallbackDb.findById("students", id) ||
-        FallbackDb.findOne("students", { admissionNumber: id });
+        FallbackDb.findById('students', id) ||
+        FallbackDb.findOne('students', { admissionNumber: id });
       if (student) student = enrichStudent(student);
       if (student?.user) {
-        student.userDetails = FallbackDb.findById("users", student.user);
+        student.userDetails = FallbackDb.findById('users', student.user);
       }
     } else {
       student = await Student.findById(id)
-        .populate("classId")
-        .populate("sectionId")
+        .populate('classId')
+        .populate('sectionId')
         .populate(
-          "user",
-          "username email role permissions isActive lastLogin loginHistory forcePasswordChange"
+          'user',
+          'username email role permissions isActive lastLogin loginHistory forcePasswordChange'
         )
-        .populate("parentId");
+        .populate('parentId');
       if (student) student = enrichStudent(student);
     }
 
     if (!student) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Student not found" });
+      return sendNotFound(res, 'Student not found');
     }
 
-    // Resolve S3 presigned URLs for file references
     student = await resolveStudentFileUrls(student);
-
     return res.json({ success: true, student });
   } catch (error) {
-    console.error("getStudentById error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieve audit log activity and login history for a student.
+ *
+ * @route GET /api/students/:id/activity
+ */
 export const getStudentActivity = async (req, res) => {
   try {
     const { id } = req.params;
-    const logs = await getRecordActivity("students", id);
+    const logs = await getRecordActivity('students', id);
     let loginHistory = [];
 
     const student =
       checkFallback() || !mongoose.Types.ObjectId.isValid(id)
-        ? FallbackDb.findById("students", id) ||
-          FallbackDb.findOne("students", { admissionNumber: id })
-        : await Student.findById(id).populate("user", "loginHistory lastLogin");
+        ? FallbackDb.findById('students', id) ||
+          FallbackDb.findOne('students', { admissionNumber: id })
+        : await Student.findById(id).populate('user', 'loginHistory lastLogin');
 
     if (student?.user) {
       const user = checkFallback()
-        ? FallbackDb.findById("users", student.user)
+        ? FallbackDb.findById('users', student.user)
         : student.user;
       loginHistory = user?.loginHistory || [];
     }
 
     return res.json({ success: true, logs, loginHistory });
   } catch (error) {
-    console.error("getStudentActivity error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
 /**
- * Send 6-digit OTP to student email for verification during creation or editing
+ * Dispatch 6-digit email OTP for student verification.
+ *
+ * @route POST /api/students/send-email-otp
  */
 export const sendStudentEmailOtp = async (req, res) => {
   try {
     const { email, name } = req.body;
     if (!email || !email.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Email address is required",
-      });
+      return sendBadRequest(res, 'Email address is required');
     }
 
     const normalizedEmail = normalizeEmail(email);
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(normalizedEmail)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid email address",
-      });
+      return sendBadRequest(res, 'Please provide a valid email address');
     }
 
-    // Generate secure 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
     if (!checkFallback()) {
       await Otp.deleteMany({ email: normalizedEmail });
       await Otp.create({
         email: normalizedEmail,
-        name: (name || "Student").trim(),
+        name: (name || 'Student').trim(),
         otp,
-        purpose: "student-email-verification",
+        purpose: 'student-email-verification'
       });
     } else {
-      FallbackDb.create("otps", {
+      FallbackDb.create('otps', {
         email: normalizedEmail,
-        name: (name || "Student").trim(),
+        name: (name || 'Student').trim(),
         otp,
-        purpose: "student-email-verification",
-        createdAt: new Date(),
+        purpose: 'student-email-verification',
+        createdAt: new Date()
       });
     }
 
-    // Send email via Resend
     await sendStudentOtpEmail({
       to: normalizedEmail,
-      name: (name || "Student").trim(),
-      otp,
+      name: (name || 'Student').trim(),
+      otp
     });
 
     return res.json({
       success: true,
       message: `A 6-digit verification code was sent to ${normalizedEmail}`,
-      email: normalizedEmail,
+      email: normalizedEmail
     });
   } catch (error) {
-    console.error("sendStudentEmailOtp error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to send verification code",
-    });
+    return sendError(res, error.message || 'Failed to send verification code', 500, error);
   }
 };
 
 /**
- * Verify 6-digit OTP for student email.
- * If studentId is provided (e.g. edit mode), also persist isEmailVerified: true to Student and User records in DB.
+ * Verify 6-digit student email OTP and persist verification status if studentId provided.
+ *
+ * @route POST /api/students/verify-email-otp
  */
 export const verifyStudentEmailOtp = async (req, res) => {
   try {
     const { email, otp, studentId } = req.body;
     if (!email || !otp) {
-      return res.status(400).json({
-        success: false,
-        message: "Email address and 6-digit verification code are required",
-      });
+      return sendBadRequest(res, 'Email address and 6-digit verification code are required');
     }
 
     const normalizedEmail = normalizeEmail(email);
@@ -891,37 +909,30 @@ export const verifyStudentEmailOtp = async (req, res) => {
     if (!checkFallback()) {
       const otpRecord = await Otp.findOne({
         email: normalizedEmail,
-        otp: enteredOtp,
+        otp: enteredOtp
       }).sort({ createdAt: -1 });
 
       if (!otpRecord) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or expired verification code. Please request a new code.",
-        });
+        return sendBadRequest(res, 'Invalid or expired verification code. Please request a new code.');
       }
 
       await Otp.deleteMany({ email: normalizedEmail });
     } else {
-      const allOtps = FallbackDb.find("otps") || [];
+      const allOtps = FallbackDb.find('otps') || [];
       const idx = allOtps.findIndex(
         (o) => o.email === normalizedEmail && String(o.otp).trim() === enteredOtp
       );
       if (idx === -1) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or expired verification code. Please request a new code.",
-        });
+        return sendBadRequest(res, 'Invalid or expired verification code. Please request a new code.');
       }
-      FallbackDb.delete("otps", allOtps[idx].id);
+      FallbackDb.delete('otps', allOtps[idx].id);
     }
 
-    // If studentId was provided (edit flow), update DB records directly
     if (studentId) {
       if (checkFallback() || !mongoose.Types.ObjectId.isValid(studentId)) {
-        const updated = FallbackDb.update("students", studentId, { isEmailVerified: true });
+        const updated = FallbackDb.update('students', studentId, { isEmailVerified: true });
         if (updated?.user) {
-          FallbackDb.update("users", updated.user, { isEmailVerified: true });
+          FallbackDb.update('users', updated.user, { isEmailVerified: true });
         }
       } else {
         const student = await Student.findByIdAndUpdate(
@@ -938,17 +949,18 @@ export const verifyStudentEmailOtp = async (req, res) => {
     return res.json({
       success: true,
       isEmailVerified: true,
-      message: "Student email verified successfully!",
+      message: 'Student email verified successfully!'
     });
   } catch (error) {
-    console.error("verifyStudentEmailOtp error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to verify email code",
-    });
+    return sendError(res, error.message || 'Failed to verify email code', 500, error);
   }
 };
 
+/**
+ * Create and register a single student record and linked parent/user accounts.
+ *
+ * @route POST /api/students
+ */
 export const createStudent = async (req, res) => {
   try {
     const payload = await buildStudentPayload(req.body);
@@ -958,100 +970,83 @@ export const createStudent = async (req, res) => {
     }
 
     if (!payload.name) payload.name = `Student ${payload.admissionNumber}`;
-    if (!payload.contactNumber) payload.contactNumber = "+919876543210";
+    if (!payload.contactNumber) payload.contactNumber = '+919876543210';
     if (!payload.parentName) payload.parentName = `Guardian of ${payload.name}`;
     if (!payload.parentContact) payload.parentContact = payload.contactNumber;
 
-    // Single / manual registration: Aadhaar number, Photo, and Aadhaar PDF are mandatory
     if (!payload.aadhaarNumber || !payload.aadhaarNumber.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Aadhaar number is mandatory for student registration",
-      });
+      return sendBadRequest(res, 'Aadhaar number is mandatory for student registration');
     }
     if (!payload.photo || !payload.photo.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Student photo (1MB or less) is mandatory for student registration",
-      });
+      return sendBadRequest(res, 'Student photo (1MB or less) is mandatory for student registration');
     }
     if (!payload.aadhaarDocument || !payload.aadhaarDocument.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Aadhaar PDF document (1MB or less) is mandatory for student registration",
-      });
+      return sendBadRequest(res, 'Aadhaar PDF document (1MB or less) is mandatory for student registration');
     }
 
     if (
       req.body.confirmPassword !== undefined &&
       password !== req.body.confirmPassword
     ) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Password and confirm password do not match",
-        });
+      return sendBadRequest(res, 'Password and confirm password do not match');
     }
 
     if (checkFallback()) {
       const duplicate =
-        FallbackDb.findOne("students", {
-          admissionNumber: payload.admissionNumber,
-        }) || FallbackDb.findOne("users", { email: payload.email });
+        FallbackDb.findOne('students', {
+          admissionNumber: payload.admissionNumber
+        }) || FallbackDb.findOne('users', { email: payload.email });
       if (duplicate) {
-        return res
-          .status(409)
-          .json({
-            success: false,
-            message: "Student admission number or email already exists",
-          });
+        return res.status(409).json({
+          success: false,
+          message: 'Student admission number or email already exists'
+        });
       }
 
       const parentEmail = normalizeEmail(
         payload.parentEmail || `${payload.parentContact}@parent.school.local`
       );
       let parent =
-        FallbackDb.findOne("parents", { phone: payload.parentContact }) ||
+        FallbackDb.findOne('parents', { phone: payload.parentContact }) ||
         (payload.parentEmail
-          ? FallbackDb.findOne("parents", { email: parentEmail })
+          ? FallbackDb.findOne('parents', { email: parentEmail })
           : null);
 
       if (!parent) {
         const existingParentUser =
-          FallbackDb.findOne("users", { email: parentEmail }) ||
-          FallbackDb.findOne("users", {
-            username: `par_${payload.parentContact}`,
+          FallbackDb.findOne('users', { email: parentEmail }) ||
+          FallbackDb.findOne('users', {
+            username: `par_${payload.parentContact}`
           });
         if (existingParentUser) {
           return res.status(409).json({
             success: false,
-            message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`,
+            message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`
           });
         }
       }
 
-      const userRecord = FallbackDb.create("users", {
+      const userRecord = FallbackDb.create('users', {
         username: payload.admissionNumber.toLowerCase(),
         admissionNumber: payload.admissionNumber,
         email: payload.email,
         password,
-        role: "student",
+        role: 'student',
         permissions: payload.permissions,
         name: payload.name,
-        isActive: payload.status === "active",
+        isActive: payload.status === 'active',
         forcePasswordChange: payload.forcePasswordChange,
         accountExpiryDate: payload.accountExpiryDate,
         loginRestriction: payload.loginRestriction,
         twoFactorEnabled: payload.twoFactorEnabled,
-        isEmailVerified: Boolean(payload.isEmailVerified),
+        isEmailVerified: Boolean(payload.isEmailVerified)
       });
-      const studentRecord = FallbackDb.create("students", {
+      const studentRecord = FallbackDb.create('students', {
         ...payload,
-        user: userRecord.id,
+        user: userRecord.id
       });
-      FallbackDb.update("users", userRecord.id, {
-        profileId: studentRecord.id,
+      FallbackDb.update('users', userRecord.id, {
+        profileId: studentRecord.id
       });
 
       const { parentAccount } = await createOrLinkParent(
@@ -1062,56 +1057,51 @@ export const createStudent = async (req, res) => {
 
       await logActivity({
         userId: req.user?._id || req.user?.id,
-        action: "CREATE",
-        module: "students",
+        action: 'CREATE',
+        module: 'students',
         recordId: studentRecord.id,
         details: `Created student ${payload.name}`,
         ipAddress: req.ip,
-        userAgent: req.headers["user-agent"],
+        userAgent: req.headers['user-agent']
       });
 
       return res.status(201).json({
         success: true,
-        message:
-          "Student, login credentials, and parent account processed successfully",
+        message: 'Student, login credentials, and parent account processed successfully',
         student: enrichStudent(studentRecord),
         accountCreated: {
           admissionNumber: payload.admissionNumber,
           email: payload.email,
-          temporaryPassword: password,
+          temporaryPassword: password
         },
-        parentAccount,
+        parentAccount
       });
     }
 
-    // Check if a real student record already exists with this admission number
     const existingStudent = await Student.findOne({
-      admissionNumber: payload.admissionNumber,
+      admissionNumber: payload.admissionNumber
     });
     if (existingStudent) {
       return res.status(409).json({
         success: false,
-        message: `Admission number ${payload.admissionNumber} is already in use.`,
+        message: `Admission number ${payload.admissionNumber} is already in use.`
       });
     }
 
-    // Check if email is taken by another fully registered student
     const emailConflict = await Student.findOne({ email: payload.email });
     if (emailConflict) {
       return res.status(409).json({
         success: false,
-        message: `Email ${payload.email} is already registered to another student.`,
+        message: `Email ${payload.email} is already registered to another student.`
       });
     }
 
-    // Clean up any orphaned User record left from a previous failed attempt
-    // (e.g. User created but Student.create failed) so it doesn't block new registrations
     const orphanedUser = await User.findOne({
       $or: [
         { username: payload.admissionNumber.toLowerCase() },
-        { admissionNumber: payload.admissionNumber },
+        { admissionNumber: payload.admissionNumber }
       ],
-      profileId: { $exists: false },  // no linked student = orphaned
+      profileId: { $exists: false }
     });
     if (orphanedUser) {
       await User.findByIdAndDelete(orphanedUser._id);
@@ -1123,20 +1113,20 @@ export const createStudent = async (req, res) => {
     let parent = await Parent.findOne({
       $or: [
         { phone: payload.parentContact },
-        ...(payload.parentEmail ? [{ email: parentEmail }] : []),
-      ],
+        ...(payload.parentEmail ? [{ email: parentEmail }] : [])
+      ]
     });
     if (!parent) {
       const existingParentUser = await User.findOne({
         $or: [
           { username: `par_${payload.parentContact}` },
-          { email: parentEmail },
-        ],
+          { email: parentEmail }
+        ]
       });
       if (existingParentUser) {
         return res.status(409).json({
           success: false,
-          message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`,
+          message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`
         });
       }
     }
@@ -1147,16 +1137,16 @@ export const createStudent = async (req, res) => {
       admissionNumber: payload.admissionNumber,
       email: payload.email,
       password,
-      role: "student",
+      role: 'student',
       permissions: payload.permissions,
       name: payload.name,
       profileId: studentRecord._id,
-      isActive: payload.status === "active",
+      isActive: payload.status === 'active',
       forcePasswordChange: payload.forcePasswordChange,
       accountExpiryDate: payload.accountExpiryDate,
       loginRestriction: payload.loginRestriction,
       twoFactorEnabled: payload.twoFactorEnabled,
-      isEmailVerified: Boolean(payload.isEmailVerified),
+      isEmailVerified: Boolean(payload.isEmailVerified)
     });
     studentRecord.user = userRecord._id;
     await studentRecord.save();
@@ -1169,34 +1159,35 @@ export const createStudent = async (req, res) => {
 
     await logActivity({
       userId: req.user?._id,
-      action: "CREATE",
-      module: "students",
+      action: 'CREATE',
+      module: 'students',
       recordId: studentRecord._id,
       details: `Created student ${payload.name}`,
       ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
+      userAgent: req.headers['user-agent']
     });
 
     return res.status(201).json({
       success: true,
-      message:
-        "Student, login credentials, and parent account processed successfully",
+      message: 'Student, login credentials, and parent account processed successfully',
       student: studentRecord,
       accountCreated: {
         admissionNumber: payload.admissionNumber,
         email: payload.email,
-        temporaryPassword: password,
+        temporaryPassword: password
       },
-      parentAccount,
+      parentAccount
     });
   } catch (error) {
-    console.error("createStudent error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: error.message || "Server error" });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Update student profile information and synchronized user credentials.
+ *
+ * @route PUT /api/students/:id
+ */
 export const updateStudent = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1204,10 +1195,9 @@ export const updateStudent = async (req, res) => {
     delete updateData.password;
     delete updateData.confirmPassword;
     if (updateData.email) updateData.email = normalizeEmail(updateData.email);
-    if (updateData.admissionNumber)
-      updateData.admissionNumber = normalizeAdmissionNumber(
-        updateData.admissionNumber
-      );
+    if (updateData.admissionNumber) {
+      updateData.admissionNumber = normalizeAdmissionNumber(updateData.admissionNumber);
+    }
 
     const matchedClass = resolveClass(updateData.class || updateData.classId || updateData.className);
     const matchedSection = resolveSection(updateData.section || updateData.sectionId || updateData.sectionName);
@@ -1225,18 +1215,18 @@ export const updateStudent = async (req, res) => {
 
     if (updateData.firstName || updateData.lastName) {
       updateData.name =
-        `${updateData.firstName || ""} ${updateData.lastName || ""}`.trim();
+        `${updateData.firstName || ''} ${updateData.lastName || ''}`.trim();
     }
 
     if (updateData.imagesRef || updateData.photo) {
-      const pUrl = updateData.imagesRef?.img || updateData.photo || "";
-      const pId = updateData.imagesRef?.id || updateData.photoId || (pUrl ? `img_${Date.now()}` : "");
+      const pUrl = updateData.imagesRef?.img || updateData.photo || '';
+      const pId = updateData.imagesRef?.id || updateData.photoId || (pUrl ? `img_${Date.now()}` : '');
       updateData.photo = pUrl;
       updateData.imagesRef = { id: pId, img: pUrl };
     }
     if (updateData.AdharRef || updateData.aadhaarDocument) {
-      const aUrl = updateData.AdharRef?.pdf || updateData.aadhaarDocument || "";
-      const aId = updateData.AdharRef?.id || updateData.aadhaarDocId || (aUrl ? `doc_${Date.now()}` : "");
+      const aUrl = updateData.AdharRef?.pdf || updateData.aadhaarDocument || '';
+      const aId = updateData.AdharRef?.id || updateData.aadhaarDocId || (aUrl ? `doc_${Date.now()}` : '');
       updateData.aadhaarDocument = aUrl;
       updateData.AdharRef = { id: aId, pdf: aUrl };
     }
@@ -1249,22 +1239,22 @@ export const updateStudent = async (req, res) => {
 
     if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
       updatedRecord =
-        FallbackDb.update("students", id, updateData) ||
-        FallbackDb.findOne("students", { admissionNumber: id });
+        FallbackDb.update('students', id, updateData) ||
+        FallbackDb.findOne('students', { admissionNumber: id });
       if (updatedRecord?.user) {
-        FallbackDb.update("users", updatedRecord.user, {
+        FallbackDb.update('users', updatedRecord.user, {
           username: updatedRecord.admissionNumber.toLowerCase(),
           admissionNumber: updatedRecord.admissionNumber,
           email: updatedRecord.email,
           permissions: updatedRecord.permissions,
           name: updatedRecord.name,
-          isActive: updatedRecord.status === "active",
-          isEmailVerified: Boolean(updatedRecord.isEmailVerified),
+          isActive: updatedRecord.status === 'active',
+          isEmailVerified: Boolean(updatedRecord.isEmailVerified)
         });
       }
     } else {
       updatedRecord = await Student.findByIdAndUpdate(id, updateData, {
-        new: true,
+        new: true
       });
       if (updatedRecord?.user) {
         await User.findByIdAndUpdate(updatedRecord.user, {
@@ -1273,85 +1263,121 @@ export const updateStudent = async (req, res) => {
           email: updatedRecord.email,
           permissions: updatedRecord.permissions,
           name: updatedRecord.name,
-          isActive: updatedRecord.status === "active",
+          isActive: updatedRecord.status === 'active',
           forcePasswordChange: updatedRecord.forcePasswordChange,
           accountExpiryDate: updatedRecord.accountExpiryDate,
           loginRestriction: updatedRecord.loginRestriction,
           twoFactorEnabled: updatedRecord.twoFactorEnabled,
-          isEmailVerified: Boolean(updatedRecord.isEmailVerified),
+          isEmailVerified: Boolean(updatedRecord.isEmailVerified)
         });
       }
     }
 
     if (!updatedRecord) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Student not found" });
+      return sendNotFound(res, 'Student not found');
     }
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
-      action: "UPDATE",
-      module: "students",
+      action: 'UPDATE',
+      module: 'students',
       recordId: id,
       details: `Updated student ${updatedRecord.name}`,
       ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
+      userAgent: req.headers['user-agent']
     });
 
     return res.json({
       success: true,
-      message: "Student updated successfully",
-      student: enrichStudent(updatedRecord),
+      message: 'Student updated successfully',
+      student: enrichStudent(updatedRecord)
     });
   } catch (error) {
-    console.error("updateStudent error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: error.message || "Server error" });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Deactivate student status.
+ *
+ * @route PATCH /api/students/:id/deactivate
+ */
 export const deactivateStudent = async (req, res) => {
-  req.body.status = "inactive";
+  req.body.status = 'inactive';
   return updateStudent(req, res);
 };
 
+/**
+ * Reset student account password.
+ *
+ * @route POST /api/students/:id/reset-password
+ */
 export const resetStudentPassword = async (req, res) => {
   try {
     const { id } = req.params;
     const password = req.body.generateRandomPassword
       ? generateRandomPassword()
-      : req.body.password;
+      : (req.body.password || req.body.newPassword);
     if (!password || password.length < 6) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Password must be at least 6 characters",
-        });
+      return sendBadRequest(res, 'Password must be at least 6 characters');
     }
 
     const student =
       checkFallback() || !mongoose.Types.ObjectId.isValid(id)
-        ? FallbackDb.findById("students", id) ||
-          FallbackDb.findOne("students", { admissionNumber: id })
+        ? FallbackDb.findById('students', id) ||
+          FallbackDb.findOne('students', { admissionNumber: id })
         : await Student.findById(id);
     if (!student) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Student not found" });
+      return sendNotFound(res, 'Student not found');
     }
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(student.user)) {
-      FallbackDb.update("users", student.user, {
-        password,
-        forcePasswordChange: Boolean(req.body.forcePasswordChange),
-      });
+    if (checkFallback()) {
+      const user =
+        FallbackDb.findById('users', student.user) ||
+        FallbackDb.findOne('users', { admissionNumber: student.admissionNumber }) ||
+        FallbackDb.findOne('users', { email: student.email });
+      if (user) {
+        FallbackDb.update('users', user.id || user._id, {
+          password,
+          tempPassword: password,
+          isActive: true,
+          accountExpiryDate: null,
+          forcePasswordChange: Boolean(req.body.forcePasswordChange)
+        });
+      }
     } else {
-      const user = await User.findById(student.user);
+      let user = (student.user && mongoose.Types.ObjectId.isValid(student.user))
+        ? await User.findById(student.user)
+        : null;
+      if (!user && student.admissionNumber) {
+        user = await User.findOne({ admissionNumber: student.admissionNumber });
+      }
+      if (!user && student.email) {
+        user = await User.findOne({ email: student.email });
+      }
+      if (!user) {
+        user = await User.create({
+          username: student.admissionNumber.toLowerCase(),
+          admissionNumber: student.admissionNumber,
+          email: student.email,
+          password,
+          tempPassword: password,
+          role: 'student',
+          permissions: student.permissions || DEFAULT_STUDENT_PERMISSIONS,
+          name: student.name,
+          profileId: student._id,
+          isActive: true,
+          forcePasswordChange: Boolean(req.body.forcePasswordChange),
+          accountExpiryDate: null
+        });
+        student.user = user._id;
+        await student.save();
+      }
       if (user) {
         user.password = password;
+        user.tempPassword = password;
+        user.isActive = true;
+        user.accountExpiryDate = null;
         user.forcePasswordChange = Boolean(req.body.forcePasswordChange);
         await user.save();
       }
@@ -1359,96 +1385,101 @@ export const resetStudentPassword = async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Student password reset successfully",
+      message: 'Student password reset successfully',
       account: {
         admissionNumber: student.admissionNumber,
         email: student.email,
-        temporaryPassword: password,
-      },
+        temporaryPassword: password
+      }
     });
   } catch (error) {
-    console.error("resetStudentPassword error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: error.message || "Server error" });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Permanently delete student and linked user records.
+ *
+ * @route DELETE /api/students/:id
+ */
 export const deleteStudent = async (req, res) => {
   try {
     const { id } = req.params;
     let success = false;
-    let studentName = "";
+    let studentName = '';
 
     if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
       const student =
-        FallbackDb.findById("students", id) ||
-        FallbackDb.findOne("students", { admissionNumber: id });
+        FallbackDb.findById('students', id) ||
+        FallbackDb.findOne('students', { admissionNumber: id });
       if (student) {
         studentName = student.name;
-        if (student.user) FallbackDb.delete("users", student.user);
-        success = FallbackDb.delete("students", student.id || id);
+        if (student.user) FallbackDb.delete('users', student.user);
+        success = FallbackDb.delete('students', student.id || id);
       }
     } else {
       const student = await Student.findById(id);
       if (student) {
         studentName = student.name;
-        if (student.user && mongoose.Types.ObjectId.isValid(student.user))
+        if (student.user && mongoose.Types.ObjectId.isValid(student.user)) {
           await User.findByIdAndDelete(student.user);
+        }
         await Student.findByIdAndDelete(id);
         success = true;
       }
     }
 
     if (!success) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Student not found" });
+      return sendNotFound(res, 'Student not found');
     }
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
-      action: "DELETE",
-      module: "students",
+      action: 'DELETE',
+      module: 'students',
       recordId: id,
       details: `Deleted student ${studentName}`,
       ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
+      userAgent: req.headers['user-agent']
     });
 
     return res.json({
       success: true,
-      message: "Student and linked user account deleted successfully",
+      message: 'Student and linked user account deleted successfully'
     });
   } catch (error) {
-    console.error("deleteStudent error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Bulk delete multiple students.
+ *
+ * @route POST /api/students/bulk-delete
+ */
 export const bulkDeleteStudents = async (req, res) => {
   try {
     const { ids = [] } = req.body;
-    if (!ids.length)
-      return res
-        .status(400)
-        .json({ success: false, message: "No student IDs provided" });
+    if (!ids.length) {
+      return sendBadRequest(res, 'No student IDs provided');
+    }
 
     let deleted = 0;
     for (const id of ids) {
       if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
         const student =
-          FallbackDb.findById("students", id) ||
-          FallbackDb.findOne("students", { admissionNumber: id });
+          FallbackDb.findById('students', id) ||
+          FallbackDb.findOne('students', { admissionNumber: id });
         if (student) {
-          if (student.user) FallbackDb.delete("users", student.user);
-          if (FallbackDb.delete("students", student.id || id)) deleted++;
+          if (student.user) FallbackDb.delete('users', student.user);
+          if (FallbackDb.delete('students', student.id || id)) deleted++;
         }
       } else {
         const student = await Student.findById(id);
         if (student) {
-          if (student.user && mongoose.Types.ObjectId.isValid(student.user))
+          if (student.user && mongoose.Types.ObjectId.isValid(student.user)) {
             await User.findByIdAndDelete(student.user);
+          }
           await Student.findByIdAndDelete(id);
           deleted++;
         }
@@ -1457,34 +1488,33 @@ export const bulkDeleteStudents = async (req, res) => {
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
-      action: "BULK",
-      module: "students",
+      action: 'BULK',
+      module: 'students',
       details: `Bulk deleted ${deleted} students`,
       ipAddress: req.ip,
-      metadata: { ids },
+      metadata: { ids }
     });
 
     return res.json({
       success: true,
       message: `${deleted} students deleted`,
-      deleted,
+      deleted
     });
   } catch (error) {
-    console.error("bulkDeleteStudents error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Promote selected students to a target class.
+ *
+ * @route POST /api/students/bulk-promote
+ */
 export const bulkPromoteStudents = async (req, res) => {
   try {
     const { ids = [], classId, sectionId } = req.body;
     if (!ids.length || !classId) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Student IDs and target class are required",
-        });
+      return sendBadRequest(res, 'Student IDs and target class are required');
     }
 
     let promoted = 0;
@@ -1492,7 +1522,7 @@ export const bulkPromoteStudents = async (req, res) => {
 
     for (const id of ids) {
       if (checkFallback()) {
-        if (FallbackDb.update("students", id, update)) promoted++;
+        if (FallbackDb.update('students', id, update)) promoted++;
       } else {
         const result = await Student.findByIdAndUpdate(id, update);
         if (result) promoted++;
@@ -1501,45 +1531,49 @@ export const bulkPromoteStudents = async (req, res) => {
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
-      action: "BULK",
-      module: "students",
+      action: 'BULK',
+      module: 'students',
       details: `Promoted ${promoted} students to class ${classId}`,
       ipAddress: req.ip,
-      metadata: { ids, classId, sectionId },
+      metadata: { ids, classId, sectionId }
     });
 
     return res.json({
       success: true,
       message: `${promoted} students promoted`,
-      promoted,
+      promoted
     });
   } catch (error) {
-    console.error("bulkPromoteStudents error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Export student roster to CSV format.
+ *
+ * @route GET /api/students/export
+ */
 export const exportStudents = async (req, res) => {
   try {
     let students = [];
     if (checkFallback()) {
-      students = FallbackDb.find("students");
+      students = FallbackDb.find('students');
     } else {
       students = await Student.find().select(
-        "name admissionNumber rollNumber classId sectionId parentName contactNumber status createdAt"
+        'name admissionNumber rollNumber classId sectionId parentName contactNumber status createdAt'
       );
     }
 
     const headers = [
-      "Name",
-      "Admission Number",
-      "Roll Number",
-      "Class",
-      "Section",
-      "Parent",
-      "Phone",
-      "Status",
-      "Created",
+      'Name',
+      'Admission Number',
+      'Roll Number',
+      'Class',
+      'Section',
+      'Parent',
+      'Phone',
+      'Status',
+      'Created'
     ];
     const rows = students.map((s) =>
       [
@@ -1551,22 +1585,26 @@ export const exportStudents = async (req, res) => {
         s.parentName,
         s.contactNumber,
         s.status,
-        s.createdAt,
+        s.createdAt
       ]
-        .map((v) => `"${String(v || "").replace(/"/g, '""')}"`)
-        .join(",")
+        .map((v) => `"${String(v || '').replace(/"/g, '""')}"`)
+        .join(',')
     );
 
-    const csv = [headers.join(","), ...rows].join("\n");
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", "attachment; filename=students.csv");
+    const csv = [headers.join(','), ...rows].join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=students.csv');
     return res.send(csv);
   } catch (error) {
-    console.error("exportStudents error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieve credentials for display/print by administrator.
+ *
+ * @route GET /api/students/:id/credentials
+ */
 export const getStudentCredentials = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1575,10 +1613,10 @@ export const getStudentCredentials = async (req, res) => {
 
     if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
       student =
-        FallbackDb.findById("students", id) ||
-        FallbackDb.findOne("students", { admissionNumber: id });
+        FallbackDb.findById('students', id) ||
+        FallbackDb.findOne('students', { admissionNumber: id });
       if (student?.user) {
-        userRecord = FallbackDb.findById("users", student.user);
+        userRecord = FallbackDb.findById('users', student.user);
       }
     } else {
       student = await Student.findById(id);
@@ -1598,10 +1636,10 @@ export const getStudentCredentials = async (req, res) => {
       userRecord?.password ||
       student?.tempPassword ||
       student?.password ||
-      "admin";
+      'admin';
 
-    if (password.startsWith("$2a$") || password.startsWith("$2b$")) {
-      password = userRecord?.tempPassword || student?.tempPassword || "admin";
+    if (password.startsWith('$2a$') || password.startsWith('$2b$')) {
+      password = userRecord?.tempPassword || student?.tempPassword || 'admin';
     }
 
     return res.json({
@@ -1611,20 +1649,24 @@ export const getStudentCredentials = async (req, res) => {
         email,
         password,
         name: student?.name || username,
-        admissionNumber: student?.admissionNumber || username,
-      },
+        admissionNumber: student?.admissionNumber || username
+      }
     });
   } catch (error) {
-    console.error("getStudentCredentials error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Bulk import multiple student records from structured array.
+ *
+ * @route POST /api/students/bulk-import
+ */
 export const bulkImportStudents = async (req, res) => {
   try {
     const { students } = req.body;
     if (!Array.isArray(students) || students.length === 0) {
-      return res.status(400).json({ success: false, message: "No student data provided for import" });
+      return sendBadRequest(res, 'No student data provided for import');
     }
 
     let successCount = 0;
@@ -1633,7 +1675,6 @@ export const bulkImportStudents = async (req, res) => {
     for (let i = 0; i < students.length; i++) {
       const raw = students[i];
       try {
-        // buildStudentPayload auto-generates admissionNumber + rollNumber
         const payload = await buildStudentPayload(raw);
         let password = raw.password;
         if (!password || password.length < 6) {
@@ -1641,44 +1682,42 @@ export const bulkImportStudents = async (req, res) => {
         }
 
         if (!payload.name) payload.name = `Student ${payload.admissionNumber}`;
-        if (!payload.contactNumber) payload.contactNumber = "";
+        if (!payload.contactNumber) payload.contactNumber = '';
         if (!payload.parentName) payload.parentName = `Guardian of ${payload.name}`;
         if (!payload.parentContact) payload.parentContact = payload.contactNumber;
 
         if (checkFallback()) {
-          const user = FallbackDb.create("users", {
+          const user = FallbackDb.create('users', {
             username: payload.admissionNumber.toLowerCase(),
             admissionNumber: payload.admissionNumber,
             email: payload.email,
             password,
             tempPassword: password,
-            role: "student",
+            role: 'student',
             permissions: payload.permissions,
             name: payload.name,
-            isActive: true,
+            isActive: true
           });
-          const createdStudent = FallbackDb.create("students", {
+          const createdStudent = FallbackDb.create('students', {
             ...payload,
             user: user.id,
-            tempPassword: password,
+            tempPassword: password
           });
-          FallbackDb.update("users", user.id, { profileId: createdStudent.id });
+          FallbackDb.update('users', user.id, { profileId: createdStudent.id });
           await createOrLinkParent(payload, createdStudent.id, password);
         } else {
-          // Clean up any orphaned user from a previous failed attempt
           const orphaned = await User.findOne({
             $or: [
               { username: payload.admissionNumber.toLowerCase() },
-              { admissionNumber: payload.admissionNumber },
+              { admissionNumber: payload.admissionNumber }
             ],
-            profileId: { $exists: false },
+            profileId: { $exists: false }
           });
           if (orphaned) await User.findByIdAndDelete(orphaned._id);
 
-          // Create student record first, then user
           const studentRecord = await Student.create({
             ...payload,
-            tempPassword: password,
+            tempPassword: password
           });
 
           const userRecord = await User.create({
@@ -1687,14 +1726,14 @@ export const bulkImportStudents = async (req, res) => {
             email: payload.email,
             password,
             tempPassword: password,
-            role: "student",
+            role: 'student',
             permissions: payload.permissions,
             name: payload.name,
             profileId: studentRecord._id,
-            isActive: payload.status === "active",
+            isActive: payload.status === 'active',
             forcePasswordChange: Boolean(payload.forcePasswordChange),
-            loginRestriction: payload.loginRestriction || "none",
-            twoFactorEnabled: Boolean(payload.twoFactorEnabled),
+            loginRestriction: payload.loginRestriction || 'none',
+            twoFactorEnabled: Boolean(payload.twoFactorEnabled)
           });
 
           studentRecord.user = userRecord._id;
@@ -1710,11 +1749,11 @@ export const bulkImportStudents = async (req, res) => {
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
-      action: "BULK",
-      module: "students",
+      action: 'BULK',
+      module: 'students',
       details: `Bulk imported ${successCount} students`,
       ipAddress: req.ip,
-      metadata: { total: students.length, successCount, errorCount: errors.length },
+      metadata: { total: students.length, successCount, errorCount: errors.length }
     });
 
     return res.json({
@@ -1722,47 +1761,65 @@ export const bulkImportStudents = async (req, res) => {
       count: successCount,
       total: students.length,
       errors,
-      message: `Successfully imported ${successCount} out of ${students.length} students.${errors.length ? ` (${errors.length} failed)` : ""}`,
+      message: `Successfully imported ${successCount} out of ${students.length} students.${errors.length ? ` (${errors.length} failed)` : ''}`
     });
   } catch (error) {
-    console.error("bulkImportStudents error:", error);
-    return res.status(500).json({ success: false, message: "Bulk import failed" });
+    return sendError(res, 'Bulk import failed', 500, error);
   }
 };
 
 // ─── PROMOTE / DEMOTE STUDENTS (Bulk Whole School, Class-wise, or Individual) ───
+
 const CLASS_ORDER = [
-  "Nursery", "LKG", "UKG",
-  "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6",
-  "Class 7", "Class 8", "Class 9", "Class 10", "Class 11", "Class 12"
+  'Nursery', 'LKG', 'UKG',
+  'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6',
+  'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12'
 ];
 
+/**
+ * Determine the next class in the academic progression sequence.
+ *
+ * @param {string} currentClass - Current class name.
+ * @returns {string} Target promoted class name or 'Passout'.
+ */
 const getNextClass = (currentClass) => {
-  if (!currentClass) return "Class 1";
+  if (!currentClass) return 'Class 1';
   const normalized = String(currentClass).split(' - ')[0].trim();
   const idx = CLASS_ORDER.findIndex((c) => c.toLowerCase() === normalized.toLowerCase());
-  if (idx === -1) return "Class 1";
-  if (idx === CLASS_ORDER.length - 1) return "Passout";
+  if (idx === -1) return 'Class 1';
+  if (idx === CLASS_ORDER.length - 1) return 'Passout';
   return CLASS_ORDER[idx + 1];
 };
 
+/**
+ * Determine the previous class in the academic progression sequence.
+ *
+ * @param {string} currentClass - Current class name.
+ * @param {string} status - Current student status.
+ * @returns {string} Target demoted class name.
+ */
 const getPrevClass = (currentClass, status) => {
-  if (status === "Passout" || currentClass === "Passout") return "Class 12";
-  if (!currentClass) return "Nursery";
+  if (status === 'Passout' || currentClass === 'Passout') return 'Class 12';
+  if (!currentClass) return 'Nursery';
   const normalized = String(currentClass).split(' - ')[0].trim();
   const idx = CLASS_ORDER.findIndex((c) => c.toLowerCase() === normalized.toLowerCase());
   if (idx <= 0) return CLASS_ORDER[0];
   return CLASS_ORDER[idx - 1];
 };
 
+/**
+ * Promote or demote students across institution, class, or individual selection.
+ *
+ * @route POST /api/students/promote
+ */
 export const promoteStudents = async (req, res) => {
   try {
     const {
-      mode = 'whole_school', // 'whole_school', 'class_wise', 'individual'
-      action = 'promote',   // 'promote', 'demote'
+      mode = 'whole_school',
+      action = 'promote',
       sourceClass = '',
       studentIds = [],
-      targetSession = '',
+      targetSession = ''
     } = req.body;
 
     const isPromote = action === 'promote';
@@ -1805,9 +1862,9 @@ export const promoteStudents = async (req, res) => {
                 action: isPassout ? 'passout' : action,
                 sessionName: targetSession,
                 promotedAt: new Date().toISOString(),
-                promotedBy: req.user?.name || 'admin',
-              },
-            ],
+                promotedBy: req.user?.name || 'admin'
+              }
+            ]
           };
         }
         return s;
@@ -1817,21 +1874,21 @@ export const promoteStudents = async (req, res) => {
 
       await logActivity({
         userId: req.user?._id || req.user?.id,
-        action: isPromote ? "PROMOTE" : "DEMOTE",
-        module: "students",
+        action: isPromote ? 'PROMOTE' : 'DEMOTE',
+        module: 'students',
         details: `${isPromote ? 'Promoted' : 'Demoted'} ${updatedCount} students (${mode})`,
-        ipAddress: req.ip,
+        ipAddress: req.ip
       });
 
       return res.json({
         success: true,
         updatedCount,
         message: `Successfully ${isPromote ? 'promoted' : 'demoted'} ${updatedCount} student(s)!`,
-        logs: updateLogs,
+        logs: updateLogs
       });
     }
 
-    // MongoDB Mode — fetch active session to attach sessionId
+    // MongoDB Mode
     const activeSession = await AcademicSession.findOne({ isCurrent: true }).lean();
 
     let query = {};
@@ -1840,8 +1897,8 @@ export const promoteStudents = async (req, res) => {
       query = {
         $or: [
           { className: { $regex: new RegExp(`^${clsName}`, 'i') } },
-          { class: { $regex: new RegExp(`^${clsName}`, 'i') } },
-        ],
+          { class: { $regex: new RegExp(`^${clsName}`, 'i') } }
+        ]
       };
     } else if (mode === 'individual') {
       query = { _id: { $in: studentIds } };
@@ -1865,39 +1922,42 @@ export const promoteStudents = async (req, res) => {
         toClass: newCls,
         action: isPassout ? 'passout' : action,
         sessionName: targetSession || activeSession?.sessionName || '',
-        sessionId: activeSession?._id || null,  // ← added
+        sessionId: activeSession?._id || null,
         promotedAt: new Date(),
-        promotedBy: req.user?.name || 'admin',
+        promotedBy: req.user?.name || 'admin'
       });
 
       await student.save();
 
-      // ── Write / update StudentSessionHistory ──────────────────────────────
       if (activeSession) {
-        // Close old record for previous session
         await StudentSessionHistory.findOneAndUpdate(
           { studentId: student._id, status: 'active' },
-          { status: 'completed', completedAt: new Date(), completedBy: req.user?.name || 'admin', action: isPassout ? 'passout' : action }
+          {
+            status: 'completed',
+            completedAt: new Date(),
+            completedBy: req.user?.name || 'admin',
+            action: isPassout ? 'passout' : action
+          }
         );
-        // Create new record for new session if not passout
+
         if (!isPassout) {
           await StudentSessionHistory.findOneAndUpdate(
             { studentId: student._id, sessionId: activeSession._id },
             {
-              studentId:       student._id,
-              studentName:     student.name,
+              studentId: student._id,
+              studentName: student.name,
               admissionNumber: student.admissionNumber,
-              sessionId:       activeSession._id,
-              sessionName:     activeSession.sessionName,
-              classId:         student.classId || '',
-              className:       newCls,
-              sectionId:       student.sectionId || '',
-              sectionName:     student.sectionName || student.section || '',
-              rollNumber:      student.rollNumber,
-              action:          'promoted',
-              status:          'active',
-              enrolledAt:      new Date(),
-              enrolledBy:      req.user?.name || 'admin',
+              sessionId: activeSession._id,
+              sessionName: activeSession.sessionName,
+              classId: student.classId || '',
+              className: newCls,
+              sectionId: student.sectionId || '',
+              sectionName: student.sectionName || student.section || '',
+              rollNumber: student.rollNumber,
+              action: 'promoted',
+              status: 'active',
+              enrolledAt: new Date(),
+              enrolledBy: req.user?.name || 'admin'
             },
             { upsert: true, new: true }
           );
@@ -1910,25 +1970,28 @@ export const promoteStudents = async (req, res) => {
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
-      action: isPromote ? "PROMOTE" : "DEMOTE",
-      module: "students",
+      action: isPromote ? 'PROMOTE' : 'DEMOTE',
+      module: 'students',
       details: `${isPromote ? 'Promoted' : 'Demoted'} ${updatedCount} students (${mode})`,
-      ipAddress: req.ip,
+      ipAddress: req.ip
     });
 
     return res.json({
       success: true,
       updatedCount,
       message: `Successfully ${isPromote ? 'promoted' : 'demoted'} ${updatedCount} student(s)!`,
-      logs: updateLogs,
+      logs: updateLogs
     });
   } catch (error) {
-    console.error("promoteStudents error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Promotion operation failed" });
+    return sendError(res, error.message || 'Promotion operation failed', 500, error);
   }
 };
 
-// ─── ROLLBACK PROMOTION (Within 24 Hours) ───
+/**
+ * Rollback student promotions enacted within the configured hour window.
+ *
+ * @route POST /api/students/rollback-promotion
+ */
 export const rollbackPromotion = async (req, res) => {
   try {
     const { maxHours = 24 } = req.body;
@@ -1954,7 +2017,7 @@ export const rollbackPromotion = async (req, res) => {
             studentId: s.id || s._id,
             name: s.name,
             from: s.className || s.class,
-            revertedTo: prevClass,
+            revertedTo: prevClass
           });
 
           return {
@@ -1968,9 +2031,9 @@ export const rollbackPromotion = async (req, res) => {
                 ...lastEntry,
                 action: 'rolled_back',
                 rolledBackAt: new Date().toISOString(),
-                rolledBackBy: req.user?.name || 'admin',
-              },
-            ],
+                rolledBackBy: req.user?.name || 'admin'
+              }
+            ]
           };
         }
         return s;
@@ -1982,10 +2045,10 @@ export const rollbackPromotion = async (req, res) => {
 
       await logActivity({
         userId: req.user?._id || req.user?.id,
-        action: "ROLLBACK_PROMOTION",
-        module: "students",
+        action: 'ROLLBACK_PROMOTION',
+        module: 'students',
         details: `Rolled back promotion for ${revertedCount} students within ${maxHours}h window`,
-        ipAddress: req.ip,
+        ipAddress: req.ip
       });
 
       return res.json({
@@ -1994,13 +2057,13 @@ export const rollbackPromotion = async (req, res) => {
         message: revertedCount > 0
           ? `Successfully rolled back promotion for ${revertedCount} student(s) to previous state!`
           : `No student promotions found within the last ${maxHours} hours to rollback.`,
-        logs: revertLogs,
+        logs: revertLogs
       });
     }
 
     // MongoDB Mode
     const students = await Student.find({
-      'promotionHistory.promotedAt': { $gte: cutoffTime },
+      'promotionHistory.promotedAt': { $gte: cutoffTime }
     });
 
     for (const student of students) {
@@ -2027,17 +2090,17 @@ export const rollbackPromotion = async (req, res) => {
           studentId: student._id,
           name: student.name,
           from: student.className,
-          revertedTo: prevClass,
+          revertedTo: prevClass
         });
       }
     }
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
-      action: "ROLLBACK_PROMOTION",
-      module: "students",
+      action: 'ROLLBACK_PROMOTION',
+      module: 'students',
       details: `Rolled back promotion for ${revertedCount} students within ${maxHours}h window`,
-      ipAddress: req.ip,
+      ipAddress: req.ip
     });
 
     return res.json({
@@ -2046,15 +2109,18 @@ export const rollbackPromotion = async (req, res) => {
       message: revertedCount > 0
         ? `Successfully rolled back promotion for ${revertedCount} student(s) to previous state!`
         : `No student promotions found within the last ${maxHours} hours to rollback.`,
-      logs: revertLogs,
+      logs: revertLogs
     });
   } catch (error) {
-    console.error("rollbackPromotion error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Rollback operation failed" });
+    return sendError(res, error.message || 'Rollback operation failed', 500, error);
   }
 };
 
-// ─── CHECK IF RECENT PROMOTION EXISTS (Within 24 Hours) ───
+/**
+ * Check if recent promotions are eligible for rollback.
+ *
+ * @route GET /api/students/promotion-status
+ */
 export const getPromotionStatus = async (req, res) => {
   try {
     const maxHours = 24;
@@ -2078,213 +2144,189 @@ export const getPromotionStatus = async (req, res) => {
       return res.json({
         success: true,
         canRollback: activePromotionsCount > 0,
-        activePromotionsCount,
+        activePromotionsCount
       });
     }
 
-    // MongoDB Mode
     const activePromotionsCountMongo = await Student.countDocuments({
-      'promotionHistory': {
+      promotionHistory: {
         $elemMatch: {
           promotedAt: { $gte: cutoffTime },
-          action: { $nin: ['rolled_back', 'demote'] },
-        },
-      },
+          action: { $nin: ['rolled_back', 'demote'] }
+        }
+      }
     });
 
     return res.json({
       success: true,
       canRollback: activePromotionsCountMongo > 0,
-      activePromotionsCount: activePromotionsCountMongo,
+      activePromotionsCount: activePromotionsCountMongo
     });
   } catch (error) {
-    console.error("getPromotionStatus error:", error);
-    return res.status(500).json({ success: false, canRollback: false });
+    return sendError(res, 'Failed to get promotion status', 500, error);
   }
 };
 
 /**
- * Upload student file (photo or Aadhaar PDF) to Cloudinary.
- * Strict 1MB size limit.
- * Saved once to Cloudinary, returned URL is placed in form state.
+ * Upload student photo or Aadhaar document to AWS S3 (with local fallback).
+ *
+ * @route POST /api/students/upload-file
  */
 export const uploadStudentFile = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "No file uploaded",
-      });
+      return sendBadRequest(res, 'No file uploaded');
     }
 
     if (req.file.size > 1024 * 1024) {
-      return res.status(400).json({
-        success: false,
-        message: "File size must not exceed 1MB",
-      });
+      return sendBadRequest(res, 'File size must not exceed 1MB');
     }
 
     const isPdf =
-      req.file.mimetype === "application/pdf" ||
-      (req.file.originalname && req.file.originalname.toLowerCase().endsWith(".pdf"));
+      req.file.mimetype === 'application/pdf' ||
+      (req.file.originalname && req.file.originalname.toLowerCase().endsWith('.pdf'));
 
-    const uploadType =
-      req.body.type || (isPdf ? "aadhaar" : "photo");
+    const uploadType = req.body.type || (isPdf ? 'aadhaar' : 'photo');
+    const folder = uploadType === 'photo'
+      ? 'school-erp/students/photos'
+      : 'school-erp/students/aadhaar';
 
-    const folder =
-      uploadType === "photo"
-        ? "school-erp/students/photos"
-        : "school-erp/students/aadhaar";
-
-    // ── Attempt S3 upload ─────────────────────────────────────────────────
     try {
       if (!process.env.AWS_S3_BUCKET_NAME) {
         throw new Error('AWS_S3_BUCKET_NAME is not configured');
       }
 
-      // Build S3 key preserving the same folder structure that Cloudinary used
-      const s3Key = generateS3Key(folder, req.file.originalname ||
-        (isPdf ? `aadhaar-${Date.now()}.pdf` : `photo-${Date.now()}.jpg`));
+      const s3Key = generateS3Key(
+        folder,
+        req.file.originalname || (isPdf ? `aadhaar-${Date.now()}.pdf` : `photo-${Date.now()}.jpg`)
+      );
 
-      // For PDFs: set ContentDisposition: 'inline' so browsers render them
-      // instead of forcing a download (replaces Cloudinary's fl_inline transform)
       await uploadToS3({
         buffer: req.file.buffer,
         key: s3Key,
         contentType: isPdf ? 'application/pdf' : req.file.mimetype,
-        contentDisposition: isPdf ? 'inline' : undefined,
+        contentDisposition: isPdf ? 'inline' : undefined
       });
 
-      // Generate a 1-hour presigned URL for immediate use
       const presignedUrl = await getPresignedUrl(s3Key, 3600);
 
-      const ref =
-        uploadType === "photo"
-          ? { id: s3Key, img: presignedUrl }
-          : { id: s3Key, pdf: presignedUrl };
+      const ref = uploadType === 'photo'
+        ? { id: s3Key, img: presignedUrl }
+        : { id: s3Key, pdf: presignedUrl };
 
       return res.json({
         success: true,
-        message: `${uploadType === "photo" ? "Photo" : "Aadhaar document"} uploaded successfully`,
-        url: presignedUrl,   // presigned URL for immediate display
-        id: s3Key,           // S3 key — stored as imagesRef.id / AdharRef.id in MongoDB
-        publicId: s3Key,     // same — mirrors Cloudinary public_id field name
+        message: `${uploadType === 'photo' ? 'Photo' : 'Aadhaar document'} uploaded successfully`,
+        url: presignedUrl,
+        id: s3Key,
+        publicId: s3Key,
         format: isPdf ? 'pdf' : (req.file.originalname?.split('.').pop() || 'jpg'),
         bytes: req.file.size,
         originalName: req.file.originalname,
         type: uploadType,
-        imagesRef: uploadType === "photo" ? ref : undefined,
-        AdharRef: uploadType !== "photo" ? ref : undefined,
-        ref,
+        imagesRef: uploadType === 'photo' ? ref : undefined,
+        AdharRef: uploadType !== 'photo' ? ref : undefined,
+        ref
       });
     } catch (s3Err) {
-      console.warn("S3 upload failed, falling back to local storage:", s3Err.message);
-
-      // Local fallback
-      const uploadsDir = path.join(process.cwd(), "uploads", "students");
+      const uploadsDir = path.join(process.cwd(), 'uploads', 'students');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
 
-      const ext = path.extname(req.file.originalname) || (isPdf ? ".pdf" : ".jpg");
+      const ext = path.extname(req.file.originalname) || (isPdf ? '.pdf' : '.jpg');
       const safeFilename = `${uploadType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
       const destPath = path.join(uploadsDir, safeFilename);
 
       fs.writeFileSync(destPath, req.file.buffer);
       const fileUrl = `/uploads/students/${safeFilename}`;
       const fileId = safeFilename;
-      const ref =
-        uploadType === "photo"
-          ? { id: fileId, img: fileUrl }
-          : { id: fileId, pdf: fileUrl };
+      const ref = uploadType === 'photo'
+        ? { id: fileId, img: fileUrl }
+        : { id: fileId, pdf: fileUrl };
 
       return res.json({
         success: true,
-        message: `${uploadType === "photo" ? "Photo" : "Aadhaar document"} saved locally`,
+        message: `${uploadType === 'photo' ? 'Photo' : 'Aadhaar document'} saved locally`,
         url: fileUrl,
         id: fileId,
         publicId: fileId,
         originalName: req.file.originalname,
         type: uploadType,
-        imagesRef: uploadType === "photo" ? ref : undefined,
-        AdharRef: uploadType !== "photo" ? ref : undefined,
-        ref,
+        imagesRef: uploadType === 'photo' ? ref : undefined,
+        AdharRef: uploadType !== 'photo' ? ref : undefined,
+        ref
       });
     }
   } catch (error) {
-    console.error("uploadStudentFile error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to upload student file",
-    });
+    return sendError(res, error.message || 'Failed to upload student file', 500, error);
   }
 };
 
 /**
- * Retrieve image or document anywhere by its ID (imagesRef.id or AdharRef.id)
+ * Retrieve uploaded student document or photo by ID.
+ *
+ * @route GET /api/students/files/:fileId
  */
 export const getStudentFileById = async (req, res) => {
   try {
     const { fileId } = req.params;
     if (!fileId) {
-      return res.status(400).json({ success: false, message: "File ID is required" });
+      return sendBadRequest(res, 'File ID is required');
     }
 
     let fileUrl = null;
-    let fileType = "image";
+    let fileType = 'image';
 
-    // 1. Check in FallbackDb or MongoDB
     if (checkFallback()) {
-      const allStudents = FallbackDb.find("students") || [];
+      const allStudents = FallbackDb.find('students') || [];
       const studentWithPhoto = allStudents.find((s) => s.imagesRef?.id === fileId || s.photoId === fileId);
       if (studentWithPhoto) {
         fileUrl = studentWithPhoto.imagesRef?.img || studentWithPhoto.photo;
-        fileType = "image";
+        fileType = 'image';
       } else {
         const studentWithDoc = allStudents.find((s) => s.AdharRef?.id === fileId || s.aadhaarRef?.id === fileId);
         if (studentWithDoc) {
           fileUrl = studentWithDoc.AdharRef?.pdf || studentWithDoc.aadhaarDocument;
-          fileType = "pdf";
+          fileType = 'pdf';
         }
       }
     } else {
       const studentWithPhoto = await Student.findOne({
-        $or: [{ "imagesRef.id": fileId }, { photo: new RegExp(fileId, "i") }],
+        $or: [{ 'imagesRef.id': fileId }, { photo: new RegExp(fileId, 'i') }]
       });
       if (studentWithPhoto) {
         fileUrl = studentWithPhoto.imagesRef?.img || studentWithPhoto.photo;
-        fileType = "image";
+        fileType = 'image';
       } else {
         const studentWithDoc = await Student.findOne({
-          $or: [{ "AdharRef.id": fileId }, { aadhaarDocument: new RegExp(fileId, "i") }],
+          $or: [{ 'AdharRef.id': fileId }, { aadhaarDocument: new RegExp(fileId, 'i') }]
         });
         if (studentWithDoc) {
           fileUrl = studentWithDoc.AdharRef?.pdf || studentWithDoc.aadhaarDocument;
-          fileType = "pdf";
+          fileType = 'pdf';
         }
       }
     }
 
-    // 2. If it's an S3 key (contains "/" but NOT a full URL), generate a presigned URL
-    if (!fileUrl && fileId.includes("/")) {
+    if (!fileUrl && fileId.includes('/')) {
       try {
         if (isS3Key(fileId)) {
           fileUrl = await getPresignedUrl(fileId, 3600);
-          fileType = fileId.toLowerCase().includes("aadhaar") ||
-                     fileId.toLowerCase().includes("adhar") ||
-                     fileId.toLowerCase().endsWith(".pdf") ? "pdf" : "image";
+          fileType = fileId.toLowerCase().includes('aadhaar') ||
+                     fileId.toLowerCase().includes('adhar') ||
+                     fileId.toLowerCase().endsWith('.pdf') ? 'pdf' : 'image';
         } else {
-          // Legacy Cloudinary publicId — try to reconstruct Cloudinary URL
           try {
             const cloudinary = configureCloudinary();
             fileUrl = cloudinary.url(fileId, { secure: true });
-            fileType = fileId.includes("photo") ? "image" : "pdf";
+            fileType = fileId.includes('photo') ? 'image' : 'pdf';
           } catch (err) {
-            // ignore — Cloudinary not configured
+            // Cloudinary optional
           }
         }
       } catch (err) {
-        // ignore — presigned URL generation failed
+        // Presigned generation skipped
       }
     }
 
@@ -2292,15 +2334,15 @@ export const getStudentFileById = async (req, res) => {
       try {
         fileUrl = await getPresignedUrl(fileUrl, 3600);
       } catch (err) {
-        console.warn("Could not presign S3 URL for fileUrl:", err);
+        // Presigned fallback
       }
     }
 
     if (!fileUrl) {
-      return res.status(404).json({ success: false, message: `File not found for ID: ${fileId}` });
+      return sendNotFound(res, `File not found for ID: ${fileId}`);
     }
 
-    if (req.query.redirect === "true" || req.headers.accept?.includes("image/")) {
+    if (req.query.redirect === 'true' || req.headers.accept?.includes('image/')) {
       return res.redirect(fileUrl);
     }
 
@@ -2309,11 +2351,10 @@ export const getStudentFileById = async (req, res) => {
       id: fileId,
       url: fileUrl,
       type: fileType,
-      imagesRef: fileType === "image" ? { id: fileId, img: fileUrl } : undefined,
-      AdharRef: fileType === "pdf" ? { id: fileId, pdf: fileUrl } : undefined,
+      imagesRef: fileType === 'image' ? { id: fileId, img: fileUrl } : undefined,
+      AdharRef: fileType === 'pdf' ? { id: fileId, pdf: fileUrl } : undefined
     });
   } catch (error) {
-    console.error("getStudentFileById error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Server error" });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };

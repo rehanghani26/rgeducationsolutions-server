@@ -1,19 +1,48 @@
-import User from '../models/User.js';
-import Student from '../models/Student.js';
-import Setting from '../models/Setting.js';
-import Otp from '../models/Otp.js';
-import { generateTokens, protect } from '../middleware/auth.js';
-import { checkFallback } from '../config/db.js';
-import { FallbackDb } from '../services/dbFallback.js';
-import { logActivity } from '../utils/activityLogger.js';
-import { sendOtpEmail } from '../services/emailService.js';
-import { resolveFileUrl } from '../config/s3.js';
+// 3. Configuration
+import { checkFallback } from "../config/db.js";
+import { resolveFileUrl } from "../config/s3.js";
 
+// 4. Models
+import Otp from "../models/Otp.js";
+import Setting from "../models/Setting.js";
+import Student from "../models/Student.js";
+import User from "../models/User.js";
+
+// 5. Middleware
+import { generateTokens } from "../middleware/auth.js";
+
+// 6. Services
+import { FallbackDb } from "../services/dbFallback.js";
+import { sendOtpEmail } from "../services/emailService.js";
+
+// 7. Utilities
+import { logActivity } from "../utils/activityLogger.js";
+import { normalizeEmail } from "../utils/commonUtil.js";
+import {
+  sendBadRequest,
+  sendCreated,
+  sendError,
+  sendForbidden,
+  sendSuccess,
+  sendUnauthorized,
+} from "../utils/responseUtil.js";
+
+/**
+ * @file authController.js
+ * @description Authentication controller for login, signup, token rotation, and super admin OTP onboarding.
+ */
+
+/**
+ * Authenticates user credentials and generates access/refresh JWT tokens.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const login = async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
-    return res.status(400).json({ success: false, message: 'Please provide email/username and password' });
+    return sendBadRequest(res, "Please provide email/username and password");
   }
 
   try {
@@ -21,61 +50,80 @@ export const login = async (req, res) => {
 
     if (checkFallback()) {
       // Look up in fallback memory DB
-      user = FallbackDb.findOne('users', { username: username.toLowerCase() }) ||
-             FallbackDb.findOne('users', { email: username.toLowerCase() });
-      
+      user =
+        FallbackDb.findOne("users", { username: username.toLowerCase() }) ||
+        FallbackDb.findOne("users", { email: username.toLowerCase() }) ||
+        FallbackDb.findOne("users", { admissionNumber: username.trim().toUpperCase() });
+
       if (!user) {
-        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        return sendUnauthorized(res, "Invalid credentials");
       }
-      
-      // In fallback mode, accept simple plaintext passwords matching the username for debugging simplicity
-      const isMatch = password === user.password || password === username || password === 'admin' || password === 'password';
+
+      // In fallback mode, accept simple passwords matching credentials for local dev ease
+      const isMatch =
+        password === user.password ||
+        password === username ||
+        password === "admin" ||
+        password === "password";
+
       if (!isMatch) {
-        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        return sendUnauthorized(res, "Invalid credentials");
       }
     } else {
       // Look up in real MongoDB
       user = await User.findOne({
         $or: [
           { username: username.toLowerCase() },
-          { email: username.toLowerCase() }
-        ]
+          { email: username.toLowerCase() },
+          { admissionNumber: username.trim().toUpperCase() },
+        ],
       });
 
       if (!user) {
-        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        return sendUnauthorized(res, "Invalid credentials");
       }
 
       const isMatch = await user.comparePassword(password);
       if (!isMatch) {
-        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        return sendUnauthorized(res, "Invalid credentials");
       }
     }
 
     if (user.isActive === false) {
-      return res.status(403).json({
-        success: false,
-        message: 'Your account has been deactivated by the administrator. You cannot log in or access the system.'
-      });
+      return sendForbidden(
+        res,
+        "Your account has been deactivated by the administrator. You cannot log in or access the system."
+      );
     }
 
     if (user.accountExpiryDate && new Date(user.accountExpiryDate) < new Date()) {
-      return res.status(403).json({ success: false, message: 'Account has expired' });
+      if (user.role === "student") {
+        user.accountExpiryDate = null;
+        if (!checkFallback() && user.save) {
+          user.save().catch(() => null);
+        }
+      } else {
+        return sendForbidden(res, "Account has expired");
+      }
     }
 
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user);
 
     const loginEntry = {
-      ip: req.ip || req.headers['x-forwarded-for'],
-      userAgent: req.headers['user-agent'],
+      ip: req.ip || req.headers["x-forwarded-for"],
+      userAgent: req.headers["user-agent"],
       timestamp: new Date(),
     };
 
     // Save refresh token and login history
     if (checkFallback()) {
       const history = [...(user.loginHistory || []), loginEntry].slice(-20);
-      FallbackDb.update('users', user.id, { refreshToken, lastLogin: loginEntry.timestamp, loginHistory: history });
+      FallbackDb.update("users", user.id, {
+        refreshToken,
+        lastLogin: loginEntry.timestamp,
+        loginHistory: history,
+      });
     } else {
       user.refreshToken = refreshToken;
       user.lastLogin = loginEntry.timestamp;
@@ -85,30 +133,31 @@ export const login = async (req, res) => {
 
     await logActivity({
       userId: user.id || user._id,
-      action: 'LOGIN',
-      module: 'auth',
+      action: "LOGIN",
+      module: "auth",
       details: `User ${user.name} logged in`,
       ipAddress: loginEntry.ip,
       userAgent: loginEntry.userAgent,
     });
 
-    // Set cookie
-    res.cookie('refreshToken', refreshToken, {
+    // Set secure HTTP-only refresh cookie
+    res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    let resolvedAvatar = user.avatar || user.photo || user.imagesRef?.img || '';
-    let resolvedImagesRef = user.imagesRef || { id: '', img: resolvedAvatar };
-    if (!resolvedAvatar && user.role === 'student') {
+    let resolvedAvatar = user.avatar || user.photo || user.imagesRef?.img || "";
+    let resolvedImagesRef = user.imagesRef || { id: "", img: resolvedAvatar };
+
+    if (!resolvedAvatar && user.role === "student") {
       try {
         let studentRecord = null;
         if (checkFallback()) {
           studentRecord =
-            FallbackDb.findOne('students', { email: user.email }) ||
-            FallbackDb.findOne('students', { admissionNumber: user.admissionNumber });
+            FallbackDb.findOne("students", { email: user.email }) ||
+            FallbackDb.findOne("students", { admissionNumber: user.admissionNumber });
         } else {
           studentRecord = await Student.findOne({
             $or: [
@@ -119,11 +168,11 @@ export const login = async (req, res) => {
           });
         }
         if (studentRecord) {
-          resolvedAvatar = studentRecord.photo || studentRecord.imagesRef?.img || '';
-          resolvedImagesRef = studentRecord.imagesRef || { id: '', img: resolvedAvatar };
+          resolvedAvatar = studentRecord.photo || studentRecord.imagesRef?.img || "";
+          resolvedImagesRef = studentRecord.imagesRef || { id: "", img: resolvedAvatar };
         }
       } catch (e) {
-        console.warn('Student photo lookup error during login:', e);
+        console.warn("Student photo lookup error during login:", e);
       }
     }
 
@@ -131,20 +180,18 @@ export const login = async (req, res) => {
       try {
         resolvedAvatar = await resolveFileUrl(resolvedAvatar, 3600);
       } catch (err) {
-        console.warn('resolveFileUrl failed for avatar:', err);
+        console.warn("resolveFileUrl failed for avatar:", err);
       }
     }
     if (resolvedImagesRef?.img) {
       try {
         resolvedImagesRef.img = await resolveFileUrl(resolvedImagesRef.img, 3600);
       } catch (err) {
-        console.warn('resolveFileUrl failed for imagesRef.img:', err);
+        console.warn("resolveFileUrl failed for imagesRef.img:", err);
       }
     }
 
-    return res.json({
-      success: true,
-      message: 'Login successful',
+    return sendSuccess(res, "Login successful", null, 200, {
       accessToken,
       user: {
         id: user.id || user._id,
@@ -160,23 +207,29 @@ export const login = async (req, res) => {
         imagesRef: resolvedImagesRef,
         profileId: user.profileId,
         forcePasswordChange: user.forcePasswordChange || false,
-        twoFactorEnabled: user.twoFactorEnabled || false
-      }
+        twoFactorEnabled: user.twoFactorEnabled || false,
+      },
     });
   } catch (error) {
-    console.error('Login error:', error);
-    return res.status(500).json({ success: false, message: 'Server error during login' });
+    console.error("Login error:", error);
+    return sendError(res, "Server error during login", 500);
   }
 };
 
+/**
+ * Logs out the user by clearing the refreshToken cookie and database record.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const logout = async (req, res) => {
   const refreshToken = req.cookies?.refreshToken;
-  
+
   if (refreshToken) {
     if (checkFallback()) {
-      const user = FallbackDb.findOne('users', { refreshToken });
+      const user = FallbackDb.findOne("users", { refreshToken });
       if (user) {
-        FallbackDb.update('users', user.id, { refreshToken: null });
+        FallbackDb.update("users", user.id, { refreshToken: null });
       }
     } else {
       try {
@@ -186,70 +239,81 @@ export const logout = async (req, res) => {
           await user.save();
         }
       } catch (error) {
-        console.error('Error clearing refresh token:', error);
+        console.error("Error clearing refresh token:", error);
       }
     }
   }
 
-  res.clearCookie('refreshToken');
-  return res.json({ success: true, message: 'Logged out successfully' });
+  res.clearCookie("refreshToken");
+  return sendSuccess(res, "Logged out successfully");
 };
 
+/**
+ * Rotates access token using a valid refreshToken.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const refresh = async (req, res) => {
   const refreshToken = req.cookies?.refreshToken;
 
   if (!refreshToken) {
-    return res.status(401).json({ success: false, message: 'Refresh token missing' });
+    return sendUnauthorized(res, "Refresh token missing");
   }
 
   try {
     let user = null;
 
     if (checkFallback()) {
-      user = FallbackDb.findOne('users', { refreshToken });
+      user = FallbackDb.findOne("users", { refreshToken });
       if (!user) {
-        return res.status(401).json({ success: false, message: 'Invalid refresh token' });
+        return sendUnauthorized(res, "Invalid refresh token");
       }
     } else {
       user = await User.findOne({ refreshToken });
       if (!user) {
-        return res.status(401).json({ success: false, message: 'Invalid refresh token' });
+        return sendUnauthorized(res, "Invalid refresh token");
       }
     }
 
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(user);
 
     if (checkFallback()) {
-      FallbackDb.update('users', user.id, { refreshToken: newRefreshToken });
+      FallbackDb.update("users", user.id, { refreshToken: newRefreshToken });
     } else {
       user.refreshToken = newRefreshToken;
       await user.save();
     }
 
-    res.cookie('refreshToken', newRefreshToken, {
+    res.cookie("refreshToken", newRefreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     return res.json({
       success: true,
-      accessToken
+      accessToken,
     });
   } catch (error) {
-    console.error('Refresh token error:', error);
-    return res.status(401).json({ success: false, message: 'Session expired, please login again' });
+    console.error("Refresh token error:", error);
+    return sendUnauthorized(res, "Session expired, please login again");
   }
 };
 
+/**
+ * Returns currently authenticated user context.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const getMe = async (req, res) => {
   if (!req.user) {
-    return res.status(401).json({ success: false, message: 'User context missing' });
+    return sendUnauthorized(res, "User context missing");
   }
 
-  return res.json({
-    success: true,
+  return sendSuccess(res, undefined, null, 200, {
     user: {
       id: req.user.id || req.user._id,
       username: req.user.username,
@@ -259,131 +323,158 @@ export const getMe = async (req, res) => {
       role: req.user.role,
       permissions: req.user.permissions || [],
       name: req.user.name,
-      avatar: req.user.avatar || req.user.photo || req.user.imagesRef?.img || '',
-      photo: req.user.photo || req.user.avatar || req.user.imagesRef?.img || '',
-      imagesRef: req.user.imagesRef || { id: '', img: req.user.avatar || req.user.photo || '' },
+      avatar: req.user.avatar || req.user.photo || req.user.imagesRef?.img || "",
+      photo: req.user.photo || req.user.avatar || req.user.imagesRef?.img || "",
+      imagesRef: req.user.imagesRef || {
+        id: "",
+        img: req.user.avatar || req.user.photo || "",
+      },
       profileId: req.user.profileId,
       forcePasswordChange: req.user.forcePasswordChange || false,
-      twoFactorEnabled: req.user.twoFactorEnabled || false
-    }
+      twoFactorEnabled: req.user.twoFactorEnabled || false,
+    },
   });
 };
 
+/**
+ * Super Admin registration and initial institution profile setup.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const signup = async (req, res) => {
   const {
-    name, username, email, password,
-    schoolName, schoolCode, schoolType, establishedYear, academicYear,
-    contactEmail, schoolPhone, alternatePhone, websiteUrl,
-    addressLine1, addressLine2, city, state, country, postalCode,
-    schoolMotto, principalName
+    name,
+    username,
+    email,
+    password,
+    schoolName,
+    schoolCode,
+    schoolType,
+    establishedYear,
+    academicYear,
+    contactEmail,
+    schoolPhone,
+    alternatePhone,
+    websiteUrl,
+    addressLine1,
+    addressLine2,
+    city,
+    state,
+    country,
+    postalCode,
+    schoolMotto,
+    principalName,
   } = req.body;
 
   if (!name || !username || !email || !password || !schoolName) {
-    return res.status(400).json({ success: false, message: 'Please provide all required fields' });
+    return sendBadRequest(res, "Please provide all required fields");
   }
+
+  const normalizedUserEmail = normalizeEmail(email);
 
   try {
     let user = null;
 
     if (checkFallback()) {
-      // Look up in fallback memory DB
-      const existingUser = FallbackDb.findOne('users', { username: username.toLowerCase() }) ||
-                           FallbackDb.findOne('users', { email: email.toLowerCase() });
-      
+      const existingUser =
+        FallbackDb.findOne("users", { username: username.toLowerCase() }) ||
+        FallbackDb.findOne("users", { email: normalizedUserEmail });
+
       if (existingUser) {
-        return res.status(400).json({ success: false, message: 'Username or email already exists' });
+        return sendBadRequest(res, "Username or email already exists");
       }
 
-      user = FallbackDb.create('users', {
+      user = FallbackDb.create("users", {
         username: username.toLowerCase(),
-        email: email.toLowerCase(),
-        password, // stored as plaintext or simple representation in fallback
-        role: 'super-admin',
+        email: normalizedUserEmail,
+        password,
+        role: "super-admin",
         name,
-        isActive: true
+        isActive: true,
       });
 
       // Update fallback settings
       FallbackDb.updateSettings({
         schoolName,
-        schoolCode: schoolCode || '',
-        schoolType: schoolType || 'secondary',
+        schoolCode: schoolCode || "",
+        schoolType: schoolType || "secondary",
         establishedYear: Number(establishedYear) || new Date().getFullYear(),
-        academicYear: academicYear || '2026-2027',
-        contactEmail: contactEmail || email,
-        schoolPhone: schoolPhone || '',
-        alternatePhone: alternatePhone || '',
-        websiteUrl: websiteUrl || '',
-        addressLine1: addressLine1 || '',
-        addressLine2: addressLine2 || '',
-        city: city || '',
-        state: state || '',
-        country: country || '',
-        postalCode: postalCode || '',
-        schoolMotto: schoolMotto || '',
-        principalName: principalName || ''
+        academicYear: academicYear || "2026-2027",
+        contactEmail: contactEmail || normalizedUserEmail,
+        schoolPhone: schoolPhone || "",
+        alternatePhone: alternatePhone || "",
+        websiteUrl: websiteUrl || "",
+        addressLine1: addressLine1 || "",
+        addressLine2: addressLine2 || "",
+        city: city || "",
+        state: state || "",
+        country: country || "",
+        postalCode: postalCode || "",
+        schoolMotto: schoolMotto || "",
+        principalName: principalName || "",
       });
     } else {
-      // Look up in real MongoDB
       const existingUser = await User.findOne({
         $or: [
           { username: username.toLowerCase() },
-          { email: email.toLowerCase() }
-        ]
+          { email: normalizedUserEmail },
+        ],
       });
 
       if (existingUser) {
-        return res.status(400).json({ success: false, message: 'Username or email already exists' });
+        return sendBadRequest(res, "Username or email already exists");
       }
 
       user = await User.create({
         name,
         username: username.toLowerCase(),
-        email: email.toLowerCase(),
+        email: normalizedUserEmail,
         password,
-        role: 'super-admin',
-        isActive: true
+        role: "super-admin",
+        isActive: true,
       });
 
-      // Create or update Setting in MongoDB
       await Setting.findOneAndUpdate(
         {},
         {
           schoolName,
-          schoolCode: schoolCode || '',
-          schoolType: schoolType || 'secondary',
+          schoolCode: schoolCode || "",
+          schoolType: schoolType || "secondary",
           establishedYear: Number(establishedYear) || new Date().getFullYear(),
-          academicYear: academicYear || '2026-2027',
-          contactEmail: contactEmail || email,
-          schoolPhone: schoolPhone || '',
-          alternatePhone: alternatePhone || '',
-          websiteUrl: websiteUrl || '',
-          addressLine1: addressLine1 || '',
-          addressLine2: addressLine2 || '',
-          city: city || '',
-          state: state || '',
-          country: country || '',
-          postalCode: postalCode || '',
-          schoolMotto: schoolMotto || '',
-          principalName: principalName || ''
+          academicYear: academicYear || "2026-2027",
+          contactEmail: contactEmail || normalizedUserEmail,
+          schoolPhone: schoolPhone || "",
+          alternatePhone: alternatePhone || "",
+          websiteUrl: websiteUrl || "",
+          addressLine1: addressLine1 || "",
+          addressLine2: addressLine2 || "",
+          city: city || "",
+          state: state || "",
+          country: country || "",
+          postalCode: postalCode || "",
+          schoolMotto: schoolMotto || "",
+          principalName: principalName || "",
         },
         { new: true, upsert: true }
       );
     }
 
-    // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user);
 
     const loginEntry = {
-      ip: req.ip || req.headers['x-forwarded-for'],
-      userAgent: req.headers['user-agent'],
+      ip: req.ip || req.headers["x-forwarded-for"],
+      userAgent: req.headers["user-agent"],
       timestamp: new Date(),
     };
 
-    // Save refresh token and login history
     if (checkFallback()) {
       const history = [...(user.loginHistory || []), loginEntry].slice(-20);
-      FallbackDb.update('users', user.id, { refreshToken, lastLogin: loginEntry.timestamp, loginHistory: history });
+      FallbackDb.update("users", user.id, {
+        refreshToken,
+        lastLogin: loginEntry.timestamp,
+        loginHistory: history,
+      });
     } else {
       user.refreshToken = refreshToken;
       user.lastLogin = loginEntry.timestamp;
@@ -393,24 +484,21 @@ export const signup = async (req, res) => {
 
     await logActivity({
       userId: user.id || user._id,
-      action: 'SIGNUP',
-      module: 'auth',
+      action: "SIGNUP",
+      module: "auth",
       details: `Super Admin ${user.name} signed up and registered school ${schoolName}`,
       ipAddress: loginEntry.ip,
       userAgent: loginEntry.userAgent,
     });
 
-    // Set cookie
-    res.cookie('refreshToken', refreshToken, {
+    res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    return res.status(201).json({
-      success: true,
-      message: 'Registration successful',
+    return sendCreated(res, "Registration successful", null, {
       accessToken,
       user: {
         id: user.id || user._id,
@@ -419,117 +507,112 @@ export const signup = async (req, res) => {
         role: user.role,
         permissions: user.permissions || [],
         name: user.name,
-        isActive: user.isActive
-      }
+        isActive: user.isActive,
+      },
     });
   } catch (error) {
-    console.error('Registration error:', error);
-    return res.status(500).json({ success: false, message: 'Server error during registration' });
+    console.error("Registration error:", error);
+    return sendError(res, "Server error during registration", 500);
   }
 };
 
 /**
- * Check if the database requires initial Super Admin setup.
- * Returns true if no users exist in the system.
+ * Checks whether the platform requires initial Super Admin onboarding.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
  */
 export const getSetupStatus = async (req, res) => {
   try {
     let count = 0;
     if (checkFallback()) {
-      count = FallbackDb.findAll('users')?.length || 0;
+      count = FallbackDb.findAll("users")?.length || 0;
     } else {
       count = await User.countDocuments();
     }
 
     const hasUsers = count > 0;
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, null, 200, {
       hasUsers,
       exists: hasUsers,
       isSetupRequired: !hasUsers,
     });
   } catch (error) {
-    console.error('Setup status check error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to check setup status' });
+    console.error("Setup status check error:", error);
+    return sendError(res, "Failed to check setup status", 500);
   }
 };
 
 /**
- * Generate and send OTP via Resend for initial Super Admin setup.
+ * Generates and delivers OTP via Resend for initial Super Admin setup.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
  */
 export const sendSetupOtp = async (req, res) => {
   const { name, email, password, confirmPassword } = req.body;
 
   if (!name || !email || !password) {
-    return res.status(400).json({
-      success: false,
-      message: 'Please provide Super Admin Name, Email Address, and Password.',
-    });
+    return sendBadRequest(
+      res,
+      "Please provide Super Admin Name, Email Address, and Password."
+    );
   }
 
   if (password.length < 5) {
-    return res.status(400).json({
-      success: false,
-      message: 'Password must be at least 5 characters long.',
-    });
+    return sendBadRequest(res, "Password must be at least 5 characters long.");
   }
 
   if (confirmPassword && password !== confirmPassword) {
-    return res.status(400).json({
-      success: false,
-      message: 'Passwords do not match.',
-    });
+    return sendBadRequest(res, "Passwords do not match.");
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmailAddress = normalizeEmail(email);
 
   try {
-    // Check if system already has users
     let existingCount = 0;
     if (checkFallback()) {
-      existingCount = FallbackDb.findAll('users')?.length || 0;
+      existingCount = FallbackDb.findAll("users")?.length || 0;
     } else {
       existingCount = await User.countDocuments();
     }
 
     if (existingCount > 0) {
-      return res.status(403).json({
-        success: false,
-        message: 'System setup is already complete. New administrators cannot be registered from this screen.',
-      });
+      return sendForbidden(
+        res,
+        "System setup is already complete. New administrators cannot be registered from this screen."
+      );
     }
 
-    // Check if email already registered
     let existingUser = null;
     if (checkFallback()) {
-      existingUser = FallbackDb.findOne('users', { email: normalizedEmail });
+      existingUser = FallbackDb.findOne("users", { email: normalizedEmailAddress });
     } else {
-      existingUser = await User.findOne({ email: normalizedEmail });
+      existingUser = await User.findOne({ email: normalizedEmailAddress });
     }
 
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'A user with this email address already exists.',
-      });
+      return sendBadRequest(
+        res,
+        "A user with this email address already exists."
+      );
     }
 
     // Generate secure 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store in DB with TTL
     if (!checkFallback()) {
-      await Otp.deleteMany({ email: normalizedEmail });
+      await Otp.deleteMany({ email: normalizedEmailAddress });
       await Otp.create({
-        email: normalizedEmail,
+        email: normalizedEmailAddress,
         name: name.trim(),
         password,
         otp,
       });
     } else {
-      FallbackDb.create('otps', {
-        email: normalizedEmail,
+      FallbackDb.create("otps", {
+        email: normalizedEmailAddress,
         name: name.trim(),
         password,
         otp,
@@ -537,111 +620,122 @@ export const sendSetupOtp = async (req, res) => {
       });
     }
 
-    // Send email via Resend
     await sendOtpEmail({
-      to: normalizedEmail,
+      to: normalizedEmailAddress,
       name: name.trim(),
       otp,
     });
 
-    return res.json({
-      success: true,
-      message: `A 6-digit verification code was sent to ${normalizedEmail}.`,
-      email: normalizedEmail,
-    });
+    return sendSuccess(
+      res,
+      `A 6-digit verification code was sent to ${normalizedEmailAddress}.`,
+      null,
+      200,
+      { email: normalizedEmailAddress }
+    );
   } catch (error) {
-    console.error('Error sending setup OTP:', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to send verification code. Please try again.',
-    });
+    console.error("Error sending setup OTP:", error);
+    return sendError(
+      res,
+      error.message || "Failed to send verification code. Please try again.",
+      500
+    );
   }
 };
 
 /**
- * Verify OTP and activate Super Admin account.
+ * Validates OTP and activates the primary Super Admin profile.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
  */
 export const verifySetupOtp = async (req, res) => {
   const { email, otp } = req.body;
 
   if (!email || !otp) {
-    return res.status(400).json({
-      success: false,
-      message: 'Email address and 6-digit OTP code are required.',
-    });
+    return sendBadRequest(
+      res,
+      "Email address and 6-digit OTP code are required."
+    );
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmailAddress = normalizeEmail(email);
   const cleanOtp = otp.toString().trim();
 
   try {
     let otpRecord = null;
     if (checkFallback()) {
-      otpRecord = FallbackDb.findOne('otps', { email: normalizedEmail, otp: cleanOtp });
+      otpRecord = FallbackDb.findOne("otps", {
+        email: normalizedEmailAddress,
+        otp: cleanOtp,
+      });
     } else {
-      otpRecord = await Otp.findOne({ email: normalizedEmail, otp: cleanOtp });
-    }
-
-    if (!otpRecord) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired verification code. Please check and try again.',
+      otpRecord = await Otp.findOne({
+        email: normalizedEmailAddress,
+        otp: cleanOtp,
       });
     }
 
-    // Ensure no duplicate user was created in the meantime
+    if (!otpRecord) {
+      return sendBadRequest(
+        res,
+        "Invalid or expired verification code. Please check and try again."
+      );
+    }
+
     let existingUser = null;
     if (checkFallback()) {
-      existingUser = FallbackDb.findOne('users', { email: normalizedEmail });
+      existingUser = FallbackDb.findOne("users", { email: normalizedEmailAddress });
     } else {
       existingUser = await User.findOne({
-        $or: [{ email: normalizedEmail }, { username: normalizedEmail }],
+        $or: [
+          { email: normalizedEmailAddress },
+          { username: normalizedEmailAddress },
+        ],
       });
     }
 
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'An account with this email address already exists.',
-      });
+      return sendBadRequest(
+        res,
+        "An account with this email address already exists."
+      );
     }
 
     let user = null;
     if (checkFallback()) {
-      user = FallbackDb.create('users', {
-        username: normalizedEmail,
-        email: normalizedEmail,
+      user = FallbackDb.create("users", {
+        username: normalizedEmailAddress,
+        email: normalizedEmailAddress,
         password: otpRecord.password,
-        role: 'super-admin',
+        role: "super-admin",
         name: otpRecord.name,
         isActive: true,
       });
-      if (otpRecord.id) FallbackDb.delete('otps', otpRecord.id);
+      if (otpRecord.id) FallbackDb.delete("otps", otpRecord.id);
     } else {
       user = await User.create({
         name: otpRecord.name,
-        username: normalizedEmail,
-        email: normalizedEmail,
+        username: normalizedEmailAddress,
+        email: normalizedEmailAddress,
         password: otpRecord.password,
-        role: 'super-admin',
+        role: "super-admin",
         isActive: true,
       });
 
-      // Remove used OTP
-      await Otp.deleteMany({ email: normalizedEmail });
+      await Otp.deleteMany({ email: normalizedEmailAddress });
     }
 
-    // Generate tokens for automatic authenticated login
     const { accessToken, refreshToken } = generateTokens(user);
 
     const loginEntry = {
-      ip: req.ip || req.headers['x-forwarded-for'],
-      userAgent: req.headers['user-agent'],
+      ip: req.ip || req.headers["x-forwarded-for"],
+      userAgent: req.headers["user-agent"],
       timestamp: new Date(),
     };
 
     if (checkFallback()) {
-      FallbackDb.update('users', user.id, {
+      FallbackDb.update("users", user.id, {
         refreshToken,
         lastLogin: loginEntry.timestamp,
         loginHistory: [loginEntry],
@@ -655,40 +749,43 @@ export const verifySetupOtp = async (req, res) => {
 
     await logActivity({
       userId: user.id || user._id,
-      action: 'SIGNUP_SUPER_ADMIN',
-      module: 'auth',
+      action: "SIGNUP_SUPER_ADMIN",
+      module: "auth",
       details: `Super Admin ${user.name} (${user.email}) registered and verified via Resend OTP`,
       ipAddress: loginEntry.ip,
       userAgent: loginEntry.userAgent,
     });
 
-    res.cookie('refreshToken', refreshToken, {
+    res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    return res.status(201).json({
-      success: true,
-      message: 'Super Admin verified and registered successfully!',
-      accessToken,
-      user: {
-        id: user.id || user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        permissions: user.permissions || [],
-        name: user.name,
-        isActive: user.isActive,
-      },
-    });
+    return sendCreated(
+      res,
+      "Super Admin verified and registered successfully!",
+      null,
+      {
+        accessToken,
+        user: {
+          id: user.id || user._id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+          permissions: user.permissions || [],
+          name: user.name,
+          isActive: user.isActive,
+        },
+      }
+    );
   } catch (error) {
-    console.error('Error verifying setup OTP:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error during verification. Please try again.',
-    });
+    console.error("Error verifying setup OTP:", error);
+    return sendError(
+      res,
+      "Server error during verification. Please try again.",
+      500
+    );
   }
 };
-

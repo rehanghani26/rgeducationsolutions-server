@@ -1,5 +1,14 @@
+// 6. Services
 import { processAiChat } from "./ai.service.js";
-import { getProvider, getFallbackProvider } from "./providers/index.js";
+import { getFallbackProvider, getProvider } from "./providers/index.js";
+
+// 7. Utilities
+import { sendBadRequest } from "../utils/responseUtil.js";
+
+/**
+ * @file ai.controller.js
+ * @description Controller for AI conversational assistant and health diagnostics.
+ */
 
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_HISTORY_LENGTH = 40;
@@ -7,6 +16,9 @@ const MAX_HISTORY_LENGTH = 40;
 /**
  * GET /api/v1/ai/health
  * Returns provider status and health.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
  */
 export async function healthController(req, res) {
   try {
@@ -29,6 +41,10 @@ export async function healthController(req, res) {
 
 /**
  * POST /api/v1/ai/chat
+ * Handles AI chat conversation with tool execution and provider fallback.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
  */
 export async function chatController(req, res) {
   try {
@@ -36,18 +52,17 @@ export async function chatController(req, res) {
 
     // ── Input validation ──────────────────────────────────────────────────────
     if (!message || typeof message !== "string" || !message.trim()) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'The "message" field is required and must be a non-empty string.',
-      });
+      return sendBadRequest(
+        res,
+        'The "message" field is required and must be a non-empty string.'
+      );
     }
 
     if (message.length > MAX_MESSAGE_LENGTH) {
-      return res.status(400).json({
-        success: false,
-        message: `Message is too long. Maximum is ${MAX_MESSAGE_LENGTH} characters.`,
-      });
+      return sendBadRequest(
+        res,
+        `Message is too long. Maximum is ${MAX_MESSAGE_LENGTH} characters.`
+      );
     }
 
     // Validate and cap conversation history
@@ -95,7 +110,6 @@ export async function chatController(req, res) {
 
     // ── Provider-specific friendly errors ─────────────────────────────────────
     let statusCode = 500;
-    // In development, expose the real error; in production keep it generic
     const isDev = process.env.NODE_ENV !== "production";
     let userMessage = isDev
       ? `AI Error: ${error.message}`

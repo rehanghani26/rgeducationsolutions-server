@@ -1,12 +1,18 @@
+// 1. Node.js built-in modules
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+
+/**
+ * @file dbFallback.js
+ * @description Local persistent in-memory JSON database engine for resilient offline fallback operation.
+ */
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_FILE = path.join(__dirname, "..", "uploads", "fallback_db.json");
 
-// Clean initial empty database structure (no hardcoded dummy records)
+// Clean initial empty database structure
 const initialDb = {
   users: [],
   students: [],
@@ -26,12 +32,14 @@ const initialDb = {
   results: [],
   passwordRequests: [],
   settings: {},
-  // ── Academic scheduling collections ──
+  // Academic scheduling collections
   academicSessions: [],
   masterPeriods: [],
   classTimetables: [],
-  // ── Leaves collection ──
-  leaveRequests: [],
+  // Budget & Payroll collections
+  budgetAllocations: [],
+  payrollRecords: [],
+  payrollDisbursements: [],
 };
 
 let db = { ...initialDb };
@@ -42,7 +50,9 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Load database from file if exists
+/**
+ * Loads persisted fallback database state from JSON disk storage.
+ */
 const loadData = () => {
   try {
     if (fs.existsSync(DATA_FILE)) {
@@ -66,12 +76,13 @@ const loadData = () => {
       if (!db.results) db.results = [];
       if (!db.passwordRequests) db.passwordRequests = [];
       if (!db.settings) db.settings = {};
-      // ── Academic scheduling collections ──
       if (!db.academicSessions) db.academicSessions = [];
       if (!db.masterPeriods) db.masterPeriods = [];
       if (!db.classTimetables) db.classTimetables = [];
-      // ── Leaves collection ──
-      if (!db.leaveRequests) db.leaveRequests = [];
+      if (!db.budgetAllocations) db.budgetAllocations = [];
+      if (!db.payrollRecords) db.payrollRecords = [];
+      if (!db.payrollDisbursements) db.payrollDisbursements = [];
+
       saveData();
     } else {
       saveData();
@@ -81,6 +92,9 @@ const loadData = () => {
   }
 };
 
+/**
+ * Persists fallback database state to disk.
+ */
 const saveData = () => {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), "utf-8");
@@ -91,7 +105,9 @@ const saveData = () => {
 
 loadData();
 
-// Generic fallback helpers
+/**
+ * Generic synchronous CRUD operations for fallback collections.
+ */
 export const FallbackDb = {
   find: (collection) => {
     return db[collection] || [];
@@ -174,7 +190,6 @@ export const FallbackDb = {
     return db.settings;
   },
 
-  // Replace an entire collection array (used for bulk isCurrent toggling, ordering, etc.)
   updateAll: (collection, newArray) => {
     db[collection] = Array.isArray(newArray) ? newArray : [];
     saveData();

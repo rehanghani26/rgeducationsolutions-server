@@ -1,32 +1,54 @@
-import AcademicSession from '../models/AcademicSession.js';
-import { FallbackDb } from '../services/dbFallback.js';
+// 3. Configuration
 import { checkFallback } from '../config/db.js';
 
-// GET all academic sessions
+// 4. Models
+import AcademicSession from '../models/AcademicSession.js';
+
+// 6. Services
+import { FallbackDb } from '../services/dbFallback.js';
+
+// 7. Utilities
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from '../utils/responseUtil.js';
+
+/**
+ * Retrieves all institutional academic sessions.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getAcademicSessions = async (req, res) => {
   try {
     if (checkFallback()) {
       const sessions = FallbackDb.find('academicSessions') || [];
-      return res.json({ success: true, sessions });
+      return sendSuccess(res, undefined, { sessions });
     }
     const sessions = await AcademicSession.find().sort({ startDate: -1 });
-    return res.json({ success: true, sessions });
+    return sendSuccess(res, undefined, { sessions });
   } catch (err) {
-    console.error('getAcademicSessions error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// CREATE new academic session
+/**
+ * Creates a new academic session.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const createAcademicSession = async (req, res) => {
   try {
     const { sessionName, startDate, endDate, isCurrent = false, notes = '' } = req.body;
 
     if (!sessionName || !startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        message: 'Session name, start date, and end date are required',
-      });
+      return sendBadRequest(res, 'Session name, start date, and end date are required');
     }
 
     if (checkFallback()) {
@@ -46,7 +68,7 @@ export const createAcademicSession = async (req, res) => {
       };
       all.unshift(newSession);
       FallbackDb.updateAll('academicSessions', all);
-      return res.status(201).json({ success: true, session: newSession });
+      return sendCreated(res, undefined, { session: newSession });
     }
 
     if (isCurrent) {
@@ -63,14 +85,19 @@ export const createAcademicSession = async (req, res) => {
       createdBy: req.user?.name || 'admin',
     });
 
-    return res.status(201).json({ success: true, session });
+    return sendCreated(res, undefined, { session });
   } catch (err) {
-    console.error('createAcademicSession error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ACTIVATE session
+/**
+ * Activates an academic session and deactivates other active sessions.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const activateAcademicSession = async (req, res) => {
   try {
     const { id } = req.params;
@@ -86,20 +113,25 @@ export const activateAcademicSession = async (req, res) => {
         }
       });
       FallbackDb.updateAll('academicSessions', all);
-      return res.json({ success: true, message: 'Academic session activated' });
+      return sendSuccess(res, 'Academic session activated');
     }
 
     await AcademicSession.updateMany({}, { isCurrent: false });
     await AcademicSession.findByIdAndUpdate(id, { isCurrent: true, status: 'active' });
 
-    return res.json({ success: true, message: 'Academic session activated' });
+    return sendSuccess(res, 'Academic session activated');
   } catch (err) {
-    console.error('activateAcademicSession error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// UPDATE session
+/**
+ * Updates an academic session's parameters.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const updateAcademicSession = async (req, res) => {
   try {
     const { id } = req.params;
@@ -115,9 +147,9 @@ export const updateAcademicSession = async (req, res) => {
         if (status) all[idx].status = status;
         if (notes !== undefined) all[idx].notes = notes;
         FallbackDb.updateAll('academicSessions', all);
-        return res.json({ success: true, session: all[idx] });
+        return sendSuccess(res, undefined, { session: all[idx] });
       }
-      return res.status(404).json({ success: false, message: 'Session not found' });
+      return sendNotFound(res, 'Session not found');
     }
 
     const session = await AcademicSession.findByIdAndUpdate(
@@ -132,14 +164,19 @@ export const updateAcademicSession = async (req, res) => {
       { new: true }
     );
 
-    return res.json({ success: true, session });
+    return sendSuccess(res, undefined, { session });
   } catch (err) {
-    console.error('updateAcademicSession error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// DELETE session
+/**
+ * Deletes an academic session.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const deleteAcademicSession = async (req, res) => {
   try {
     const { id } = req.params;
@@ -149,40 +186,43 @@ export const deleteAcademicSession = async (req, res) => {
         (s) => String(s._id) !== String(id) && String(s.id) !== String(id)
       );
       FallbackDb.updateAll('academicSessions', all);
-      return res.json({ success: true, message: 'Session deleted' });
+      return sendSuccess(res, 'Session deleted');
     }
 
     await AcademicSession.findByIdAndDelete(id);
-    return res.json({ success: true, message: 'Session deleted' });
+    return sendSuccess(res, 'Session deleted');
   } catch (err) {
-    console.error('deleteAcademicSession error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// GET active session (fast single-record lookup for stepper banner & downstream controllers)
+/**
+ * Retrieves the currently active academic session.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getActiveSession = async (req, res) => {
   try {
     if (checkFallback()) {
       const all = FallbackDb.find('academicSessions') || [];
       const active = all.find((s) => s.isCurrent) || all[0] || null;
-      return res.json({ success: true, session: active });
+      return sendSuccess(res, undefined, { session: active });
     }
     const session = await AcademicSession.findOne({ isCurrent: true }).lean();
-    return res.json({ success: true, session: session || null });
+    return sendSuccess(res, undefined, { session: session || null });
   } catch (err) {
-    console.error('getActiveSession error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
 /**
- * Internal helper — NOT exposed as an HTTP route.
- * Called by masterPeriodController and classTimetableController after save/delete
- * to keep the denormalized hasMasterSchedule / timetableCount in sync.
+ * Internal helper to update denormalized session metadata (e.g., timetable count).
  *
- * @param {string} sessionId  – Mongo ObjectId string or FallbackDb _id
- * @param {object} patch      – e.g. { hasMasterSchedule: true } or { timetableCount: 5 }
+ * @param {string} sessionId - Mongo ObjectId string or FallbackDb _id.
+ * @param {Object} patch - Fields to update.
+ * @returns {Promise<void>}
  */
 export const updateSessionMetadata = async (sessionId, patch) => {
   try {
@@ -200,7 +240,6 @@ export const updateSessionMetadata = async (sessionId, patch) => {
     }
     await AcademicSession.findByIdAndUpdate(sessionId, { $set: patch });
   } catch (err) {
-    // Non-critical — log but do not throw so the caller is not disrupted
     console.warn('updateSessionMetadata (non-fatal):', err.message);
   }
 };

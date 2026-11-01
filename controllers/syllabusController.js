@@ -1,13 +1,31 @@
-import ClassSyllabus from "../models/ClassSyllabus.js";
+// 3. Configuration
 import { checkFallback } from "../config/db.js";
+
+// 4. Models
+import ClassSyllabus from "../models/ClassSyllabus.js";
+
+// 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
 
-// Standard default syllabus templates generator
+// 7. Utilities
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from "../utils/responseUtil.js";
+
+/**
+ * Standard default syllabus templates generator.
+ *
+ * @param {string} classIdentifier - Class identifier string or code.
+ * @returns {Object} Default curriculum template with standard prescribed subjects and books.
+ */
 export const getDefaultCurriculumForClass = (classIdentifier) => {
   const norm = String(classIdentifier || "").toLowerCase().trim();
   let cleanName = classIdentifier;
 
-  // Derive human friendly name
   if (norm.includes("nur")) cleanName = "Nursery";
   else if (norm.includes("lkg")) cleanName = "LKG";
   else if (norm.includes("ukg")) cleanName = "UKG";
@@ -21,8 +39,6 @@ export const getDefaultCurriculumForClass = (classIdentifier) => {
 
   const yr = new Date().getFullYear();
   const academicYear = `${yr}-${yr + 1}`;
-
-  // Check grade level
   const num = parseInt((norm.match(/\d+/) || [])[0] || "0", 10);
 
   let subjects = [];
@@ -238,7 +254,6 @@ export const getDefaultCurriculumForClass = (classIdentifier) => {
       },
     ];
   } else {
-    // Senior secondary or default
     subjects = [
       {
         subjectName: "English Core",
@@ -298,7 +313,12 @@ export const getDefaultCurriculumForClass = (classIdentifier) => {
   };
 };
 
-// Normalize classId helper (e.g. "cls-1" or "Class 1" or "1" => "cls-1")
+/**
+ * Normalizes class ID (e.g., "Class 1" -> "cls-1").
+ *
+ * @param {string} raw - Raw class identifier.
+ * @returns {string} Normalized code.
+ */
 const normalizeClassId = (raw) => {
   if (!raw) return "";
   const str = String(raw).trim().toLowerCase();
@@ -312,31 +332,35 @@ const normalizeClassId = (raw) => {
 };
 
 /**
- * GET /api/v1/syllabus
- * List all saved syllabuses
+ * Retrieves all saved curriculum syllabuses.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getAllSyllabus = async (req, res) => {
   try {
     if (checkFallback()) {
       const list = FallbackDb.find("syllabus") || [];
-      return res.json({ success: true, count: list.length, syllabuses: list });
+      return sendSuccess(res, undefined, { count: list.length, syllabuses: list });
     }
 
     const syllabuses = await ClassSyllabus.find({}).sort({ className: 1 });
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, {
       count: syllabuses.length,
       syllabuses,
     });
   } catch (error) {
-    console.error("getAllSyllabus error:", error);
-    return res.status(500).json({ success: false, message: "Server error fetching syllabuses" });
+    return sendError(res, "Server error fetching syllabuses", 500, error);
   }
 };
 
 /**
- * GET /api/v1/syllabus/:classId
- * Get syllabus for a specific class (or default template if none configured yet)
+ * Retrieves curriculum syllabus for a specific class, or returns the default template.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const getSyllabusByClass = async (req, res) => {
   try {
@@ -354,15 +378,13 @@ export const getSyllabusByClass = async (req, res) => {
       );
 
       if (found) {
-        return res.json({ success: true, syllabus: found, isDefault: false });
+        return sendSuccess(res, undefined, { syllabus: found, isDefault: false });
       }
 
-      // Return default template
-      return res.json({ success: true, syllabus: defaultCurriculum, isDefault: true });
+      return sendSuccess(res, undefined, { syllabus: defaultCurriculum, isDefault: true });
     }
 
-    // Try finding by exact classId or regex match
-    let syllabus = await ClassSyllabus.findOne({
+    const syllabus = await ClassSyllabus.findOne({
       $or: [
         { classId: classId },
         { classId: normalized },
@@ -372,24 +394,24 @@ export const getSyllabusByClass = async (req, res) => {
     });
 
     if (!syllabus) {
-      // Return default curriculum
-      return res.json({
-        success: true,
+      return sendSuccess(res, undefined, {
         syllabus: defaultCurriculum,
         isDefault: true,
       });
     }
 
-    return res.json({ success: true, syllabus, isDefault: false });
+    return sendSuccess(res, undefined, { syllabus, isDefault: false });
   } catch (error) {
-    console.error("getSyllabusByClass error:", error);
-    return res.status(500).json({ success: false, message: "Server error fetching class syllabus" });
+    return sendError(res, "Server error fetching class syllabus", 500, error);
   }
 };
 
 /**
- * PUT /api/v1/syllabus/:classId
- * Upsert class syllabus and subjects
+ * Upserts a class syllabus and prescribed subjects.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const upsertClassSyllabus = async (req, res) => {
   try {
@@ -437,14 +459,11 @@ export const upsertClassSyllabus = async (req, res) => {
         });
       }
 
-      return res.json({
-        success: true,
-        message: `Curriculum and books for ${cleanClassName} saved successfully`,
+      return sendSuccess(res, `Curriculum and books for ${cleanClassName} saved successfully`, {
         syllabus: saved,
       });
     }
 
-    // MongoDB upsert
     const filter = {
       $or: [{ classId: normalized }, { classId: classId }, { className: cleanClassName }],
     };
@@ -465,31 +484,28 @@ export const upsertClassSyllabus = async (req, res) => {
       setDefaultsOnInsert: true,
     });
 
-    return res.json({
-      success: true,
-      message: `Curriculum and books for ${cleanClassName} saved successfully`,
+    return sendSuccess(res, `Curriculum and books for ${cleanClassName} saved successfully`, {
       syllabus,
     });
   } catch (error) {
-    console.error("upsertClassSyllabus error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Failed to save syllabus" });
+    return sendError(res, error.message || "Failed to save syllabus", 500, error);
   }
 };
 
 /**
- * POST /api/v1/syllabus/:classId/reset
- * Reset class syllabus to standard default
+ * Resets a class syllabus back to its standard default curriculum.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
  */
 export const resetClassSyllabus = async (req, res) => {
   try {
     const { classId } = req.params;
     const defaultTemplate = getDefaultCurriculumForClass(classId);
-
-    // Call upsert with default template
     req.body = defaultTemplate;
     return upsertClassSyllabus(req, res);
   } catch (error) {
-    console.error("resetClassSyllabus error:", error);
-    return res.status(500).json({ success: false, message: "Failed to reset syllabus" });
+    return sendError(res, "Failed to reset syllabus", 500, error);
   }
 };

@@ -1,9 +1,30 @@
-import Exam from '../models/Exam.js';
+// 3. Configuration
 import { checkFallback } from '../config/db.js';
+
+// 4. Models
+import Exam from '../models/Exam.js';
+
+// 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
+
+// 7. Utilities
 import { parsePagination, buildSearchFilter, paginateResult, paginateArray } from '../utils/paginateQuery.js';
 import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from '../utils/responseUtil.js';
 
+/**
+ * Retrieves paginated exams with term and name search filters.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getExams = async (req, res) => {
   try {
     const { page, limit, skip, sort, search, status } = parsePagination(req.query);
@@ -12,7 +33,7 @@ export const getExams = async (req, res) => {
     if (checkFallback()) {
       const list = FallbackDb.find('exams') || [];
       const result = paginateArray(list, { page, limit, search, status, searchFields });
-      return res.json({ success: true, exams: result.data, ...result });
+      return sendSuccess(res, undefined, { exams: result.data, ...result });
     }
 
     const filter = { ...buildSearchFilter(search, searchFields) };
@@ -27,13 +48,19 @@ export const getExams = async (req, res) => {
       Exam.countDocuments(filter),
     ]);
 
-    return res.json({ success: true, exams, ...paginateResult(exams, total, { page, limit }) });
+    return sendSuccess(res, undefined, { exams, ...paginateResult(exams, total, { page, limit }) });
   } catch (error) {
-    console.error('getExams error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves a single examination record by ID.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getExamById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -41,25 +68,37 @@ export const getExamById = async (req, res) => {
       ? FallbackDb.findById('exams', id)
       : await Exam.findById(id);
 
-    if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
-    return res.json({ success: true, exam });
+    if (!exam) return sendNotFound(res, 'Exam not found');
+    return sendSuccess(res, undefined, { exam });
   } catch (error) {
-    console.error('getExamById error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Retrieves activity logs for an examination.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getExamActivity = async (req, res) => {
   try {
     const { id } = req.params;
     const logs = await getRecordActivity('exams', id);
-    return res.json({ success: true, logs, loginHistory: [] });
+    return sendSuccess(res, undefined, { logs, loginHistory: [] });
   } catch (error) {
-    console.error('getExamActivity error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };
 
+/**
+ * Creates a new examination schedule.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const createExam = async (req, res) => {
   try {
     const {
@@ -69,7 +108,7 @@ export const createExam = async (req, res) => {
     } = req.body;
 
     if (!name || !term || !date) {
-      return res.status(400).json({ success: false, message: 'Name, term, and date are required' });
+      return sendBadRequest(res, 'Name, term, and date are required');
     }
 
     const examData = {
@@ -97,13 +136,19 @@ export const createExam = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.status(201).json({ success: true, message: 'Exam created', exam });
+    return sendCreated(res, 'Exam created', { exam });
   } catch (error) {
-    console.error('createExam error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Updates an examination schedule.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const updateExam = async (req, res) => {
   try {
     const { id } = req.params;
@@ -115,7 +160,7 @@ export const updateExam = async (req, res) => {
       exam = await Exam.findByIdAndUpdate(id, req.body, { new: true });
     }
 
-    if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
+    if (!exam) return sendNotFound(res, 'Exam not found');
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
@@ -127,13 +172,19 @@ export const updateExam = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({ success: true, message: 'Exam updated', exam });
+    return sendSuccess(res, 'Exam updated', { exam });
   } catch (error) {
-    console.error('updateExam error:', error);
-    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    return sendError(res, error.message || 'Server error', 500, error);
   }
 };
 
+/**
+ * Deletes an examination schedule.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const deleteExam = async (req, res) => {
   try {
     const { id } = req.params;
@@ -155,7 +206,7 @@ export const deleteExam = async (req, res) => {
       }
     }
 
-    if (!success) return res.status(404).json({ success: false, message: 'Exam not found' });
+    if (!success) return sendNotFound(res, 'Exam not found');
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
@@ -167,9 +218,8 @@ export const deleteExam = async (req, res) => {
       userAgent: req.headers['user-agent'],
     });
 
-    return res.json({ success: true, message: 'Exam deleted' });
+    return sendSuccess(res, 'Exam deleted');
   } catch (error) {
-    console.error('deleteExam error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, error);
   }
 };

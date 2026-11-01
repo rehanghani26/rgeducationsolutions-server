@@ -1,7 +1,22 @@
+/**
+ * @file emailService.js
+ * @description Outbound transactional email service utilizing Resend REST API with automatic development rerouting.
+ */
+
 const RESEND_API_URL = "https://api.resend.com/emails";
 const DEFAULT_FROM = process.env.RESEND_FROM || "onboarding@resend.dev";
 const DEV_FALLBACK_EMAIL = "rehanghani366@gmail.com";
 
+/**
+ * Sends an email via the Resend API with automatic free-tier fallback routing for local development.
+ *
+ * @param {Object} params
+ * @param {string|Array<string>} params.to - Recipient email(s)
+ * @param {string} params.subject - Email subject line
+ * @param {string} params.html - HTML body
+ * @param {string} [params.from] - Sender address
+ * @returns {Promise<{ success: boolean, id: string, reroutedTo?: string }>}
+ */
 export async function sendEmail({ to, subject, html, from = DEFAULT_FROM }) {
   const apiKey = process.env.RESEND_API_KEY;
   const sender = process.env.RESEND_FROM || from || DEFAULT_FROM;
@@ -70,11 +85,13 @@ export async function sendEmail({ to, subject, html, from = DEFAULT_FROM }) {
 }
 
 /**
- * Send OTP Verification Email for Super Admin registration
- * @param {object} params
+ * Sends OTP Verification Email for Super Admin registration.
+ *
+ * @param {Object} params
  * @param {string} params.to - Recipient email
  * @param {string} params.name - Super admin name
  * @param {string} params.otp - 6-digit OTP code
+ * @returns {Promise<Object>}
  */
 export async function sendOtpEmail({ to, name, otp }) {
   const subject = `🔐 ${otp} is your RG EduCore Super Admin Setup OTP`;
@@ -182,11 +199,13 @@ export async function sendOtpEmail({ to, name, otp }) {
 }
 
 /**
- * Send OTP Verification Email for Student Email Verification
- * @param {object} params
+ * Sends OTP Verification Email for Student Email Verification.
+ *
+ * @param {Object} params
  * @param {string} params.to - Recipient student email
- * @param {string} params.name - Student name
+ * @param {string} [params.name='Student'] - Student name
  * @param {string} params.otp - 6-digit OTP code
+ * @returns {Promise<Object>}
  */
 export async function sendStudentOtpEmail({ to, name = "Student", otp }) {
   const subject = `🔐 ${otp} is your Student Email Verification Code`;
@@ -293,4 +312,3 @@ export async function sendStudentOtpEmail({ to, name = "Student", otp }) {
 
   return await sendEmail({ to, subject, html });
 }
-

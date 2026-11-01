@@ -20,5 +20,74 @@
   "academicSessions": [],
   "masterPeriods": [],
   "classTimetables": [],
-  "leaveRequests": []
+  "leaveRequests": [],
+  "budgetAllocations": [],
+  "payrollRecords": [],
+  "payrollDisbursements": [],
+  "auditLogs": [
+    {
+      "id": "hgl43c1",
+      "_id": "vozyq81",
+      "createdAt": "2026-10-31T15:33:21.150Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "payroll",
+      "details": "GET /api/v1/payroll/staff?month=October+2026&year=2026&search=&role=",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 15
+      },
+      "timestamp": "2026-10-31T15:33:21.150Z"
+    },
+    {
+      "id": "kt26xnw",
+      "_id": "d8affvg",
+      "createdAt": "2026-10-31T15:33:21.166Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "payroll",
+      "details": "GET /api/v1/payroll/summary?month=October+2026&year=2026",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 8
+      },
+      "timestamp": "2026-10-31T15:33:21.166Z"
+    },
+    {
+      "id": "rmhp30x",
+      "_id": "36um6ug",
+      "createdAt": "2026-10-31T15:33:21.233Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "payroll",
+      "details": "GET /api/v1/payroll/staff?month=October+2026&year=2026&search=&role=",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 10
+      },
+      "timestamp": "2026-10-31T15:33:21.233Z"
+    },
+    {
+      "id": "eo3oorn",
+      "_id": "2uj9rfr",
+      "createdAt": "2026-10-31T15:33:21.261Z",
+      "userId": "6a22de06b2cde6bb9073f324",
+      "action": "READ",
+      "module": "payroll",
+      "details": "GET /api/v1/payroll/summary?month=October+2026&year=2026",
+      "ipAddress": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "metadata": {
+        "statusCode": 200,
+        "durationMs": 6
+      },
+      "timestamp": "2026-10-31T15:33:21.261Z"
+    }
+  ]
 }

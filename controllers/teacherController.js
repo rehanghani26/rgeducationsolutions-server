@@ -1,15 +1,42 @@
+// 2. External packages
 import mongoose from "mongoose";
+
+// 3. Configuration
+import { checkFallback } from "../config/db.js";
+
+// 4. Models
 import Teacher from "../models/Teacher.js";
 import User from "../models/User.js";
-import { checkFallback } from "../config/db.js";
+
+// 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
+
+// 7. Utilities
+import { getRecordActivity, logActivity } from "../utils/activityLogger.js";
 import {
-  parsePagination,
+  formatFullName,
+  generateSecurePassword,
+  isValidObjectId,
+  normalizeEmail,
+} from "../utils/commonUtil.js";
+import {
   buildSearchFilter,
-  paginateResult,
   paginateArray,
+  paginateResult,
+  parsePagination,
 } from "../utils/paginateQuery.js";
-import { logActivity, getRecordActivity } from "../utils/activityLogger.js";
+import {
+  sendBadRequest,
+  sendCreated,
+  sendError,
+  sendNotFound,
+  sendSuccess,
+} from "../utils/responseUtil.js";
+
+/**
+ * @file teacherController.js
+ * @description Controller for faculty teacher operations, credentials sync, and bulk actions.
+ */
 
 const DEFAULT_TEACHER_PERMISSIONS = [
   "dashboard",
@@ -22,15 +49,14 @@ const DEFAULT_TEACHER_PERMISSIONS = [
   "communication",
 ];
 
-const normalizeEmail = (email = "") => email.trim().toLowerCase();
 const normalizeEmployeeId = (employeeId = "") =>
   employeeId.trim().toUpperCase();
-const fullName = (data) =>
-  data.name || `${data.firstName || ""} ${data.lastName || ""}`.trim();
 
-const generateRandomPassword = () =>
-  `Tch@${Math.random().toString(36).slice(2, 8)}${Math.floor(100 + Math.random() * 900)}`;
-
+/**
+ * Auto-generates sequential employee ID: TCH-0001
+ *
+ * @returns {Promise<string>} Next employee ID.
+ */
 const getNextEmployeeId = async () => {
   const prefix = "TCH-";
   let lastId = "TCH-0000";
@@ -54,10 +80,16 @@ const getNextEmployeeId = async () => {
   return `${prefix}${String(next).padStart(4, "0")}`;
 };
 
+/**
+ * Normalizes input payload for Teacher creation/update.
+ *
+ * @param {Record<string, any>} data - Raw input body.
+ * @returns {Promise<Record<string, any>>}
+ */
 const buildTeacherPayload = async (data) => {
   const employeeId =
     normalizeEmployeeId(data.employeeId) || (await getNextEmployeeId());
-  const name = fullName(data);
+  const name = formatFullName(data);
   const firstName = data.firstName || name.split(" ")[0];
   const lastName = data.lastName || name.split(" ").slice(1).join(" ") || "-";
   const email = normalizeEmail(
@@ -91,6 +123,9 @@ const buildTeacherPayload = async (data) => {
   };
 };
 
+/**
+ * Synchronizes user authentication account with teacher profile.
+ */
 const syncUserFromTeacher = async ({ teacher, password, existingUser }) => {
   const userData = {
     username: teacher.employeeId.toLowerCase(),
@@ -120,6 +155,12 @@ const syncUserFromTeacher = async ({ teacher, password, existingUser }) => {
   return User.create(userData);
 };
 
+/**
+ * Retrieves paginated list of teachers.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const getTeachers = async (req, res) => {
   try {
     const { page, limit, skip, sort, search, status } = parsePagination(
@@ -143,7 +184,10 @@ export const getTeachers = async (req, res) => {
         status,
         searchFields,
       });
-      return res.json({ success: true, teachers: result.data, ...result });
+      return sendSuccess(res, undefined, null, 200, {
+        teachers: result.data,
+        ...result,
+      });
     }
 
     const filter = { ...buildSearchFilter(search, searchFields) };
@@ -162,23 +206,28 @@ export const getTeachers = async (req, res) => {
       Teacher.countDocuments(filter),
     ]);
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, null, 200, {
       teachers,
       ...paginateResult(teachers, total, { page, limit }),
     });
   } catch (error) {
     console.error("getTeachers error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500);
   }
 };
 
+/**
+ * Retrieves a single teacher by ID or employeeId.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const getTeacherById = async (req, res) => {
   try {
     const { id } = req.params;
     let teacher = null;
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       teacher =
         FallbackDb.findById("teachers", id) ||
         FallbackDb.findOne("teachers", { employeeId: id });
@@ -193,31 +242,35 @@ export const getTeacherById = async (req, res) => {
     }
 
     if (!teacher) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Teacher record not found" });
+      return sendNotFound(res, "Teacher record not found");
     }
 
-    return res.json({ success: true, teacher });
+    return sendSuccess(res, undefined, null, 200, { teacher });
   } catch (error) {
     console.error("getTeacherById error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500);
   }
 };
 
+/**
+ * Retrieves audit activity and login history for a teacher.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const getTeacherActivity = async (req, res) => {
   try {
     const { id } = req.params;
     let logs = [];
     try {
       logs = await getRecordActivity("teachers", id);
-    } catch (e) {
+    } catch (_e) {
       logs = [];
     }
     let loginHistory = [];
     let teacher = null;
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       teacher =
         FallbackDb.findById("teachers", id) ||
         FallbackDb.findOne("teachers", { employeeId: id });
@@ -235,18 +288,24 @@ export const getTeacherActivity = async (req, res) => {
       }
     }
 
-    return res.json({ success: true, logs, loginHistory });
+    return sendSuccess(res, undefined, null, 200, { logs, loginHistory });
   } catch (error) {
     console.error("getTeacherActivity error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500);
   }
 };
 
+/**
+ * Creates a new teacher record and companion user authentication account.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const createTeacher = async (req, res) => {
   try {
     const payload = await buildTeacherPayload(req.body);
     const password = req.body.generateRandomPassword
-      ? generateRandomPassword()
+      ? generateSecurePassword("Tch@")
       : req.body.password;
 
     if (
@@ -256,34 +315,27 @@ export const createTeacher = async (req, res) => {
       !payload.phone ||
       !payload.designation
     ) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message:
-            "First name, last name, email, phone, and designation are required",
-        });
+      return sendBadRequest(
+        res,
+        "First name, last name, email, phone, and designation are required"
+      );
     }
 
     if (!password || password.length < 6) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Password must be at least 6 characters",
-        });
+      return sendBadRequest(
+        res,
+        "Password must be at least 6 characters"
+      );
     }
 
     if (
       req.body.confirmPassword !== undefined &&
       password !== req.body.confirmPassword
     ) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Password and confirm password do not match",
-        });
+      return sendBadRequest(
+        res,
+        "Password and confirm password do not match"
+      );
     }
 
     if (checkFallback()) {
@@ -291,12 +343,11 @@ export const createTeacher = async (req, res) => {
         FallbackDb.findOne("teachers", { employeeId: payload.employeeId }) ||
         FallbackDb.findOne("users", { email: payload.email });
       if (duplicate) {
-        return res
-          .status(409)
-          .json({
-            success: false,
-            message: "Teacher employee ID or email already exists",
-          });
+        return sendError(
+          res,
+          "Teacher employee ID or email already exists",
+          409
+        );
       }
 
       const userRecord = FallbackDb.create("users", {
@@ -331,16 +382,19 @@ export const createTeacher = async (req, res) => {
         userAgent: req.headers["user-agent"],
       });
 
-      return res.status(201).json({
-        success: true,
-        message: "Teacher and login credentials created successfully",
-        teacher: teacherRecord,
-        accountCreated: {
-          employeeId: payload.employeeId,
-          email: payload.email,
-          temporaryPassword: password,
-        },
-      });
+      return sendCreated(
+        res,
+        "Teacher and login credentials created successfully",
+        null,
+        {
+          teacher: teacherRecord,
+          accountCreated: {
+            employeeId: payload.employeeId,
+            email: payload.email,
+            temporaryPassword: password,
+          },
+        }
+      );
     }
 
     const existingUser = await User.findOne({
@@ -354,12 +408,11 @@ export const createTeacher = async (req, res) => {
       employeeId: payload.employeeId,
     });
     if (existingUser || existingTeacher) {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "Teacher employee ID or email already exists",
-        });
+      return sendError(
+        res,
+        "Teacher employee ID or email already exists",
+        409
+      );
     }
 
     const teacherRecord = await Teacher.create(payload);
@@ -380,24 +433,31 @@ export const createTeacher = async (req, res) => {
       userAgent: req.headers["user-agent"],
     });
 
-    return res.status(201).json({
-      success: true,
-      message: "Teacher and login credentials created successfully",
-      teacher: teacherRecord,
-      accountCreated: {
-        employeeId: payload.employeeId,
-        email: payload.email,
-        temporaryPassword: password,
-      },
-    });
+    return sendCreated(
+      res,
+      "Teacher and login credentials created successfully",
+      null,
+      {
+        teacher: teacherRecord,
+        accountCreated: {
+          employeeId: payload.employeeId,
+          email: payload.email,
+          temporaryPassword: password,
+        },
+      }
+    );
   } catch (error) {
     console.error("createTeacher error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: error.message || "Server error" });
+    return sendError(res, error.message || "Server error", 500);
   }
 };
 
+/**
+ * Updates an existing teacher record and propagates details to companion User account.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const updateTeacher = async (req, res) => {
   try {
     const { id } = req.params;
@@ -405,8 +465,9 @@ export const updateTeacher = async (req, res) => {
     delete updateData.password;
     delete updateData.confirmPassword;
     if (updateData.email) updateData.email = normalizeEmail(updateData.email);
-    if (updateData.employeeId)
+    if (updateData.employeeId) {
       updateData.employeeId = normalizeEmployeeId(updateData.employeeId);
+    }
     if (updateData.firstName || updateData.lastName) {
       updateData.name =
         `${updateData.firstName || ""} ${updateData.lastName || ""}`.trim();
@@ -414,7 +475,7 @@ export const updateTeacher = async (req, res) => {
 
     let updatedRecord = null;
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       updatedRecord =
         FallbackDb.update("teachers", id, updateData) ||
         FallbackDb.findOne("teachers", { employeeId: id });
@@ -451,9 +512,7 @@ export const updateTeacher = async (req, res) => {
     }
 
     if (!updatedRecord) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Teacher record not found" });
+      return sendNotFound(res, "Teacher record not found");
     }
 
     await logActivity({
@@ -466,16 +525,12 @@ export const updateTeacher = async (req, res) => {
       userAgent: req.headers["user-agent"],
     });
 
-    return res.json({
-      success: true,
-      message: "Teacher updated successfully",
+    return sendSuccess(res, "Teacher updated successfully", null, 200, {
       teacher: updatedRecord,
     });
   } catch (error) {
     console.error("updateTeacher error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: error.message || "Server error" });
+    return sendError(res, error.message || "Server error", 500);
   }
 };
 
@@ -484,33 +539,34 @@ export const deactivateTeacher = async (req, res) => {
   return updateTeacher(req, res);
 };
 
+/**
+ * Resets teacher credentials.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const resetTeacherPassword = async (req, res) => {
   try {
     const { id } = req.params;
     const password = req.body.generateRandomPassword
-      ? generateRandomPassword()
+      ? generateSecurePassword("Tch@")
       : req.body.password;
+
     if (!password || password.length < 6) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Password must be at least 6 characters",
-        });
+      return sendBadRequest(res, "Password must be at least 6 characters");
     }
 
     const teacher =
-      checkFallback() || !mongoose.Types.ObjectId.isValid(id)
+      checkFallback() || !isValidObjectId(id)
         ? FallbackDb.findById("teachers", id) ||
           FallbackDb.findOne("teachers", { employeeId: id })
         : await Teacher.findById(id);
+
     if (!teacher) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Teacher record not found" });
+      return sendNotFound(res, "Teacher record not found");
     }
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(teacher.user)) {
+    if (checkFallback() || !isValidObjectId(teacher.user)) {
       FallbackDb.update("users", teacher.user, {
         password,
         forcePasswordChange: Boolean(req.body.forcePasswordChange),
@@ -524,9 +580,7 @@ export const resetTeacherPassword = async (req, res) => {
       }
     }
 
-    return res.json({
-      success: true,
-      message: "Teacher password reset successfully",
+    return sendSuccess(res, "Teacher password reset successfully", null, 200, {
       account: {
         employeeId: teacher.employeeId,
         email: teacher.email,
@@ -535,19 +589,23 @@ export const resetTeacherPassword = async (req, res) => {
     });
   } catch (error) {
     console.error("resetTeacherPassword error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: error.message || "Server error" });
+    return sendError(res, error.message || "Server error", 500);
   }
 };
 
+/**
+ * Deletes a teacher and companion User record.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const deleteTeacher = async (req, res) => {
   try {
     const { id } = req.params;
     let success = false;
     let teacherName = "";
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       const teacher =
         FallbackDb.findById("teachers", id) ||
         FallbackDb.findOne("teachers", { employeeId: id });
@@ -560,17 +618,16 @@ export const deleteTeacher = async (req, res) => {
       const teacher = await Teacher.findById(id);
       if (teacher) {
         teacherName = teacher.name;
-        if (teacher.user && mongoose.Types.ObjectId.isValid(teacher.user))
+        if (teacher.user && isValidObjectId(teacher.user)) {
           await User.findByIdAndDelete(teacher.user);
+        }
         await Teacher.findByIdAndDelete(id);
         success = true;
       }
     }
 
     if (!success) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Teacher record not found" });
+      return sendNotFound(res, "Teacher record not found");
     }
 
     await logActivity({
@@ -583,27 +640,29 @@ export const deleteTeacher = async (req, res) => {
       userAgent: req.headers["user-agent"],
     });
 
-    return res.json({
-      success: true,
-      message: "Teacher and user account deleted successfully",
-    });
+    return sendSuccess(res, "Teacher and user account deleted successfully");
   } catch (error) {
     console.error("deleteTeacher error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500);
   }
 };
 
+/**
+ * Bulk deletes multiple teachers.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const bulkDeleteTeachers = async (req, res) => {
   try {
     const { ids = [] } = req.body;
-    if (!ids.length)
-      return res
-        .status(400)
-        .json({ success: false, message: "No teacher IDs provided" });
+    if (!ids.length) {
+      return sendBadRequest(res, "No teacher IDs provided");
+    }
 
     let deleted = 0;
     for (const id of ids) {
-      if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+      if (checkFallback() || !isValidObjectId(id)) {
         const teacher =
           FallbackDb.findById("teachers", id) ||
           FallbackDb.findOne("teachers", { employeeId: id });
@@ -614,8 +673,9 @@ export const bulkDeleteTeachers = async (req, res) => {
       } else {
         const teacher = await Teacher.findById(id);
         if (teacher) {
-          if (teacher.user && mongoose.Types.ObjectId.isValid(teacher.user))
+          if (teacher.user && isValidObjectId(teacher.user)) {
             await User.findByIdAndDelete(teacher.user);
+          }
           await Teacher.findByIdAndDelete(id);
           deleted++;
         }
@@ -631,17 +691,21 @@ export const bulkDeleteTeachers = async (req, res) => {
       metadata: { ids },
     });
 
-    return res.json({
-      success: true,
-      message: `${deleted} teachers deleted`,
+    return sendSuccess(res, `${deleted} teachers deleted`, null, 200, {
       deleted,
     });
   } catch (error) {
     console.error("bulkDeleteTeachers error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500);
   }
 };
 
+/**
+ * Exports teacher records in CSV format.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const exportTeachers = async (req, res) => {
   try {
     let teachers = [];
@@ -682,212 +746,23 @@ export const exportTeachers = async (req, res) => {
     return res.send(csv);
   } catch (error) {
     console.error("exportTeachers error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500);
   }
 };
 
-export const getAllLeaves = async (req, res) => {
-  try {
-    let leavesList = [];
-    if (checkFallback()) {
-      const teachers = FallbackDb.find("teachers") || [];
-      teachers.forEach((t) => {
-        (t.leaves || []).forEach((l) => {
-          leavesList.push({
-            ...l,
-            teacherId: t.id,
-            teacherName: t.name,
-            employeeId: t.employeeId,
-            designation: t.designation,
-            department: t.department,
-          });
-        });
-      });
-    } else {
-      const teachers = await Teacher.find();
-      teachers.forEach((t) => {
-        (t.leaves || []).forEach((l) => {
-          leavesList.push({
-            _id: l._id,
-            id: l._id,
-            date: l.date,
-            reason: l.reason,
-            status: l.status,
-            teacherId: t._id,
-            teacherName: t.name,
-            employeeId: t.employeeId,
-            designation: t.designation,
-            department: t.department,
-          });
-        });
-      });
-    }
-    leavesList.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return res.json({ success: true, leaves: leavesList });
-  } catch (error) {
-    console.error("getAllLeaves error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
-export const requestLeave = async (req, res) => {
-  try {
-    const { date, reason } = req.body;
-    if (!date || !reason) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Date and reason are required" });
-    }
-
-    if (checkFallback()) {
-      const teacher =
-        FallbackDb.findOne("teachers", { user: req.user.id }) ||
-        FallbackDb.findById("teachers", req.user.profileId);
-      if (!teacher) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Teacher record not found" });
-      }
-      const newLeave = {
-        id: Math.random().toString(36).substring(2, 9),
-        _id: Math.random().toString(36).substring(2, 9),
-        date: new Date(date).toISOString(),
-        reason,
-        status: "pending",
-      };
-      const leaves = [...(teacher.leaves || []), newLeave];
-      FallbackDb.update("teachers", teacher.id, { leaves });
-      return res
-        .status(201)
-        .json({
-          success: true,
-          message: "Leave requested successfully",
-          leaves,
-        });
-    } else {
-      let teacher = await Teacher.findOne({ user: req.user._id });
-      if (!teacher && req.user.profileId) {
-        teacher = await Teacher.findById(req.user.profileId);
-      }
-      if (!teacher) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Teacher record not found" });
-      }
-      teacher.leaves.push({ date: new Date(date), reason, status: "pending" });
-      await teacher.save();
-      return res
-        .status(201)
-        .json({
-          success: true,
-          message: "Leave requested successfully",
-          leaves: teacher.leaves,
-        });
-    }
-  } catch (error) {
-    console.error("requestLeave error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
-export const reviewLeave = async (req, res) => {
-  try {
-    const { teacherId, leaveId } = req.params;
-    const { status } = req.body;
-
-    if (!["approved", "rejected"].includes(status)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid status" });
-    }
-
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(teacherId)) {
-      const teacher =
-        FallbackDb.findById("teachers", teacherId) ||
-        FallbackDb.findOne("teachers", { employeeId: teacherId });
-      if (!teacher) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Teacher record not found" });
-      }
-      const leaves = (teacher.leaves || []).map((l) => {
-        if (l.id === leaveId || l._id === leaveId) {
-          return { ...l, status };
-        }
-        return l;
-      });
-      FallbackDb.update("teachers", teacher.id || teacherId, { leaves });
-      return res.json({
-        success: true,
-        message: `Leave ${status} successfully`,
-        leaves,
-      });
-    } else {
-      const teacher = await Teacher.findById(teacherId);
-      if (!teacher) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Teacher record not found" });
-      }
-      const leave = teacher.leaves.id(leaveId);
-      if (!leave) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Leave record not found" });
-      }
-      leave.status = status;
-      await teacher.save();
-      return res.json({
-        success: true,
-        message: `Leave ${status} successfully`,
-        leaves: teacher.leaves,
-      });
-    }
-  } catch (error) {
-    console.error("reviewLeave error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
-export const getMyLeaves = async (req, res) => {
-  try {
-    let teacher = null;
-    if (
-      checkFallback() ||
-      !mongoose.Types.ObjectId.isValid(req.user?.profileId || "")
-    ) {
-      teacher =
-        FallbackDb.findOne("teachers", { user: req.user?.id }) ||
-        FallbackDb.findById("teachers", req.user?.profileId);
-    } else {
-      teacher = await Teacher.findOne({ user: req.user._id });
-      if (
-        !teacher &&
-        req.user.profileId &&
-        mongoose.Types.ObjectId.isValid(req.user.profileId)
-      ) {
-        teacher = await Teacher.findById(req.user.profileId);
-      }
-    }
-    if (!teacher) {
-      teacher =
-        FallbackDb.findOne("teachers", { user: req.user?.id }) ||
-        FallbackDb.findById("teachers", req.user?.profileId);
-    }
-    return res.json({ success: true, leaves: teacher?.leaves || [] });
-  } catch (error) {
-    console.error("getMyLeaves error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
+/**
+ * Retrieves teacher login credentials.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const getTeacherCredentials = async (req, res) => {
   try {
     const { id } = req.params;
     let teacher = null;
     let userRecord = null;
 
-    if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
+    if (checkFallback() || !isValidObjectId(id)) {
       teacher =
         FallbackDb.findById("teachers", id) ||
         FallbackDb.findOne("teachers", { employeeId: id });
@@ -906,7 +781,7 @@ export const getTeacherCredentials = async (req, res) => {
       userRecord?.email ||
       teacher?.email ||
       `${String(username).toLowerCase()}@school.local`;
-    
+
     let password =
       userRecord?.tempPassword ||
       userRecord?.password ||
@@ -918,8 +793,7 @@ export const getTeacherCredentials = async (req, res) => {
       password = userRecord?.tempPassword || teacher?.tempPassword || "admin";
     }
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, undefined, null, 200, {
       credentials: {
         username,
         email,
@@ -930,15 +804,21 @@ export const getTeacherCredentials = async (req, res) => {
     });
   } catch (error) {
     console.error("getTeacherCredentials error:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return sendError(res, "Server error", 500);
   }
 };
 
+/**
+ * Bulk imports teacher records from an array payload.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ */
 export const bulkImportTeachers = async (req, res) => {
   try {
     const { teachers } = req.body;
     if (!Array.isArray(teachers) || teachers.length === 0) {
-      return res.status(400).json({ success: false, message: "No teacher data provided for import" });
+      return sendBadRequest(res, "No teacher data provided for import");
     }
 
     let successCount = 0;
@@ -950,7 +830,7 @@ export const bulkImportTeachers = async (req, res) => {
         const payload = await buildTeacherPayload(raw);
         let password = raw.password;
         if (!password || password.length < 6) {
-          password = generateRandomPassword();
+          password = generateSecurePassword("Tch@");
         }
 
         if (!payload.name) payload.name = `Teacher ${payload.employeeId}`;
@@ -976,7 +856,9 @@ export const bulkImportTeachers = async (req, res) => {
           });
           FallbackDb.update("users", user.id, { profileId: createdTeacher.id });
         } else {
-          const existing = await Teacher.findOne({ employeeId: payload.employeeId });
+          const existing = await Teacher.findOne({
+            employeeId: payload.employeeId,
+          });
           if (!existing) {
             const user = await syncUserFromTeacher({
               teacher: { ...payload, _id: new mongoose.Types.ObjectId() },
@@ -996,19 +878,27 @@ export const bulkImportTeachers = async (req, res) => {
         }
         successCount++;
       } catch (err) {
-        errors.push({ index: i, name: raw.firstName || raw.name, error: err.message });
+        errors.push({
+          index: i,
+          name: raw.firstName || raw.name,
+          error: err.message,
+        });
       }
     }
 
-    return res.json({
-      success: true,
-      count: successCount,
-      total: teachers.length,
-      errors,
-      message: `Successfully imported ${successCount} out of ${teachers.length} teachers.`,
-    });
+    return sendSuccess(
+      res,
+      `Successfully imported ${successCount} out of ${teachers.length} teachers.`,
+      null,
+      200,
+      {
+        count: successCount,
+        total: teachers.length,
+        errors,
+      }
+    );
   } catch (error) {
     console.error("bulkImportTeachers error:", error);
-    return res.status(500).json({ success: false, message: "Bulk import failed" });
+    return sendError(res, "Bulk import failed", 500);
   }
 };

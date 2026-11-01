@@ -1,10 +1,18 @@
-import mongoose from "mongoose";
+// 1. Node.js built-in modules
 import dns from "node:dns";
+
+// 2. External packages
+import mongoose from "mongoose";
+
+/**
+ * @file db.js
+ * @description MongoDB connection management with resilient reconnects and offline FallbackDb fallback.
+ */
 
 // Fix for Node.js / Windows DNS SRV lookup failures with MongoDB Atlas clusters
 try {
   dns.setServers(["8.8.8.8", "1.1.1.1"]);
-} catch (e) {
+} catch (_e) {
   // Ignore if custom DNS servers cannot be set
 }
 
@@ -48,6 +56,11 @@ const scheduleReconnect = () => {
   }, 10000); // Retry every 10 seconds in the background
 };
 
+/**
+ * Connects to MongoDB Atlas or local MongoDB instance with resilient timeout configs.
+ *
+ * @returns {Promise<void>}
+ */
 export const connectDB = async () => {
   if (isConnecting || isConnected) return;
 
@@ -115,6 +128,10 @@ export const connectDB = async () => {
         { $or: [{ admissionNumber: null }, { admissionNumber: "" }] },
         { $unset: { admissionNumber: "" } }
       );
+      await usersCollection.updateMany(
+        { role: "student", accountExpiryDate: { $exists: true, $ne: null } },
+        { $unset: { accountExpiryDate: "" } }
+      );
 
       // Ensure sparse unique indexes
       await usersCollection.createIndex(
@@ -149,7 +166,7 @@ export const connectDB = async () => {
           "✅ Dropped legacy unique index date_1_classId_1 on attendances."
         );
       }
-    } catch (attIdxErr) {
+    } catch (_attIdxErr) {
       // Ignore if index doesn't exist
     }
   } catch (error) {
@@ -162,12 +179,24 @@ export const connectDB = async () => {
     );
     console.warn(`Error detail: ${error.message}`);
 
-    if (error.message.includes("Server selection timed out") || error.name === "MongooseServerSelectionError") {
-      console.warn("💡 Tip: Check MongoDB Atlas Network Access (IP Access List). Ensure '0.0.0.0/0' (Allow Access From Anywhere) is added.");
-    } else if (error.message.includes("bad auth") || error.message.includes("Authentication failed")) {
-      console.warn("💡 Tip: MongoDB Atlas authentication failed. Check your username and password in MONGODB_URI.");
+    if (
+      error.message.includes("Server selection timed out") ||
+      error.name === "MongooseServerSelectionError"
+    ) {
+      console.warn(
+        "💡 Tip: Check MongoDB Atlas Network Access (IP Access List). Ensure '0.0.0.0/0' (Allow Access From Anywhere) is added."
+      );
+    } else if (
+      error.message.includes("bad auth") ||
+      error.message.includes("Authentication failed")
+    ) {
+      console.warn(
+        "💡 Tip: MongoDB Atlas authentication failed. Check your username and password in MONGODB_URI."
+      );
     } else if (error.message.includes("querySrv")) {
-      console.warn("💡 Tip: DNS SRV resolution issue. Check your internet connection or DNS provider.");
+      console.warn(
+        "💡 Tip: DNS SRV resolution issue. Check your internet connection or DNS provider."
+      );
     }
 
     scheduleReconnect();
@@ -176,6 +205,11 @@ export const connectDB = async () => {
   }
 };
 
+/**
+ * Gets the current connection status of MongoDB and FallbackDb.
+ *
+ * @returns {{ isConnected: boolean, isFallback: boolean, lastError: string|null, lastAttempt: string|null }}
+ */
 export const getDbState = () => {
   return {
     isConnected,
@@ -185,10 +219,20 @@ export const getDbState = () => {
   };
 };
 
+/**
+ * Checks whether the application is currently running in Fallback mode.
+ *
+ * @returns {boolean} True if fallback is active.
+ */
 export const checkFallback = () => {
   return fallbackActive || !isConnected;
 };
 
+/**
+ * Manually attempts to reconnect to the database.
+ *
+ * @returns {Promise<Object>} Updated DB state.
+ */
 export const reconnectDB = async () => {
   isConnected = false;
   fallbackActive = true;

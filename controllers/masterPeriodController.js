@@ -1,10 +1,33 @@
+// 2. External packages
 import mongoose from 'mongoose';
+
+// 3. Configuration
+import { checkFallback } from '../config/db.js';
+
+// 4. Models
 import MasterPeriod from '../models/MasterPeriod.js';
 import ClassTimetable from '../models/ClassTimetable.js';
-import { checkFallback } from '../config/db.js';
+
+// 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
 
-// ─── Helper: compute duration ─────────────────────────────────────────────────
+// 7. Utilities
+import { isValidObjectId } from '../utils/commonUtil.js';
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendError
+} from '../utils/responseUtil.js';
+
+/**
+ * Computes difference in minutes between two HH:MM time strings.
+ *
+ * @param {string} start - Start time (HH:MM).
+ * @param {string} end - End time (HH:MM).
+ * @returns {number} Duration in minutes.
+ */
 const calcMinutes = (start, end) => {
   if (!start || !end) return 0;
   const [sh, sm] = start.split(':').map(Number);
@@ -12,12 +35,16 @@ const calcMinutes = (start, end) => {
   return Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
 };
 
-// ─── Helper: sanitize periods before database write ───────────────────────────
+/**
+ * Sanitizes periods array before persistence, ensuring sequential order and duration calculation.
+ *
+ * @param {Array<Object>} [periods=[]] - Period definitions.
+ * @returns {Array<Object>} Sanitized periods.
+ */
 const sanitizePeriods = (periods = []) => {
   return periods.map((p, idx) => {
     const item = { ...p };
-    // Remove _id if it's not a valid 24-character hex ObjectId
-    if (item._id && !mongoose.Types.ObjectId.isValid(item._id)) {
+    if (item._id && !isValidObjectId(item._id)) {
       delete item._id;
     }
     return {
@@ -28,18 +55,27 @@ const sanitizePeriods = (periods = []) => {
   });
 };
 
-// ─── Default Saturday half-day slots template ────────────────────────────────
+/** Default Saturday half-day slots template */
 const DEFAULT_SATURDAY_PERIODS = [
   { order: 1, type: 'prayer', customLabel: 'Morning Prayer & Assembly', startTime: '08:00', endTime: '08:20', durationMinutes: 20 },
-  { order: 2, type: 'class',  customLabel: 'Period 1', startTime: '08:20', endTime: '09:05', durationMinutes: 45 },
-  { order: 3, type: 'class',  customLabel: 'Period 2', startTime: '09:05', endTime: '09:50', durationMinutes: 45 },
+  { order: 2, type: 'class', customLabel: 'Period 1', startTime: '08:20', endTime: '09:05', durationMinutes: 45 },
+  { order: 3, type: 'class', customLabel: 'Period 2', startTime: '09:05', endTime: '09:50', durationMinutes: 45 },
   { order: 4, type: 'recess', customLabel: 'Fruit Recess', startTime: '09:50', endTime: '10:15', durationMinutes: 25 },
-  { order: 5, type: 'class',  customLabel: 'Period 3', startTime: '10:15', endTime: '11:00', durationMinutes: 45 },
-  { order: 6, type: 'class',  customLabel: 'Period 4', startTime: '11:00', endTime: '11:45', durationMinutes: 45 },
-  { order: 7, type: 'leave',  customLabel: 'School Dispersal', startTime: '11:45', endTime: '12:00', durationMinutes: 15 },
+  { order: 5, type: 'class', customLabel: 'Period 3', startTime: '10:15', endTime: '11:00', durationMinutes: 45 },
+  { order: 6, type: 'class', customLabel: 'Period 4', startTime: '11:00', endTime: '11:45', durationMinutes: 45 },
+  { order: 7, type: 'leave', customLabel: 'School Dispersal', startTime: '11:45', endTime: '12:00', durationMinutes: 15 },
 ];
 
-// ─── Helper: sanitize day-specific schedules ensuring EVERY active day is stored ──
+/**
+ * Sanitizes day-specific schedules ensuring every active day is mapped and populated.
+ *
+ * @param {Object} [daySchedules={}] - Input day schedules map.
+ * @param {string} [defaultStart='07:00'] - Default start time.
+ * @param {string} [defaultEnd='14:00'] - Default end time.
+ * @param {Array<string>} [operatingDays] - Active operating days.
+ * @param {Array<Object>} [defaultPeriods=[]] - Standard period templates.
+ * @returns {Object} Sanitized day schedules map.
+ */
 const sanitizeDaySchedules = (
   daySchedules = {},
   defaultStart = '07:00',
@@ -82,7 +118,6 @@ const sanitizeDaySchedules = (
     }
   });
 
-  // Preserve any other days in inputMap (e.g. sunday)
   Object.keys(inputMap).forEach((k) => {
     if (!result[k] && inputMap[k]) {
       const ex = inputMap[k];
@@ -102,7 +137,12 @@ const sanitizeDaySchedules = (
   return result;
 };
 
-// ─── Helper: enrich schedule document with complete day-wise data ────────────
+/**
+ * Enriches a schedule document with completed day-wise breakdown.
+ *
+ * @param {Object} schedule - Schedule document.
+ * @returns {Object} Enriched schedule.
+ */
 const enrichScheduleWithDayWise = (schedule) => {
   if (!schedule) return schedule;
   const doc = schedule.toObject ? schedule.toObject() : { ...schedule };
@@ -125,10 +165,16 @@ const enrichScheduleWithDayWise = (schedule) => {
   return doc;
 };
 
-// ─── GET all master periods (both types) ──────────────────────────────────────
+/**
+ * Retrieves all master period schedules.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getMasterPeriods = async (req, res) => {
   try {
-    const { type } = req.query; // ?type=regular | ?type=exam
+    const { type } = req.query;
     let list = [];
     const filter = type ? { scheduleType: type } : {};
 
@@ -141,14 +187,19 @@ export const getMasterPeriods = async (req, res) => {
     }
 
     const enrichedList = list.map((item) => enrichScheduleWithDayWise(item));
-    return res.json({ success: true, schedules: enrichedList });
+    return sendSuccess(res, undefined, { schedules: enrichedList });
   } catch (err) {
-    console.error('getMasterPeriods error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── GET single master period by id ───────────────────────────────────────────
+/**
+ * Retrieves a single master period schedule by ID.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getMasterPeriodById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -159,22 +210,27 @@ export const getMasterPeriodById = async (req, res) => {
         (r) => String(r._id) === String(id) || String(r.id) === String(id)
       );
     } else {
-      if (mongoose.Types.ObjectId.isValid(id)) {
+      if (isValidObjectId(id)) {
         schedule = await MasterPeriod.findById(id);
       }
     }
 
     if (!schedule) {
-      return res.status(404).json({ success: false, message: 'Schedule not found' });
+      return sendNotFound(res, 'Schedule not found');
     }
-    return res.json({ success: true, schedule: enrichScheduleWithDayWise(schedule) });
+    return sendSuccess(res, undefined, { schedule: enrichScheduleWithDayWise(schedule) });
   } catch (err) {
-    console.error('getMasterPeriodById error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── CREATE master period schedule ────────────────────────────────────────────
+/**
+ * Creates or upserts a master period schedule template.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const createMasterPeriod = async (req, res) => {
   try {
     const {
@@ -189,10 +245,7 @@ export const createMasterPeriod = async (req, res) => {
     } = req.body;
 
     if (!scheduleType || !schoolStartTime || !schoolEndTime) {
-      return res.status(400).json({
-        success: false,
-        message: 'scheduleType, schoolStartTime, and schoolEndTime are required',
-      });
+      return sendBadRequest(res, 'scheduleType, schoolStartTime, and schoolEndTime are required');
     }
 
     const activeDays = days && days.length > 0
@@ -242,14 +295,19 @@ export const createMasterPeriod = async (req, res) => {
       );
     }
 
-    return res.status(201).json({ success: true, schedule: enrichScheduleWithDayWise(schedule) });
+    return sendCreated(res, undefined, { schedule: enrichScheduleWithDayWise(schedule) });
   } catch (err) {
-    console.error('createMasterPeriod error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── UPDATE master period (replace periods) ────────────────────────────────────
+/**
+ * Updates a master period schedule template.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const updateMasterPeriod = async (req, res) => {
   try {
     const { id } = req.params;
@@ -327,7 +385,7 @@ export const updateMasterPeriod = async (req, res) => {
         ...(isActive !== undefined && { isActive }),
       };
 
-      if (mongoose.Types.ObjectId.isValid(id)) {
+      if (isValidObjectId(id)) {
         schedule = await MasterPeriod.findByIdAndUpdate(id, updateData, { new: true });
       }
 
@@ -344,14 +402,19 @@ export const updateMasterPeriod = async (req, res) => {
       }
     }
 
-    return res.json({ success: true, schedule: enrichScheduleWithDayWise(schedule) });
+    return sendSuccess(res, undefined, { schedule: enrichScheduleWithDayWise(schedule) });
   } catch (err) {
-    console.error('updateMasterPeriod error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── DELETE master period ──────────────────────────────────────────────────────
+/**
+ * Deletes a master period schedule template.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const deleteMasterPeriod = async (req, res) => {
   try {
     const { id } = req.params;
@@ -362,24 +425,29 @@ export const deleteMasterPeriod = async (req, res) => {
       );
       FallbackDb.updateAll('masterPeriods', all);
     } else {
-      if (mongoose.Types.ObjectId.isValid(id)) {
+      if (isValidObjectId(id)) {
         const deleted = await MasterPeriod.findByIdAndDelete(id);
         if (!deleted) {
-          return res.status(404).json({ success: false, message: 'Schedule not found' });
+          return sendNotFound(res, 'Schedule not found');
         }
       } else {
-        return res.status(404).json({ success: false, message: 'Schedule not found' });
+        return sendNotFound(res, 'Schedule not found');
       }
     }
 
-    return res.json({ success: true, message: 'Schedule deleted successfully' });
+    return sendSuccess(res, 'Schedule deleted successfully');
   } catch (err) {
-    console.error('deleteMasterPeriod error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── GET class timetable by class or list all ────────────────────────────────────
+/**
+ * Retrieves class timetable by class key or all timetables.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const getClassTimetable = async (req, res) => {
   try {
     const { classSection, classId, className, scheduleType = 'regular' } = req.query;
@@ -395,9 +463,9 @@ export const getClassTimetable = async (req, res) => {
               (classId && t.classId === classId)) &&
             (t.scheduleType || 'regular') === scheduleType
         );
-        return res.json({ success: true, timetable: found || null, timetables: all });
+        return sendSuccess(res, undefined, { timetable: found || null, timetables: all });
       }
-      return res.json({ success: true, timetables: all });
+      return sendSuccess(res, undefined, { timetables: all });
     }
 
     if (targetClass || classId) {
@@ -411,18 +479,23 @@ export const getClassTimetable = async (req, res) => {
       };
       const timetable = await ClassTimetable.findOne(filter);
       const all = await ClassTimetable.find({ scheduleType });
-      return res.json({ success: true, timetable, timetables: all });
+      return sendSuccess(res, undefined, { timetable, timetables: all });
     }
 
     const timetables = await ClassTimetable.find({ scheduleType });
-    return res.json({ success: true, timetables });
+    return sendSuccess(res, undefined, { timetables });
   } catch (err) {
-    console.error('getClassTimetable error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── SAVE / UPDATE class timetable allocations ─────────────────────────────────
+/**
+ * Saves or updates period allocations for a class timetable.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const saveClassTimetable = async (req, res) => {
   try {
     const {
@@ -438,10 +511,7 @@ export const saveClassTimetable = async (req, res) => {
     const targetClassName = className || classSectionKey || classId;
 
     if (!targetClassName) {
-      return res.status(400).json({
-        success: false,
-        message: 'className or classId is required',
-      });
+      return sendBadRequest(res, 'className or classId is required');
     }
 
     const resolvedKey = classSectionKey || targetClassName;
@@ -501,14 +571,19 @@ export const saveClassTimetable = async (req, res) => {
       );
     }
 
-    return res.status(200).json({ success: true, timetable });
+    return sendSuccess(res, undefined, { timetable });
   } catch (err) {
-    console.error('saveClassTimetable error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// ─── DELETE class timetable ───────────────────────────────────────────────────
+/**
+ * Deletes a class timetable allocation.
+ *
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
 export const deleteClassTimetable = async (req, res) => {
   try {
     const { id } = req.params;
@@ -524,7 +599,7 @@ export const deleteClassTimetable = async (req, res) => {
       );
       FallbackDb.updateAll('classTimetables', all);
     } else {
-      if (mongoose.Types.ObjectId.isValid(id)) {
+      if (isValidObjectId(id)) {
         await ClassTimetable.findByIdAndDelete(id);
       } else {
         await ClassTimetable.deleteMany({
@@ -537,11 +612,8 @@ export const deleteClassTimetable = async (req, res) => {
       }
     }
 
-    return res.json({ success: true, message: 'Class timetable deleted successfully' });
+    return sendSuccess(res, 'Class timetable deleted successfully');
   } catch (err) {
-    console.error('deleteClassTimetable error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
-
-

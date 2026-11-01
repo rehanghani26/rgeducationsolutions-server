@@ -1,30 +1,47 @@
-import ClassRoom from '../models/ClassRoom.js';
-import { uploadToS3, generateS3Key, getPresignedUrl, resolveFileUrl, isS3Key } from '../config/s3.js';
-import Section from '../models/Section.js';
-import Subject from '../models/Subject.js';
-import Book from '../models/Book.js';
-import Library from '../models/Library.js';
-import Transport from '../models/Transport.js';
-import Notification from '../models/Notification.js';
-import Setting from '../models/Setting.js';
-import User from '../models/User.js';
-import Student from '../models/Student.js';
-import Teacher from '../models/Teacher.js';
-import Parent from '../models/Parent.js';
-import Notice from '../models/Notice.js';
-import Curriculum from '../models/Curriculum.js';
-
+// 3. Configuration
 import { checkFallback } from '../config/db.js';
+import { uploadToS3, generateS3Key, getPresignedUrl, resolveFileUrl } from '../config/s3.js';
+
+// 4. Models
+import Book from '../models/Book.js';
+import Class from '../models/Class.js';
+import ClassRoom from '../models/ClassRoom.js';
+import Curriculum from '../models/Curriculum.js';
+import Leave from '../models/Leave.js';
+import Library from '../models/Library.js';
+import Notice from '../models/Notice.js';
+import Notification from '../models/Notification.js';
+import Parent from '../models/Parent.js';
+import Section from '../models/Section.js';
+import Setting from '../models/Setting.js';
+import Student from '../models/Student.js';
+import Subject from '../models/Subject.js';
+import Teacher from '../models/Teacher.js';
+import Transport from '../models/Transport.js';
+import User from '../models/User.js';
+
+// 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
+
+// 7. Utilities
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendForbidden,
+  sendError
+} from '../utils/responseUtil.js';
 
 /**
  * Upload an image buffer to S3 under the company-profile folder.
- * Returns an S3-result-shaped object so the rest of the function can stay the same.
+ * Returns an S3-result-shaped object.
  *
- * @param {Buffer} fileBuffer
- * @param {string} type        'logo' | 'banner'
- * @param {string} originalName
- * @param {string} mimeType
+ * @param {Buffer} fileBuffer - Image file buffer.
+ * @param {'logo'|'banner'} type - Image type descriptor.
+ * @param {string} originalName - Original uploaded filename.
+ * @param {string} mimeType - File MIME type.
+ * @returns {Promise<Object>} S3 asset metadata descriptor.
  */
 const uploadBufferToS3 = async (fileBuffer, type, originalName, mimeType) => {
   const folder = `school-erp/company-profile/${type}`;
@@ -32,14 +49,18 @@ const uploadBufferToS3 = async (fileBuffer, type, originalName, mimeType) => {
   await uploadToS3({ buffer: fileBuffer, key, contentType: mimeType });
   return {
     key,
-    secure_url: key,        // Store S3 key in URL fields — resolved to presigned URL on read
-    public_id: key,         // Used as publicId in MongoDB
-    asset_id: '',           // No concept of asset_id in S3
-    original_filename: originalName.replace(/\.[^.]+$/, ''), // strip extension
+    secure_url: key,
+    public_id: key,
+    asset_id: '',
+    original_filename: originalName.replace(/\.[^.]+$/, '')
   };
 };
 
-// Academic helpers
+/**
+ * Retrieve all registered academic classes.
+ *
+ * @route GET /api/erp/classes
+ */
 export const getClasses = async (req, res) => {
   try {
     let list = [];
@@ -50,10 +71,15 @@ export const getClasses = async (req, res) => {
     }
     return res.json({ success: true, classes: list });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
+/**
+ * Retrieve all registered academic sections.
+ *
+ * @route GET /api/erp/sections
+ */
 export const getSections = async (req, res) => {
   try {
     let list = [];
@@ -64,10 +90,15 @@ export const getSections = async (req, res) => {
     }
     return res.json({ success: true, sections: list });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
+/**
+ * Retrieve all academic subjects.
+ *
+ * @route GET /api/erp/subjects
+ */
 export const getSubjects = async (req, res) => {
   try {
     let list = [];
@@ -78,21 +109,26 @@ export const getSubjects = async (req, res) => {
     }
     return res.json({ success: true, subjects: list });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
+/**
+ * Create a new academic class record.
+ *
+ * @route POST /api/erp/classes
+ */
 export const createClass = async (req, res) => {
   try {
     const { name, code, room, capacity, totalStudents, classTeacher } = req.body;
     if (!name || !code) {
-      return res.status(400).json({ success: false, message: 'Class Name and Registry Code are required' });
+      return sendBadRequest(res, 'Class Name and Registry Code are required');
     }
 
     if (checkFallback()) {
       const existing = FallbackDb.findOne('classes', { code });
       if (existing) {
-        return res.status(400).json({ success: false, message: 'Class code already exists' });
+        return sendBadRequest(res, 'Class code already exists');
       }
       const record = FallbackDb.create('classes', {
         name,
@@ -107,7 +143,7 @@ export const createClass = async (req, res) => {
 
     const existingClass = await Class.findOne({ $or: [{ code }, { name }] });
     if (existingClass) {
-      return res.status(400).json({ success: false, message: 'Class name or code already exists' });
+      return sendBadRequest(res, 'Class name or code already exists');
     }
 
     const newClass = await Class.create({
@@ -119,16 +155,20 @@ export const createClass = async (req, res) => {
 
     return res.status(201).json({ success: true, message: 'Class created successfully', class: newClass });
   } catch (err) {
-    console.error('createClass error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error creating class' });
+    return sendError(res, err.message || 'Server error creating class', 500, err);
   }
 };
 
+/**
+ * Create a new section for a class.
+ *
+ * @route POST /api/erp/sections
+ */
 export const createSection = async (req, res) => {
   try {
     const { name, classId, className, room, capacity, enrolled, classTeacher } = req.body;
     if (!name) {
-      return res.status(400).json({ success: false, message: 'Section Name is required' });
+      return sendBadRequest(res, 'Section Name is required');
     }
 
     if (checkFallback()) {
@@ -154,22 +194,26 @@ export const createSection = async (req, res) => {
 
     return res.status(201).json({ success: true, message: 'Section created successfully', section: newSection });
   } catch (err) {
-    console.error('createSection error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error creating section' });
+    return sendError(res, err.message || 'Server error creating section', 500, err);
   }
 };
 
+/**
+ * Register a new academic subject.
+ *
+ * @route POST /api/erp/subjects
+ */
 export const createSubject = async (req, res) => {
   try {
     const { name, code, type, credits, teacher } = req.body;
     if (!name || !code) {
-      return res.status(400).json({ success: false, message: 'Subject Name and Registry Code are required' });
+      return sendBadRequest(res, 'Subject Name and Registry Code are required');
     }
 
     if (checkFallback()) {
       const existing = FallbackDb.findOne('subjects', { code });
       if (existing) {
-        return res.status(400).json({ success: false, message: 'Subject code already exists' });
+        return sendBadRequest(res, 'Subject code already exists');
       }
       const record = FallbackDb.create('subjects', {
         name,
@@ -183,7 +227,7 @@ export const createSubject = async (req, res) => {
 
     const existingSub = await Subject.findOne({ code });
     if (existingSub) {
-      return res.status(400).json({ success: false, message: 'Subject code already exists' });
+      return sendBadRequest(res, 'Subject code already exists');
     }
 
     const newSubject = await Subject.create({
@@ -196,12 +240,15 @@ export const createSubject = async (req, res) => {
 
     return res.status(201).json({ success: true, message: 'Subject created successfully', subject: newSubject });
   } catch (err) {
-    console.error('createSubject error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Server error creating subject' });
+    return sendError(res, err.message || 'Server error creating subject', 500, err);
   }
 };
 
-// Library helpers
+/**
+ * Retrieve all library inventory books.
+ *
+ * @route GET /api/erp/books
+ */
 export const getBooks = async (req, res) => {
   try {
     let list = [];
@@ -212,10 +259,15 @@ export const getBooks = async (req, res) => {
     }
     return res.json({ success: true, books: list });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
+/**
+ * Add a new book to the library catalog.
+ *
+ * @route POST /api/erp/books
+ */
 export const createBook = async (req, res) => {
   try {
     const data = req.body;
@@ -235,16 +287,21 @@ export const createBook = async (req, res) => {
     }
     return res.status(201).json({ success: true, book: record });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
+/**
+ * Retrieve issued library books log.
+ *
+ * @route GET /api/erp/library/issues
+ */
 export const getLibraryIssues = async (req, res) => {
   try {
     let list = [];
     if (checkFallback()) {
       list = FallbackDb.find('library');
-      list = list.map(item => {
+      list = list.map((item) => {
         const bookObj = FallbackDb.findById('books', item.bookId);
         const studObj = FallbackDb.findById('students', item.studentId);
         return {
@@ -258,10 +315,15 @@ export const getLibraryIssues = async (req, res) => {
     }
     return res.json({ success: true, issues: list });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
+/**
+ * Issue a book to a student.
+ *
+ * @route POST /api/erp/library/issue
+ */
 export const issueBook = async (req, res) => {
   try {
     const { bookId, studentId, dueDate } = req.body;
@@ -270,13 +332,11 @@ export const issueBook = async (req, res) => {
     if (checkFallback()) {
       const book = FallbackDb.findById('books', bookId);
       if (!book || book.totalQty <= book.issuedQty) {
-        return res.status(400).json({ success: false, message: 'Book is currently unavailable' });
+        return sendBadRequest(res, 'Book is currently unavailable');
       }
 
-      // Update issue quantity
       FallbackDb.update('books', bookId, { issuedQty: book.issuedQty + 1 });
       
-      // Log issue record
       issueRecord = FallbackDb.create('library', {
         bookId,
         studentId,
@@ -288,7 +348,7 @@ export const issueBook = async (req, res) => {
     } else {
       const book = await Book.findById(bookId);
       if (!book || book.totalQty <= book.issuedQty) {
-        return res.status(400).json({ success: false, message: 'Book is unavailable' });
+        return sendBadRequest(res, 'Book is unavailable');
       }
 
       book.issuedQty += 1;
@@ -304,11 +364,15 @@ export const issueBook = async (req, res) => {
 
     return res.status(201).json({ success: true, message: 'Book issued successfully', record: issueRecord });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
-// Transport Route lists
+/**
+ * Retrieve transport route details.
+ *
+ * @route GET /api/erp/transport
+ */
 export const getTransport = async (req, res) => {
   try {
     let list = [];
@@ -319,11 +383,15 @@ export const getTransport = async (req, res) => {
     }
     return res.json({ success: true, transport: list });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
-// System alerts / notifications
+/**
+ * Retrieve system alert notifications.
+ *
+ * @route GET /api/erp/notifications
+ */
 export const getNotifications = async (req, res) => {
   try {
     let list = [];
@@ -334,11 +402,15 @@ export const getNotifications = async (req, res) => {
     }
     return res.json({ success: true, notifications: list });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
-// Global App Settings
+/**
+ * Fetch ERP global application settings with optional category filtering and S3 presigned URLs.
+ *
+ * @route GET /api/erp/settings
+ */
 export const getSettings = async (req, res) => {
   try {
     const { category, includePortal, includeTemplates } = req.query;
@@ -347,8 +419,6 @@ export const getSettings = async (req, res) => {
     if (checkFallback()) {
       config = FallbackDb.getSettings();
     } else {
-      // Exclude heavy portalSettings and defaultDocumentTemplates by default.
-      // Those modules have their dedicated endpoints: /portal/settings and /documents/templates.
       let query = Setting.findOne();
       if (includePortal !== 'true' && includeTemplates !== 'true') {
         query = query.select('-portalSettings -defaultDocumentTemplates');
@@ -365,7 +435,6 @@ export const getSettings = async (req, res) => {
       }
     }
 
-    // Convert raw config to plain object so we can resolve presigned URLs
     const settings = config?.toObject ? config.toObject() : { ...(config || {}) };
 
     if (includePortal !== 'true') {
@@ -375,15 +444,12 @@ export const getSettings = async (req, res) => {
       delete settings.defaultDocumentTemplates;
     }
 
-    // Resolve S3 keys → presigned URLs for logo and banner fields.
-    // Cloudinary URLs and empty strings pass through unchanged (resolveFileUrl handles this).
-    // Priority: use the PublicId field (permanent S3 key) when available.
     const logoKey = settings.schoolLogoPublicId || settings.schoolLogo || settings.companyLogo || '';
     const bannerKey = settings.schoolBannerPublicId || settings.schoolBanner || '';
 
     const [resolvedLogo, resolvedBanner] = await Promise.all([
       resolveFileUrl(logoKey, 3600),
-      resolveFileUrl(bannerKey, 3600),
+      resolveFileUrl(bannerKey, 3600)
     ]);
 
     if (resolvedLogo) {
@@ -394,7 +460,6 @@ export const getSettings = async (req, res) => {
       settings.schoolBanner = resolvedBanner;
     }
 
-    // Optional category filtering if client requests a specific slice
     if (category) {
       const categoryFilters = {
         profile: [
@@ -426,22 +491,24 @@ export const getSettings = async (req, res) => {
 
     return res.json({ success: true, settings });
   } catch (err) {
-    console.error('getSettings error:', err.message);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
+/**
+ * Update global application settings.
+ *
+ * @route PUT /api/erp/settings
+ */
 export const updateSettings = async (req, res) => {
   try {
     const data = { ...req.body };
 
-    // Prevent overwriting internal timestamps or IDs
     delete data._id;
     delete data.__v;
     delete data.createdAt;
     delete data.updatedAt;
 
-    // Do NOT wipe or overwrite separate sub-modules through general settings update
     if (!data.portalSettings) {
       delete data.portalSettings;
     }
@@ -472,46 +539,45 @@ export const updateSettings = async (req, res) => {
 
     return res.json({ success: true, message: 'Configuration settings updated', settings });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return sendError(res, 'Server error', 500, err);
   }
 };
 
+/**
+ * Upload school logo or banner image to AWS S3 and update settings.
+ *
+ * @route POST /api/erp/upload-profile-image
+ */
 export const uploadProfileImage = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Please upload an image file' });
+      return sendBadRequest(res, 'Please upload an image file');
     }
 
     if (!req.file.mimetype.startsWith('image/')) {
-      return res.status(400).json({ success: false, message: 'Please upload a valid image file' });
+      return sendBadRequest(res, 'Please upload a valid image file');
     }
 
     const type = req.body.type === 'banner' ? 'banner' : 'logo';
 
-    // ── Guard: AWS configured ────────────────────────────────────────────────
     if (!process.env.AWS_S3_BUCKET_NAME) {
-      return res.status(500).json({
-        success: false,
-        message: 'AWS S3 is not configured on the server',
-      });
+      return sendError(res, 'AWS S3 is not configured on the server', 500);
     }
 
-    // ── Upload to S3 ─────────────────────────────────────────────────────────
     const result = await uploadBufferToS3(
       req.file.buffer,
       type,
       req.file.originalname,
-      req.file.mimetype,
+      req.file.mimetype
     );
 
     const fieldPrefix = type === 'banner' ? 'schoolBanner' : 'schoolLogo';
 
-    // Store S3 key (permanent reference) in MongoDB
     const imageData = {
-      [`${fieldPrefix}`]:         result.key,
-      [`${fieldPrefix}PublicId`]: result.key,   // key doubles as publicId
-      [`${fieldPrefix}AssetId`]:  '',             // no asset_id concept in S3
-      [`${fieldPrefix}Name`]:     result.original_filename || req.file.originalname,
+      [`${fieldPrefix}`]: result.key,
+      [`${fieldPrefix}PublicId`]: result.key,
+      [`${fieldPrefix}AssetId`]: '',
+      [`${fieldPrefix}Name`]: result.original_filename || req.file.originalname
     };
     if (type === 'logo') {
       imageData.companyLogo = result.key;
@@ -524,7 +590,6 @@ export const uploadProfileImage = async (req, res) => {
       settings = await Setting.findOneAndUpdate({}, imageData, { new: true, upsert: true });
     }
 
-    // Generate presigned URL for immediate display in the UI (1 hour)
     const presignedUrl = await getPresignedUrl(result.key, 3600);
 
     return res.status(201).json({
@@ -532,176 +597,175 @@ export const uploadProfileImage = async (req, res) => {
       message: 'Image uploaded successfully',
       image: {
         type,
-        url: presignedUrl,          // time-limited URL for client display
-        publicId: result.key,       // permanent S3 key — stored in form state
+        url: presignedUrl,
+        publicId: result.key,
         assetId: '',
-        name: result.original_filename || req.file.originalname,
+        name: result.original_filename || req.file.originalname
       },
-      settings,
+      settings
     });
   } catch (err) {
-    console.error('Profile image upload failed:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to upload image' });
+    return sendError(res, 'Failed to upload image', 500, err);
   }
 };
 
+/**
+ * Seed initial sample dummy teachers, students, parents, and classes.
+ *
+ * @route POST /api/erp/seed-dummies
+ */
 export const seedDummies = async (req, res) => {
   try {
-    const defaultPassword = "123456";
+    const defaultPassword = '123456';
 
     if (checkFallback()) {
-      // 1. Fallback Database Path
-      let class10 = FallbackDb.findOne("classes", { name: "Class 10" });
+      let class10 = FallbackDb.findOne('classes', { name: 'Class 10' });
       if (!class10) {
-        class10 = FallbackDb.create("classes", { name: "Class 10", code: "C10", room: "Room 301" });
+        class10 = FallbackDb.create('classes', { name: 'Class 10', code: 'C10', room: 'Room 301' });
       }
-      let class11 = FallbackDb.findOne("classes", { name: "Class 11" });
+      let class11 = FallbackDb.findOne('classes', { name: 'Class 11' });
       if (!class11) {
-        class11 = FallbackDb.create("classes", { name: "Class 11", code: "C11", room: "Room 402" });
+        class11 = FallbackDb.create('classes', { name: 'Class 11', code: 'C11', room: 'Room 402' });
       }
 
-      let secA = FallbackDb.findOne("sections", { name: "Section A", classId: class10.id });
+      let secA = FallbackDb.findOne('sections', { name: 'Section A', classId: class10.id });
       if (!secA) {
-        secA = FallbackDb.create("sections", { name: "Section A", classId: class10.id });
+        secA = FallbackDb.create('sections', { name: 'Section A', classId: class10.id });
       }
-      let secB = FallbackDb.findOne("sections", { name: "Section B", classId: class11.id });
+      let secB = FallbackDb.findOne('sections', { name: 'Section B', classId: class11.id });
       if (!secB) {
-        secB = FallbackDb.create("sections", { name: "Section B", classId: class11.id });
+        secB = FallbackDb.create('sections', { name: 'Section B', classId: class11.id });
       }
 
-      // Seed 25 teachers
       for (let i = 1; i <= 25; i++) {
         const email = `teacher${i}@fake.com`;
         const username = `teacher_dummy${i}`;
-        const employeeId = `EMP-DUM-${String(i).padStart(4, "0")}`;
+        const employeeId = `EMP-DUM-${String(i).padStart(4, '0')}`;
 
-        let userRecord = FallbackDb.findOne("users", { email });
+        let userRecord = FallbackDb.findOne('users', { email });
         if (!userRecord) {
-          userRecord = FallbackDb.create("users", {
+          userRecord = FallbackDb.create('users', {
             username,
             email,
             password: defaultPassword,
-            role: "teacher",
+            role: 'teacher',
             name: `Teacher Dummy ${i}`,
-            isActive: true,
+            isActive: true
           });
-          const teacherRecord = FallbackDb.create("teachers", {
+          const teacherRecord = FallbackDb.create('teachers', {
             user: userRecord.id,
             name: `Teacher Dummy ${i}`,
-            firstName: "Teacher",
+            firstName: 'Teacher',
             lastName: `Dummy ${i}`,
             employeeId,
-            phone: `99988887${String(i).padStart(2, "0")}`,
+            phone: `99988887${String(i).padStart(2, '0')}`,
             email,
-            designation: "Dummy Teacher",
+            designation: 'Dummy Teacher',
             salary: 30000 + i * 500,
-            status: "active",
+            status: 'active',
             classesAssigned: [class10.id],
             sectionsAssigned: [secA.id],
-            subjectsAssigned: ["Practical"],
+            subjectsAssigned: ['Practical']
           });
-          FallbackDb.update("users", userRecord.id, { profileId: teacherRecord.id });
+          FallbackDb.update('users', userRecord.id, { profileId: teacherRecord.id });
         }
       }
 
-      // Seed 25 students
       for (let i = 1; i <= 25; i++) {
         const email = `student${i}@fake.com`;
         const username = `student_dummy${i}`;
-        const admissionNumber = `STD-DUM-${String(i).padStart(4, "0")}`;
+        const admissionNumber = `STD-DUM-${String(i).padStart(4, '0')}`;
         const parentEmail = `parent${i}@fake.com`;
-        const parentPhone = `77766665${String(i).padStart(2, "0")}`;
+        const parentPhone = `77766665${String(i).padStart(2, '0')}`;
 
-        let userRecord = FallbackDb.findOne("users", { email });
+        let userRecord = FallbackDb.findOne('users', { email });
         if (!userRecord) {
-          userRecord = FallbackDb.create("users", {
+          userRecord = FallbackDb.create('users', {
             username,
             email,
             password: defaultPassword,
-            role: "student",
+            role: 'student',
             name: `Student Dummy ${i}`,
-            isActive: true,
+            isActive: true
           });
 
           const classId = i % 2 === 0 ? class11.id : class10.id;
           const sectionId = i % 2 === 0 ? secB.id : secA.id;
 
-          const studentRecord = FallbackDb.create("students", {
+          const studentRecord = FallbackDb.create('students', {
             user: userRecord.id,
             name: `Student Dummy ${i}`,
-            firstName: "Student",
+            firstName: 'Student',
             lastName: `Dummy ${i}`,
             admissionNumber,
             rollNumber: String(100 + i),
             email,
-            contactNumber: `88877776${String(i).padStart(2, "0")}`,
+            contactNumber: `88877776${String(i).padStart(2, '0')}`,
             parentName: `Parent Dummy ${i}`,
             parentContact: parentPhone,
             parentEmail,
             classId,
             sectionId,
-            status: "active",
-            permissions: ["dashboard", "academics", "timetable", "reports", "communication"],
+            status: 'active',
+            permissions: ['dashboard', 'academics', 'timetable', 'reports', 'communication']
           });
-          FallbackDb.update("users", userRecord.id, { profileId: studentRecord.id });
+          FallbackDb.update('users', userRecord.id, { profileId: studentRecord.id });
 
-          let parent = FallbackDb.findOne("parents", { phone: parentPhone });
+          let parent = FallbackDb.findOne('parents', { phone: parentPhone });
           if (!parent) {
-            const parentUser = FallbackDb.create("users", {
+            const parentUser = FallbackDb.create('users', {
               username: `par_${parentPhone}`,
               email: parentEmail,
               password: defaultPassword,
-              role: "parent",
+              role: 'parent',
               name: `Parent Dummy ${i}`,
-              isActive: true,
+              isActive: true
             });
-            parent = FallbackDb.create("parents", {
+            parent = FallbackDb.create('parents', {
               user: parentUser.id,
               name: `Parent Dummy ${i}`,
               phone: parentPhone,
               email: parentEmail,
               children: [studentRecord.id],
-              status: "active",
+              status: 'active'
             });
-            FallbackDb.update("users", parentUser.id, { profileId: parent.id });
+            FallbackDb.update('users', parentUser.id, { profileId: parent.id });
           } else {
             const children = [...new Set([...(parent.children || []), studentRecord.id])];
-            FallbackDb.update("parents", parent.id, { children });
+            FallbackDb.update('parents', parent.id, { children });
           }
-          FallbackDb.update("students", studentRecord.id, { parentId: parent.id });
+          FallbackDb.update('students', studentRecord.id, { parentId: parent.id });
         }
       }
 
       return res.status(201).json({
         success: true,
-        message: "Successfully seeded 25 dummy teachers and 25 dummy students in Fallback Database.",
+        message: 'Successfully seeded 25 dummy teachers and 25 dummy students in Fallback Database.'
       });
     }
 
-    // 2. MongoDB Path
-    let class10 = await Class.findOne({ name: "Class 10" });
+    let class10 = await Class.findOne({ name: 'Class 10' });
     if (!class10) {
-      class10 = await Class.create({ name: "Class 10", code: "C10", room: "Room 301" });
+      class10 = await Class.create({ name: 'Class 10', code: 'C10', room: 'Room 301' });
     }
-    let class11 = await Class.findOne({ name: "Class 11" });
+    let class11 = await Class.findOne({ name: 'Class 11' });
     if (!class11) {
-      class11 = await Class.create({ name: "Class 11", code: "C11", room: "Room 402" });
+      class11 = await Class.create({ name: 'Class 11', code: 'C11', room: 'Room 402' });
     }
 
-    let secA = await Section.findOne({ name: "Section A", classId: class10._id });
+    let secA = await Section.findOne({ name: 'Section A', classId: class10._id });
     if (!secA) {
-      secA = await Section.create({ name: "Section A", classId: class10._id });
+      secA = await Section.create({ name: 'Section A', classId: class10._id });
     }
-    let secB = await Section.findOne({ name: "Section B", classId: class11._id });
+    let secB = await Section.findOne({ name: 'Section B', classId: class11._id });
     if (!secB) {
-      secB = await Section.create({ name: "Section B", classId: class11._id });
+      secB = await Section.create({ name: 'Section B', classId: class11._id });
     }
 
-    // Seed 25 teachers
     for (let i = 1; i <= 25; i++) {
       const email = `teacher${i}@fake.com`;
       const username = `teacher_dummy${i}`;
-      const employeeId = `EMP-DUM-${String(i).padStart(4, "0")}`;
+      const employeeId = `EMP-DUM-${String(i).padStart(4, '0')}`;
 
       let userRecord = await User.findOne({ email });
       if (!userRecord) {
@@ -709,37 +773,36 @@ export const seedDummies = async (req, res) => {
           username,
           email,
           password: defaultPassword,
-          role: "teacher",
+          role: 'teacher',
           name: `Teacher Dummy ${i}`,
-          isActive: true,
+          isActive: true
         });
         const teacherRecord = await Teacher.create({
           user: userRecord._id,
           name: `Teacher Dummy ${i}`,
-          firstName: "Teacher",
+          firstName: 'Teacher',
           lastName: `Dummy ${i}`,
           employeeId,
-          phone: `99988887${String(i).padStart(2, "0")}`,
+          phone: `99988887${String(i).padStart(2, '0')}`,
           email,
-          designation: "Dummy Teacher",
+          designation: 'Dummy Teacher',
           salary: 30000 + i * 500,
-          status: "active",
+          status: 'active',
           classesAssigned: [class10.name],
           sectionsAssigned: [secA.name],
-          subjectsAssigned: ["Practical"],
+          subjectsAssigned: ['Practical']
         });
         userRecord.profileId = teacherRecord._id;
         await userRecord.save();
       }
     }
 
-    // Seed 25 students
     for (let i = 1; i <= 25; i++) {
       const email = `student${i}@fake.com`;
       const username = `student_dummy${i}`;
-      const admissionNumber = `STD-DUM-${String(i).padStart(4, "0")}`;
+      const admissionNumber = `STD-DUM-${String(i).padStart(4, '0')}`;
       const parentEmail = `parent${i}@fake.com`;
-      const parentPhone = `77766665${String(i).padStart(2, "0")}`;
+      const parentPhone = `77766665${String(i).padStart(2, '0')}`;
 
       let userRecord = await User.findOne({ email });
       if (!userRecord) {
@@ -747,9 +810,9 @@ export const seedDummies = async (req, res) => {
           username,
           email,
           password: defaultPassword,
-          role: "student",
+          role: 'student',
           name: `Student Dummy ${i}`,
-          isActive: true,
+          isActive: true
         });
 
         const classId = i % 2 === 0 ? class11._id : class10._id;
@@ -758,19 +821,19 @@ export const seedDummies = async (req, res) => {
         const studentRecord = await Student.create({
           user: userRecord._id,
           name: `Student Dummy ${i}`,
-          firstName: "Student",
+          firstName: 'Student',
           lastName: `Dummy ${i}`,
           admissionNumber,
           rollNumber: String(100 + i),
           email,
-          contactNumber: `88877776${String(i).padStart(2, "0")}`,
+          contactNumber: `88877776${String(i).padStart(2, '0')}`,
           parentName: `Parent Dummy ${i}`,
           parentContact: parentPhone,
           parentEmail,
           classId,
           sectionId,
-          status: "active",
-          permissions: ["dashboard", "academics", "timetable", "reports", "communication"],
+          status: 'active',
+          permissions: ['dashboard', 'academics', 'timetable', 'reports', 'communication']
         });
         userRecord.profileId = studentRecord._id;
         await userRecord.save();
@@ -781,9 +844,9 @@ export const seedDummies = async (req, res) => {
             username: `par_${parentPhone}`,
             email: parentEmail,
             password: defaultPassword,
-            role: "parent",
+            role: 'parent',
             name: `Parent Dummy ${i}`,
-            isActive: true,
+            isActive: true
           });
           parent = await Parent.create({
             user: parentUser._id,
@@ -791,7 +854,7 @@ export const seedDummies = async (req, res) => {
             phone: parentPhone,
             email: parentEmail,
             children: [studentRecord._id],
-            status: "active",
+            status: 'active'
           });
           parentUser.profileId = parent._id;
           await parentUser.save();
@@ -808,15 +871,18 @@ export const seedDummies = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Successfully seeded 25 dummy teachers and 25 dummy students in MongoDB Database.",
+      message: 'Successfully seeded 25 dummy teachers and 25 dummy students in MongoDB Database.'
     });
   } catch (err) {
-    console.error("seedDummies error:", err);
-    return res.status(500).json({ success: false, message: err.message || "Server error" });
+    return sendError(res, err.message || 'Server error', 500, err);
   }
 };
 
-// Notice Board controllers
+/**
+ * Retrieve public active notices.
+ *
+ * @route GET /api/erp/notices
+ */
 export const getNotices = async (req, res) => {
   try {
     let list = [];
@@ -825,17 +891,22 @@ export const getNotices = async (req, res) => {
     } else {
       list = await Notice.find({ active: { $ne: false } }).sort({ createdAt: -1 });
     }
-    res.status(200).json({ success: true, count: list.length, notices: list || [] });
+    return res.status(200).json({ success: true, count: list.length, notices: list || [] });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
+/**
+ * Publish a new campus notice announcement.
+ *
+ * @route POST /api/erp/notices
+ */
 export const createNotice = async (req, res) => {
   try {
     const { title, content, category, icon, priority, targetRoles } = req.body;
     if (!title || !content) {
-      return res.status(400).json({ success: false, message: 'Title and content are required' });
+      return sendBadRequest(res, 'Title and content are required');
     }
 
     const payload = {
@@ -845,7 +916,7 @@ export const createNotice = async (req, res) => {
       icon: icon || '📢',
       priority: priority || 'medium',
       targetRoles: targetRoles || ['all'],
-      author: req.user?.name || req.user?.username || 'Administration',
+      author: req.user?.name || req.user?.username || 'Administration'
     };
 
     let item;
@@ -855,12 +926,17 @@ export const createNotice = async (req, res) => {
       item = await Notice.create(payload);
     }
 
-    res.status(201).json({ success: true, message: 'Notice published successfully', notice: item });
+    return res.status(201).json({ success: true, message: 'Notice published successfully', notice: item });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
+/**
+ * Delete a campus notice announcement.
+ *
+ * @route DELETE /api/erp/notices/:id
+ */
 export const deleteNotice = async (req, res) => {
   try {
     const { id } = req.params;
@@ -869,33 +945,42 @@ export const deleteNotice = async (req, res) => {
     } else {
       await Notice.findByIdAndDelete(id);
     }
-    res.status(200).json({ success: true, message: 'Notice removed successfully' });
+    return sendSuccess(res, 'Notice removed successfully');
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
-// Leave Management Controllers
+/**
+ * Fetch authenticated user leave applications.
+ *
+ * @route GET /api/erp/leaves/my
+ */
 export const getMyLeaves = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?._id;
     let list = [];
     if (checkFallback()) {
       list = FallbackDb.find('leaves') || [];
-      list = list.filter(l => l.userId === userId || l.applicantRole === req.user?.role);
+      list = list.filter((l) => l.userId === userId || l.applicantRole === req.user?.role);
     }
     if (!list || list.length === 0) {
       list = [
         { _id: 'lv-01', id: 'lv-01', category: 'Medical Leave', reason: 'High fever and doctor advice for 3 days rest.', startDate: '2026-05-18', endDate: '2026-05-20', status: 'approved', applicantName: req.user?.name || 'Student', applicantRole: req.user?.role || 'student', createdAt: new Date() },
-        { _id: 'lv-02', id: 'lv-02', category: 'Personal / Family', reason: 'Attending family wedding function.', startDate: '2026-05-25', endDate: '2026-05-26', status: 'pending', applicantName: req.user?.name || 'Student', applicantRole: req.user?.role || 'student', createdAt: new Date() },
+        { _id: 'lv-02', id: 'lv-02', category: 'Personal / Family', reason: 'Attending family wedding function.', startDate: '2026-05-25', endDate: '2026-05-26', status: 'pending', applicantName: req.user?.name || 'Student', applicantRole: req.user?.role || 'student', createdAt: new Date() }
       ];
     }
-    res.status(200).json({ success: true, leaves: list });
+    return res.status(200).json({ success: true, leaves: list });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
+/**
+ * Retrieve all leave requests across the institution.
+ *
+ * @route GET /api/erp/leaves
+ */
 export const getAllLeaves = async (req, res) => {
   try {
     let list = [];
@@ -906,20 +991,25 @@ export const getAllLeaves = async (req, res) => {
       list = [
         { _id: 'lv-01', id: 'lv-01', category: 'Medical Leave', reason: 'High fever and doctor advice for 3 days rest.', startDate: '2026-05-18', endDate: '2026-05-20', status: 'pending', applicantName: 'Ahmed Al-Rashidi', applicantRole: 'student', classSection: 'Class 10-A', createdAt: new Date() },
         { _id: 'lv-02', id: 'lv-02', category: 'Casual Leave', reason: 'Urgent personal home maintenance.', startDate: '2026-05-22', endDate: '2026-05-23', status: 'pending', applicantName: 'Dr. Tariq Al-Hassan', applicantRole: 'teacher', department: 'Sciences', createdAt: new Date() },
-        { _id: 'lv-03', id: 'lv-03', category: 'Family Event', reason: 'Sister wedding function out of town.', startDate: '2026-05-12', endDate: '2026-05-14', status: 'approved', applicantName: 'Fatima Al-Zahra', applicantRole: 'student', classSection: 'Class 9-B', createdAt: new Date() },
+        { _id: 'lv-03', id: 'lv-03', category: 'Family Event', reason: 'Sister wedding function out of town.', startDate: '2026-05-12', endDate: '2026-05-14', status: 'approved', applicantName: 'Fatima Al-Zahra', applicantRole: 'student', classSection: 'Class 9-B', createdAt: new Date() }
       ];
     }
-    res.status(200).json({ success: true, leaves: list });
+    return res.status(200).json({ success: true, leaves: list });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
+/**
+ * Submit a new leave request.
+ *
+ * @route POST /api/erp/leaves/request
+ */
 export const requestLeave = async (req, res) => {
   try {
     const { category, reason, startDate, endDate, date } = req.body;
     if (!reason) {
-      return res.status(400).json({ success: false, message: 'Reason is required' });
+      return sendBadRequest(res, 'Reason is required');
     }
 
     const payload = {
@@ -931,7 +1021,7 @@ export const requestLeave = async (req, res) => {
       startDate: startDate || date || new Date().toISOString().split('T')[0],
       endDate: endDate || startDate || date || new Date().toISOString().split('T')[0],
       status: 'pending',
-      createdAt: new Date(),
+      createdAt: new Date()
     };
 
     let item;
@@ -941,12 +1031,17 @@ export const requestLeave = async (req, res) => {
       item = payload;
     }
 
-    res.status(201).json({ success: true, message: 'Leave application submitted successfully', leave: item });
+    return res.status(201).json({ success: true, message: 'Leave application submitted successfully', leave: item });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
+/**
+ * Review and approve or reject a leave application.
+ *
+ * @route PATCH /api/erp/leaves/:id/review
+ */
 export const reviewLeave = async (req, res) => {
   try {
     const { id } = req.params;
@@ -954,15 +1049,59 @@ export const reviewLeave = async (req, res) => {
     if (checkFallback()) {
       FallbackDb.update('leaves', id, { status });
     }
-    res.status(200).json({ success: true, message: `Leave status updated to ${status}` });
+    return res.status(200).json({ success: true, message: `Leave status updated to ${status}` });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
-// ─── Dynamic Academic Curriculum & Courses Helpers ─────────────────────────────
-const DEFAULT_CURRICULUM_SEED = [];
+/**
+ * Fetch all leave records associated with a specific applicant ID.
+ *
+ * @route GET /api/erp/leaves/applicant/:id
+ */
+export const getApplicantLeaves = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let list = [];
+    if (checkFallback()) {
+      list = FallbackDb.find('leaves') || [];
+      list = list.filter((l) => l.studentId === id || l.userId === id || l.applicantName === id);
+    } else {
+      list = await Leave.find({
+        $or: [
+          { studentId: id },
+          { userId: id },
+          { applicantName: new RegExp(id, 'i') }
+        ]
+      }).sort({ createdAt: -1 });
+    }
 
+    const summary = {
+      totalApplications: list.length,
+      totalDaysApplied: list.reduce((acc, curr) => acc + (curr.totalDays || 1), 0),
+      approvedDays: list.filter((l) => l.status === 'approved').reduce((acc, curr) => acc + (curr.totalDays || 1), 0),
+      pendingDays: list.filter((l) => l.status === 'pending').reduce((acc, curr) => acc + (curr.totalDays || 1), 0),
+      rejectedDays: list.filter((l) => l.status === 'rejected').reduce((acc, curr) => acc + (curr.totalDays || 1), 0)
+    };
+
+    return res.json({
+      success: true,
+      summary,
+      pendingRequests: list.filter((l) => l.status === 'pending'),
+      history: list,
+      activeLeaveNow: list.find((l) => l.status === 'approved')
+    });
+  } catch (err) {
+    return sendError(res, err.message, 500, err);
+  }
+};
+
+/**
+ * Retrieve academic curriculums with optional class and section filters.
+ *
+ * @route GET /api/erp/curriculums
+ */
 export const getCurriculums = async (req, res) => {
   try {
     const { className, sectionName } = req.query;
@@ -1000,24 +1139,28 @@ export const getCurriculums = async (req, res) => {
           { sectionName: 'All Sections' },
           { sectionName: { $exists: false } },
           { sectionName: '' },
-          { sectionName: null },
+          { sectionName: null }
         ];
       }
 
       curriculums = await Curriculum.find(query).sort({ createdAt: -1 });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: curriculums.length,
-      curriculums: curriculums || [],
+      curriculums: curriculums || []
     });
   } catch (err) {
-    console.error('getCurriculums error:', err);
-    res.status(500).json({ success: false, message: err.message || 'Server error fetching curriculum' });
+    return sendError(res, err.message || 'Server error fetching curriculum', 500, err);
   }
 };
 
+/**
+ * Assign and create a new curriculum course record.
+ *
+ * @route POST /api/erp/curriculums
+ */
 export const createCurriculum = async (req, res) => {
   try {
     const userRole = (req.user?.role || '').toLowerCase().replace(/_/g, '-');
@@ -1025,10 +1168,7 @@ export const createCurriculum = async (req, res) => {
     const isTeacher = ['teacher', 'head-teacher', 'hod', 'coordinator'].includes(userRole);
 
     if (!isPrivileged && !isTeacher) {
-      return res.status(403).json({
-        success: false,
-        message: 'Permission denied. Only Administrators, Principals, and Class Teachers can assign curriculum & courses.',
-      });
+      return sendForbidden(res, 'Permission denied. Only Administrators, Principals, and Class Teachers can assign curriculum & courses.');
     }
 
     const {
@@ -1045,11 +1185,11 @@ export const createCurriculum = async (req, res) => {
       progress,
       currentChapter,
       units,
-      materials,
+      materials
     } = req.body;
 
     if (!name || !code) {
-      return res.status(400).json({ success: false, message: 'Subject Name and Course Code are required' });
+      return sendBadRequest(res, 'Subject Name and Course Code are required');
     }
 
     const payload = {
@@ -1068,7 +1208,7 @@ export const createCurriculum = async (req, res) => {
       assignedBy: req.user.name || 'Administration',
       assignedByRole: userRole,
       units: Array.isArray(units) ? units : [],
-      materials: Array.isArray(materials) ? materials : [],
+      materials: Array.isArray(materials) ? materials : []
     };
 
     let record;
@@ -1078,17 +1218,21 @@ export const createCurriculum = async (req, res) => {
       record = await Curriculum.create(payload);
     }
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'Academic Curriculum & Course assigned successfully',
-      curriculum: record,
+      curriculum: record
     });
   } catch (err) {
-    console.error('createCurriculum error:', err);
-    res.status(500).json({ success: false, message: err.message || 'Failed to assign curriculum' });
+    return sendError(res, err.message || 'Failed to assign curriculum', 500, err);
   }
 };
 
+/**
+ * Update an existing academic curriculum.
+ *
+ * @route PUT /api/erp/curriculums/:id
+ */
 export const updateCurriculum = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1101,19 +1245,24 @@ export const updateCurriculum = async (req, res) => {
     }
 
     if (!updated) {
-      return res.status(404).json({ success: false, message: 'Curriculum record not found' });
+      return sendNotFound(res, 'Curriculum record not found');
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: 'Curriculum updated successfully',
-      curriculum: updated,
+      curriculum: updated
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message || 'Failed to update curriculum' });
+    return sendError(res, err.message || 'Failed to update curriculum', 500, err);
   }
 };
 
+/**
+ * Delete a curriculum course record.
+ *
+ * @route DELETE /api/erp/curriculums/:id
+ */
 export const deleteCurriculum = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1124,29 +1273,31 @@ export const deleteCurriculum = async (req, res) => {
       await Curriculum.findByIdAndDelete(id);
     }
 
-    res.status(200).json({
-      success: true,
-      message: 'Curriculum course removed successfully',
-    });
+    return sendSuccess(res, 'Curriculum course removed successfully');
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message || 'Failed to delete curriculum' });
+    return sendError(res, err.message || 'Failed to delete curriculum', 500, err);
   }
 };
 
+/**
+ * Add a syllabus chapter / unit to a curriculum.
+ *
+ * @route POST /api/erp/curriculums/:id/units
+ */
 export const addCurriculumUnit = async (req, res) => {
   try {
     const { id } = req.params;
     const { title, status, duration } = req.body;
 
     if (!title) {
-      return res.status(400).json({ success: false, message: 'Unit title is required' });
+      return sendBadRequest(res, 'Unit title is required');
     }
 
     const newUnit = {
       id: Date.now(),
       title,
       status: status || 'upcoming',
-      duration: duration || '2 weeks',
+      duration: duration || '2 weeks'
     };
 
     if (checkFallback()) {
@@ -1159,19 +1310,24 @@ export const addCurriculumUnit = async (req, res) => {
       await Curriculum.findByIdAndUpdate(id, { $push: { units: newUnit } });
     }
 
-    res.status(200).json({ success: true, message: 'Unit added successfully', unit: newUnit });
+    return res.status(200).json({ success: true, message: 'Unit added successfully', unit: newUnit });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
 
+/**
+ * Attach study material to a curriculum.
+ *
+ * @route POST /api/erp/curriculums/:id/materials
+ */
 export const addCurriculumMaterial = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, type, size, url } = req.body;
 
     if (!name) {
-      return res.status(400).json({ success: false, message: 'Material name is required' });
+      return sendBadRequest(res, 'Material name is required');
     }
 
     const newMat = {
@@ -1179,7 +1335,7 @@ export const addCurriculumMaterial = async (req, res) => {
       type: type || 'PDF',
       size: size || '2.5 MB',
       url: url || '',
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     };
 
     if (checkFallback()) {
@@ -1192,8 +1348,8 @@ export const addCurriculumMaterial = async (req, res) => {
       await Curriculum.findByIdAndUpdate(id, { $push: { materials: newMat } });
     }
 
-    res.status(200).json({ success: true, message: 'Study material added successfully', material: newMat });
+    return res.status(200).json({ success: true, message: 'Study material added successfully', material: newMat });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return sendError(res, err.message, 500, err);
   }
 };
