@@ -1,34 +1,147 @@
+// 2. External packages
+import OpenAI from "openai";
+
+// 8. Base Provider
 import { AIProvider } from "./base.provider.js";
 
-const DEFAULT_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
-const DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1";
+// ════════════════════════════════════════════════════════════════════════════════
+// 1. ALL AVAILABLE NVIDIA MODELS (Constants)
+// ════════════════════════════════════════════════════════════════════════════════
+export const MODEL_NVIDIA_3_5    = "nvidia/nemotron-3.5-lightning-30b-a3b";        // NVIDIA Nemotron 3.5 (High Performance + Thinking)
+export const MODEL_NVIDIA_3      = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"; // NVIDIA Nemotron 3 (Nano Reasoning)
+export const MODEL_LLAMA_3_3_70B = "meta/llama-3.3-70b-instruct";                 // Meta Llama 3.3 70B (Full Tool Calling)
+export const MODEL_LLAMA_3_1_70B = "meta/llama-3.1-70b-instruct";                 // Meta Llama 3.1 70B (Full Tool Calling)
+export const MODEL_NEMOTRON_70B  = "nvidia/llama-3.1-nemotron-70b-instruct";       // NVIDIA Nemotron 70B
+export const MODEL_LLAMA_3_1_8B  = "meta/llama-3.1-8b-instruct";                  // Meta Llama 3.1 8B (Fast / Lightweight)
 
-// Models that support tool/function calling
-const TOOL_CAPABLE_MODELS = [
-  "meta/llama-3.3-70b-instruct",
-  "meta/llama-3.1-70b-instruct",
-  "nvidia/llama-3.1-nemotron-70b-instruct",
-  "meta/llama-3.1-8b-instruct",
-];
+// ════════════════════════════════════════════════════════════════════════════════
+// 2. ACTIVE MODEL SELECTOR
+// 👉 Change ONLY this one variable to switch models everywhere automatically!
+// ════════════════════════════════════════════════════════════════════════════════
+export const SELECTED_MODEL = MODEL_NVIDIA_3_5;
+// export const SELECTED_MODEL = MODEL_NVIDIA_3;
+// export const SELECTED_MODEL = MODEL_LLAMA_3_3_70B;
+// export const SELECTED_MODEL = MODEL_LLAMA_3_1_70B;
+// export const SELECTED_MODEL = MODEL_NEMOTRON_70B;
+// export const SELECTED_MODEL = MODEL_LLAMA_3_1_8B;
 
-// Reasoning models — require special parameters, no tool-calling
-const REASONING_MODELS = [
-  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-];
+export const DEFAULT_MODEL = SELECTED_MODEL;
+export const DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1";
 
+// ════════════════════════════════════════════════════════════════════════════════
+// 3. ADAPTIVE MODEL PROFILES & HYPERPARAMETERS
+// When you change SELECTED_MODEL, all parameters adapt automatically!
+// ════════════════════════════════════════════════════════════════════════════════
+export const MODEL_PROFILES = {
+  [MODEL_NVIDIA_3_5]: {
+    id: MODEL_NVIDIA_3_5,
+    displayName: "NVIDIA Nemotron 3.5 Lightning (30B)",
+    isReasoning: true,
+    supportsTools: false,
+    temperature: 1,
+    top_p: 0.95,
+    max_tokens: 16384,
+    reasoning_budget: 16384,
+    chat_template_kwargs: { enable_thinking: true },
+  },
+  [MODEL_NVIDIA_3]: {
+    id: MODEL_NVIDIA_3,
+    displayName: "NVIDIA Nemotron 3 Nano Omni (30B)",
+    isReasoning: true,
+    supportsTools: false,
+    temperature: 0.6,
+    top_p: 0.95,
+    max_tokens: 16384,
+    reasoning_budget: 16384,
+    chat_template_kwargs: { enable_thinking: true },
+  },
+  [MODEL_LLAMA_3_3_70B]: {
+    id: MODEL_LLAMA_3_3_70B,
+    displayName: "Meta Llama 3.3 70B Instruct",
+    isReasoning: false,
+    supportsTools: true,
+    temperature: 0.5,
+    top_p: 1,
+    max_tokens: 4096,
+  },
+  [MODEL_LLAMA_3_1_70B]: {
+    id: MODEL_LLAMA_3_1_70B,
+    displayName: "Meta Llama 3.1 70B Instruct",
+    isReasoning: false,
+    supportsTools: true,
+    temperature: 0.5,
+    top_p: 1,
+    max_tokens: 4096,
+  },
+  [MODEL_NEMOTRON_70B]: {
+    id: MODEL_NEMOTRON_70B,
+    displayName: "NVIDIA Llama 3.1 Nemotron 70B",
+    isReasoning: false,
+    supportsTools: true,
+    temperature: 0.5,
+    top_p: 1,
+    max_tokens: 4096,
+  },
+  [MODEL_LLAMA_3_1_8B]: {
+    id: MODEL_LLAMA_3_1_8B,
+    displayName: "Meta Llama 3.1 8B Instruct",
+    isReasoning: false,
+    supportsTools: true,
+    temperature: 0.5,
+    top_p: 1,
+    max_tokens: 2048,
+  },
+};
+
+/**
+ * Returns the full profile & settings for any model name.
+ *
+ * @param {string} [modelName]
+ * @returns {object} Model profile with optimal parameters
+ */
+export function getModelProfile(modelName = SELECTED_MODEL) {
+  if (MODEL_PROFILES[modelName]) {
+    return MODEL_PROFILES[modelName];
+  }
+
+  const isReasoning =
+    modelName.includes("3.5") ||
+    modelName.includes("reasoning") ||
+    modelName.includes("lightning");
+
+  return {
+    id: modelName,
+    displayName: modelName,
+    isReasoning,
+    supportsTools: !isReasoning,
+    temperature: isReasoning ? 1 : 0.7,
+    top_p: isReasoning ? 0.95 : 1,
+    max_tokens: isReasoning ? 16384 : 4096,
+    reasoning_budget: isReasoning ? 16384 : undefined,
+    chat_template_kwargs: isReasoning ? { enable_thinking: true } : undefined,
+  };
+}
+
+// Fallback candidates if active model returns 404
 const RELIABLE_NVIDIA_MODELS = [
-  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-  "meta/llama-3.3-70b-instruct",
-  "meta/llama-3.1-70b-instruct",
-  "nvidia/llama-3.1-nemotron-70b-instruct",
-  "meta/llama-3.1-8b-instruct",
+  MODEL_NVIDIA_3_5,
+  MODEL_NVIDIA_3,
+  MODEL_LLAMA_3_3_70B,
+  MODEL_LLAMA_3_1_70B,
+  MODEL_NEMOTRON_70B,
+  MODEL_LLAMA_3_1_8B,
 ];
 
+// ════════════════════════════════════════════════════════════════════════════════
+// 4. NVIDIA AI PROVIDER CLASS
+// ════════════════════════════════════════════════════════════════════════════════
 export class NvidiaProvider extends AIProvider {
   constructor() {
     super("NVIDIA");
 
-    const apiKey = process.env.NVIDIA_API_KEY;
+    const apiKey =
+      process.env.NVIDIA_API_KEY ||
+      "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";
     if (!apiKey) {
       throw new Error("NVIDIA_API_KEY is not set in environment variables.");
     }
@@ -38,21 +151,21 @@ export class NvidiaProvider extends AIProvider {
       /\/+$/,
       ""
     );
-    this.model = process.env.NVIDIA_MODEL || DEFAULT_MODEL;
-    this.client = null;
-    this._initClient();
+    this.model = process.env.NVIDIA_MODEL || SELECTED_MODEL;
+
+    // Direct OpenAI SDK client initialized with NVIDIA endpoints
+    this.client = new OpenAI({
+      apiKey: this.apiKey,
+      baseURL: this.baseURL,
+    });
   }
 
   async _initClient() {
-    try {
-      const { default: OpenAI } = await import("openai");
+    if (!this.client) {
       this.client = new OpenAI({
         apiKey: this.apiKey,
         baseURL: this.baseURL,
       });
-    } catch {
-      // openai package not installed or failed to load; native fetch will be used seamlessly
-      this.client = null;
     }
   }
 
@@ -60,14 +173,12 @@ export class NvidiaProvider extends AIProvider {
    * Send messages with tool-calling or completion support via NVIDIA NIM API.
    */
   async generateWithTools(messages, tools = [], options = {}) {
-    const model = options.model || this.model;
-    const isReasoningModel = REASONING_MODELS.includes(model);
+    const targetModel = options.model || this.model;
+    const profile = getModelProfile(targetModel);
 
-    // Reasoning models (Nemotron) don't support function/tool calling
-    // Fallback: treat as plain text generation
-    const effectiveTools = isReasoningModel ? [] : tools;
+    // If model does not support tools (e.g. reasoning models), ignore tools safely
+    const effectiveTools = profile.supportsTools ? tools : [];
 
-    // Convert internal tool definitions to OpenAI/NVIDIA function format
     const nvidiaTools = effectiveTools.map((tool) => ({
       type: "function",
       function: {
@@ -78,16 +189,20 @@ export class NvidiaProvider extends AIProvider {
     }));
 
     const requestParams = {
-      model,
+      model: targetModel,
       messages: sanitizeMessages(messages),
-      temperature: options.temperature ?? (isReasoningModel ? 0.6 : 0.5),
-      max_tokens: options.maxTokens ?? (isReasoningModel ? 65536 : 1024),
-      top_p: options.topP ?? (isReasoningModel ? 0.95 : 1),
+      temperature: options.temperature ?? profile.temperature,
+      max_tokens: options.maxTokens ?? profile.max_tokens,
+      top_p: options.topP ?? profile.top_p,
     };
 
-    // Add reasoning budget for reasoning-capable models
-    if (isReasoningModel) {
-      requestParams.reasoning_budget = options.reasoningBudget ?? 16384;
+    // Attach thinking/reasoning parameters if the model supports it
+    if (profile.isReasoning) {
+      requestParams.reasoning_budget =
+        options.reasoningBudget ?? profile.reasoning_budget ?? 16384;
+      requestParams.chat_template_kwargs =
+        options.chat_template_kwargs ??
+        profile.chat_template_kwargs ?? { enable_thinking: true };
     }
 
     if (nvidiaTools.length > 0) {
@@ -102,34 +217,37 @@ export class NvidiaProvider extends AIProvider {
     } catch (err) {
       const errLower = (err.message || "").toLowerCase();
 
-      // If the model name is invalid or decommissioned (404), try reliable fallback models
+      // If the model returns 404, try other candidate models in the list
       if (
         err.status === 404 ||
         errLower.includes("404") ||
         errLower.includes("not found")
       ) {
         console.warn(
-          `[NVIDIA Provider] Model "${requestParams.model}" returned 404 Not Found. Trying available models...`
+          `[NVIDIA Provider] Model "${requestParams.model}" returned 404. Retrying with fallback models...`
         );
         const candidates = RELIABLE_NVIDIA_MODELS.filter(
           (m) => m !== requestParams.model
         );
         for (const candidate of candidates) {
           try {
-            console.warn(
-              `[NVIDIA Provider] Retrying with model "${candidate}"...`
-            );
+            console.warn(`[NVIDIA Provider] Retrying with "${candidate}"...`);
             requestParams.model = candidate;
+            const candProfile = getModelProfile(candidate);
+            if (!candProfile.supportsTools) {
+              delete requestParams.tools;
+              delete requestParams.tool_choice;
+            }
             completionData = await this._callApi(requestParams);
             this.model = candidate;
             break;
-          } catch (retryErr) {
-            // continue trying next candidate
+          } catch {
+            // try next
           }
         }
       }
 
-      // If the selected model does not support tools/function calling, retry without tools
+      // If model failed because of tools parameter, retry without tools
       if (!completionData && requestParams.tools) {
         if (
           errLower.includes("tool") ||
@@ -139,7 +257,7 @@ export class NvidiaProvider extends AIProvider {
           errLower.includes("400")
         ) {
           console.warn(
-            `[NVIDIA Provider] Model "${model}" failed with tools parameter. Retrying without tools...`
+            `[NVIDIA Provider] Model "${targetModel}" failed with tools. Retrying in text-only mode...`
           );
           delete requestParams.tools;
           delete requestParams.tool_choice;
@@ -176,24 +294,72 @@ export class NvidiaProvider extends AIProvider {
       };
     }
 
-    // Plain text response
+    // Plain text response with reasoning support
     return {
       type: "text",
       text: message?.content || "",
+      reasoning: message?.reasoning_content || "",
       usage: completionData.usage,
     };
   }
 
-  async _callApi(params) {
-    if (!this.client) {
-      await this._initClient();
+  /**
+   * Stream completion chunks with real-time reasoning_content output.
+   *
+   * @param {Array<{role: string, content: string}>} messages
+   * @param {object} [options]
+   * @param {function({reasoning: string, content: string, chunk: object}): void} [onChunk]
+   * @returns {Promise<{text: string, reasoning: string}>}
+   */
+  async streamCompletion(messages, options = {}, onChunk = null) {
+    const targetModel = options.model || this.model;
+    const profile = getModelProfile(targetModel);
+
+    const requestParams = {
+      model: targetModel,
+      messages: sanitizeMessages(messages),
+      temperature: options.temperature ?? profile.temperature,
+      top_p: options.topP ?? profile.top_p,
+      max_tokens: options.maxTokens ?? profile.max_tokens,
+      stream: true,
+    };
+
+    if (profile.isReasoning) {
+      requestParams.reasoning_budget =
+        options.reasoningBudget ?? profile.reasoning_budget ?? 16384;
+      requestParams.chat_template_kwargs =
+        options.chat_template_kwargs ??
+        profile.chat_template_kwargs ?? { enable_thinking: true };
     }
 
+    const stream = await this.client.chat.completions.create(requestParams);
+    let fullContent = "";
+    let fullReasoning = "";
+
+    for await (const chunk of stream) {
+      const reasoning = chunk.choices[0]?.delta?.reasoning_content || "";
+      const content = chunk.choices[0]?.delta?.content || "";
+
+      if (reasoning) {
+        fullReasoning += reasoning;
+      }
+      if (content) {
+        fullContent += content;
+      }
+
+      if (onChunk) {
+        onChunk({ reasoning, content, chunk });
+      }
+    }
+
+    return { text: fullContent, reasoning: fullReasoning };
+  }
+
+  async _callApi(params) {
     if (this.client) {
       return await this.client.chat.completions.create(params);
     }
 
-    // Fallback using global fetch (built into modern Node.js)
     const url = `${this.baseURL}/chat/completions`;
     const res = await fetch(url, {
       method: "POST",
