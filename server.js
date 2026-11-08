@@ -45,6 +45,7 @@ import studentRoutes from "./routes/studentRoutes.js";
 import syllabusRoutes from "./routes/syllabusRoutes.js";
 import teacherRoutes from "./routes/teacherRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import vendorRoutes from "./routes/vendorRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,6 +105,7 @@ app.use("/api/v1/students", studentRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/v1/teachers", teacherRoutes);
 app.use("/api/v1/inventory", inventoryRoutes);
+app.use(["/api/v1/vendors", "/api/v1/inventory/vendors"], vendorRoutes);
 app.use("/api/v1/finance", financeRoutes);
 app.use("/api/v1/erp", erpRoutes);
 

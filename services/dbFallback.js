@@ -24,6 +24,10 @@ const initialDb = {
   fees: [],
   expenses: [],
   inventory: [],
+  vendors: [],
+  inventoryPurchases: [],
+  inventoryIssuances: [],
+  inventoryTransactions: [],
   exams: [],
   notices: [],
   notifications: [],
@@ -68,6 +72,10 @@ const loadData = () => {
       if (!db.fees) db.fees = [];
       if (!db.expenses) db.expenses = [];
       if (!db.inventory) db.inventory = [];
+      if (!db.vendors) db.vendors = [];
+      if (!db.inventoryPurchases) db.inventoryPurchases = [];
+      if (!db.inventoryIssuances) db.inventoryIssuances = [];
+      if (!db.inventoryTransactions) db.inventoryTransactions = [];
       if (!db.exams) db.exams = [];
       if (!db.notices) db.notices = [];
       if (!db.notifications) db.notifications = [];
