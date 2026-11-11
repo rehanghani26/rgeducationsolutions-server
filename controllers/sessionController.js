@@ -3,6 +3,7 @@ import { checkFallback } from '../config/db.js';
 
 // 4. Models
 import AcademicSession from '../models/AcademicSession.js';
+import BudgetAllocation from '../models/BudgetAllocation.js';
 
 // 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
@@ -27,10 +28,10 @@ export const getAcademicSessions = async (req, res) => {
   try {
     if (checkFallback()) {
       const sessions = FallbackDb.find('academicSessions') || [];
-      return sendSuccess(res, undefined, { sessions });
+      return sendSuccess(res, undefined, { sessions }, 200, { sessions });
     }
     const sessions = await AcademicSession.find().sort({ startDate: -1 });
-    return sendSuccess(res, undefined, { sessions });
+    return sendSuccess(res, undefined, { sessions }, 200, { sessions });
   } catch (err) {
     return sendError(res, err.message || 'Server error', 500, err);
   }
@@ -68,7 +69,7 @@ export const createAcademicSession = async (req, res) => {
       };
       all.unshift(newSession);
       FallbackDb.updateAll('academicSessions', all);
-      return sendCreated(res, undefined, { session: newSession });
+      return sendCreated(res, 'Academic session created successfully', { session: newSession }, { session: newSession });
     }
 
     if (isCurrent) {
@@ -85,7 +86,7 @@ export const createAcademicSession = async (req, res) => {
       createdBy: req.user?.name || 'admin',
     });
 
-    return sendCreated(res, undefined, { session });
+    return sendCreated(res, 'Academic session created successfully', { session }, { session });
   } catch (err) {
     return sendError(res, err.message || 'Server error', 500, err);
   }
@@ -101,6 +102,7 @@ export const createAcademicSession = async (req, res) => {
 export const activateAcademicSession = async (req, res) => {
   try {
     const { id } = req.params;
+    let activated = null;
 
     if (checkFallback()) {
       const all = FallbackDb.find('academicSessions') || [];
@@ -108,18 +110,23 @@ export const activateAcademicSession = async (req, res) => {
         if (String(s._id) === String(id) || String(s.id) === String(id)) {
           s.isCurrent = true;
           s.status = 'active';
+          activated = s;
         } else {
           s.isCurrent = false;
         }
       });
       FallbackDb.updateAll('academicSessions', all);
-      return sendSuccess(res, 'Academic session activated');
+      return sendSuccess(res, 'Academic session activated', { session: activated }, 200, { session: activated });
     }
 
     await AcademicSession.updateMany({}, { isCurrent: false });
-    await AcademicSession.findByIdAndUpdate(id, { isCurrent: true, status: 'active' });
+    activated = await AcademicSession.findByIdAndUpdate(
+      id,
+      { isCurrent: true, status: 'active' },
+      { new: true }
+    );
 
-    return sendSuccess(res, 'Academic session activated');
+    return sendSuccess(res, 'Academic session activated', { session: activated }, 200, { session: activated });
   } catch (err) {
     return sendError(res, err.message || 'Server error', 500, err);
   }
@@ -135,36 +142,86 @@ export const activateAcademicSession = async (req, res) => {
 export const updateAcademicSession = async (req, res) => {
   try {
     const { id } = req.params;
-    const { sessionName, startDate, endDate, status, notes } = req.body;
+    const { sessionName, startDate, endDate, status, notes, isCurrent } = req.body;
 
     if (checkFallback()) {
       const all = FallbackDb.find('academicSessions') || [];
       const idx = all.findIndex((s) => String(s._id) === String(id) || String(s.id) === String(id));
       if (idx !== -1) {
-        if (sessionName) all[idx].sessionName = sessionName;
+        if (sessionName) all[idx].sessionName = sessionName.trim();
         if (startDate) all[idx].startDate = startDate;
         if (endDate) all[idx].endDate = endDate;
         if (status) all[idx].status = status;
         if (notes !== undefined) all[idx].notes = notes;
+        if (isCurrent !== undefined) {
+          if (isCurrent) {
+            all.forEach((s) => (s.isCurrent = false));
+            all[idx].isCurrent = true;
+            all[idx].status = 'active';
+          } else {
+            all[idx].isCurrent = false;
+          }
+        }
         FallbackDb.updateAll('academicSessions', all);
-        return sendSuccess(res, undefined, { session: all[idx] });
+
+        // Keep BudgetAllocation sessionName synchronized
+        if (sessionName) {
+          const budgets = FallbackDb.find('budgetAllocations') || [];
+          budgets.forEach((b) => {
+            if (String(b.sessionId) === String(id)) {
+              b.sessionName = sessionName.trim();
+            }
+          });
+          FallbackDb.updateAll('budgetAllocations', budgets);
+        }
+
+        return sendSuccess(res, 'Academic session updated successfully', { session: all[idx] }, 200, { session: all[idx] });
       }
       return sendNotFound(res, 'Session not found');
     }
 
+    if (isCurrent) {
+      await AcademicSession.updateMany({ _id: { $ne: id } }, { isCurrent: false });
+    }
+
+    const updateFields = {
+      ...(sessionName && { sessionName: sessionName.trim() }),
+      ...(startDate && { startDate }),
+      ...(endDate && { endDate }),
+      ...(status && { status }),
+      ...(notes !== undefined && { notes }),
+    };
+
+    if (isCurrent !== undefined) {
+      updateFields.isCurrent = Boolean(isCurrent);
+      if (isCurrent) {
+        updateFields.status = 'active';
+      }
+    }
+
     const session = await AcademicSession.findByIdAndUpdate(
       id,
-      {
-        ...(sessionName && { sessionName }),
-        ...(startDate && { startDate }),
-        ...(endDate && { endDate }),
-        ...(status && { status }),
-        ...(notes !== undefined && { notes }),
-      },
+      updateFields,
       { new: true }
     );
 
-    return sendSuccess(res, undefined, { session });
+    if (!session) {
+      return sendNotFound(res, 'Session not found');
+    }
+
+    // Keep linked budget allocation sessionName in sync
+    if (sessionName) {
+      try {
+        await BudgetAllocation.updateMany(
+          { sessionId: id },
+          { sessionName: sessionName.trim() }
+        );
+      } catch (e) {
+        console.warn('BudgetAllocation sync note:', e.message);
+      }
+    }
+
+    return sendSuccess(res, 'Academic session updated successfully', { session }, 200, { session });
   } catch (err) {
     return sendError(res, err.message || 'Server error', 500, err);
   }
@@ -182,15 +239,26 @@ export const deleteAcademicSession = async (req, res) => {
     const { id } = req.params;
 
     if (checkFallback()) {
-      const all = (FallbackDb.find('academicSessions') || []).filter(
-        (s) => String(s._id) !== String(id) && String(s.id) !== String(id)
-      );
-      FallbackDb.updateAll('academicSessions', all);
-      return sendSuccess(res, 'Session deleted');
+      const all = FallbackDb.find('academicSessions') || [];
+      const target = all.find((s) => String(s._id) === String(id) || String(s.id) === String(id));
+      if (target?.isCurrent) {
+        return sendBadRequest(res, 'Cannot delete the currently active academic session. Activate another session first.');
+      }
+      const filtered = all.filter((s) => String(s._id) !== String(id) && String(s.id) !== String(id));
+      FallbackDb.updateAll('academicSessions', filtered);
+      return sendSuccess(res, 'Session deleted successfully');
+    }
+
+    const session = await AcademicSession.findById(id);
+    if (!session) {
+      return sendNotFound(res, 'Session not found');
+    }
+    if (session.isCurrent) {
+      return sendBadRequest(res, 'Cannot delete the currently active academic session. Activate another session first.');
     }
 
     await AcademicSession.findByIdAndDelete(id);
-    return sendSuccess(res, 'Session deleted');
+    return sendSuccess(res, 'Session deleted successfully');
   } catch (err) {
     return sendError(res, err.message || 'Server error', 500, err);
   }
@@ -208,10 +276,13 @@ export const getActiveSession = async (req, res) => {
     if (checkFallback()) {
       const all = FallbackDb.find('academicSessions') || [];
       const active = all.find((s) => s.isCurrent) || all[0] || null;
-      return sendSuccess(res, undefined, { session: active });
+      return sendSuccess(res, undefined, { session: active }, 200, { session: active });
     }
-    const session = await AcademicSession.findOne({ isCurrent: true }).lean();
-    return sendSuccess(res, undefined, { session: session || null });
+    let session = await AcademicSession.findOne({ isCurrent: true }).lean();
+    if (!session) {
+      session = await AcademicSession.findOne().sort({ startDate: -1 }).lean();
+    }
+    return sendSuccess(res, undefined, { session: session || null }, 200, { session: session || null });
   } catch (err) {
     return sendError(res, err.message || 'Server error', 500, err);
   }

@@ -116,6 +116,10 @@ const PayrollDisbursementSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    bonus: {
+      type: Number,
+      default: 0,
+    },
     allowances: {
       type: Number,
       default: 0,
@@ -133,6 +137,10 @@ const PayrollDisbursementSchema = new mongoose.Schema(
       default: 0,
     },
     otherDeductions: {
+      type: Number,
+      default: 0,
+    },
+    customDeduction: {
       type: Number,
       default: 0,
     },

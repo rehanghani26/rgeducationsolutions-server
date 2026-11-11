@@ -28,70 +28,10 @@ import {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Ensure FallbackDb has an issuedCertificates collection initialized with demo records.
+ * Ensure FallbackDb has an issuedCertificates collection initialized.
  */
 const ensureFallbackCertificates = () => {
-  const existing = FallbackDb.find('issuedCertificates');
-  if (!existing || existing.length === 0) {
-    const demo1 = {
-      id: 'cert-fb-001',
-      _id: 'cert-fb-001',
-      certificateNumber: 'CERT-2026-000001',
-      certificateType: 'BONAFIDE',
-      templateId: 'certificate-classic',
-      templateVersion: 'v1',
-      recipientType: 'student',
-      recipientId: 's1',
-      recipientNameSnapshot: 'Harry Potter',
-      recipientIdSnapshot: 'STD-2026-001',
-      additionalSnapshot: {
-        class: 'Class 10',
-        section: 'Section A',
-        rollNumber: '01',
-        academicYear: '2025-2026',
-        bloodGroup: 'O+',
-        dob: '2010-07-31',
-        parentName: 'James Potter'
-      },
-      academicSession: '2025-2026',
-      issuedBy: { name: 'Albus Dumbledore', role: 'super-admin' },
-      issuedAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-      status: 'VALID',
-      verificationToken: 'a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0',
-      purposeNote: 'Issued for passport verification and higher education admission.'
-    };
-
-    const demo2 = {
-      id: 'cert-fb-002',
-      _id: 'cert-fb-002',
-      certificateNumber: 'CERT-2026-000002',
-      certificateType: 'CHARACTER',
-      templateId: 'certificate-academic',
-      templateVersion: 'v1',
-      recipientType: 'student',
-      recipientId: 's2',
-      recipientNameSnapshot: 'Hermione Granger',
-      recipientIdSnapshot: 'STD-2026-002',
-      additionalSnapshot: {
-        class: 'Class 10',
-        section: 'Section A',
-        rollNumber: '02',
-        academicYear: '2025-2026',
-        bloodGroup: 'A+',
-        dob: '2010-09-19',
-        parentName: 'Mr. Granger'
-      },
-      academicSession: '2025-2026',
-      issuedBy: { name: 'Minerva McGonagall', role: 'principal' },
-      issuedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-      status: 'VALID',
-      verificationToken: 'b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef01',
-      purposeNote: 'Awarded for exemplary academic and behavioral conduct.'
-    };
-
-    FallbackDb.create('issuedCertificates', demo1);
-    FallbackDb.create('issuedCertificates', demo2);
-  }
+  // Empty default - no hardcoded/seed certificates
 };
 
 /**

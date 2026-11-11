@@ -42,77 +42,6 @@ import {
  * @description Homework assignment management, student submissions, and grading workflow.
  */
 
-// ─── Seed Data for Fallback Engine ───────────────────────────────────────────
-const HOMEWORK_SEED = [
-  {
-    id: "hw-1",
-    _id: "hw-1",
-    title: "Linear Equations Practice Set",
-    subject: "Mathematics",
-    instructions:
-      "Complete problems 1–25 from Chapter 4. Show all working steps. Diagrams must be drawn neatly with a ruler.",
-    className: "Class 10",
-    sectionName: "Section A",
-    teacherName: "Severus Snape",
-    issueDate: "2026-09-03",
-    dueDate: "2026-09-07",
-    totalMarks: 25,
-    priority: "high",
-    status: "published",
-    attachments: [
-      {
-        title: "Chapter 4 Reference Sheet",
-        url: "https://school.local/resources/ch4-ref.pdf",
-        type: "document",
-      },
-    ],
-    submissions: [],
-  },
-  {
-    id: "hw-2",
-    _id: "hw-2",
-    title: "Photosynthesis Lab Report",
-    subject: "Science",
-    instructions:
-      "Write a full lab report (min. 600 words) on the photosynthesis experiment conducted on Sep 2nd. Include hypothesis, observations, results, and conclusion.",
-    className: "Class 10",
-    sectionName: "Section A",
-    teacherName: "Filius Flitwick",
-    issueDate: "2026-09-02",
-    dueDate: "2026-09-10",
-    totalMarks: 20,
-    priority: "normal",
-    status: "published",
-    attachments: [],
-    submissions: [],
-  },
-  {
-    id: "hw-3",
-    _id: "hw-3",
-    title: "History Essay: Industrial Revolution",
-    subject: "History",
-    instructions:
-      "Write a 500-word analytical essay on the social impact of the Industrial Revolution. Use at least 3 cited sources.",
-    className: "Class 11",
-    sectionName: "All Sections",
-    teacherName: "Filius Flitwick",
-    issueDate: "2026-09-01",
-    dueDate: "2026-09-06",
-    totalMarks: 30,
-    priority: "high",
-    status: "published",
-    attachments: [],
-    submissions: [],
-  },
-];
-
-const seedFallbackHomework = () => {
-  const current = FallbackDb.find("homework") || [];
-  if (current.length) return current;
-  HOMEWORK_SEED.forEach((item) => FallbackDb.create("homework", item));
-  return FallbackDb.find("homework") || [];
-};
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
@@ -349,7 +278,7 @@ export const getHomework = async (req, res) => {
     if (checkFallback()) {
       const scoped = await filterRecordsForUser(
         req,
-        seedFallbackHomework(),
+        FallbackDb.find("homework") || [],
         { hideDraftForLearners: true }
       );
       const filtered = applyFallbackFilters(scoped, req.query);

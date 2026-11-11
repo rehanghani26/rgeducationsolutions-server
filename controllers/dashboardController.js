@@ -76,12 +76,12 @@ export const getStats = async (req, res) => {
         });
         const totalDays = presentCount + absentCount;
         const attendanceRate =
-          totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 95;
+          totalDays > 0 ? `${Math.round((presentCount / totalDays) * 100)}%` : "N/A";
 
         const fee = FallbackDb.findOne("fees", { studentId: student.id }) || {
           amountPaid: 0,
-          amountPending: 5000,
-          status: "unpaid",
+          amountPending: 0,
+          status: "N/A",
         };
         const upcomingExams = (FallbackDb.find("exams") || []).filter(
           (e) => e.status === "upcoming"
@@ -99,9 +99,9 @@ export const getStats = async (req, res) => {
           className: classDetails?.name || "—",
           sectionName: sectionDetails?.name || "—",
           classTeacher: classTeacherName,
-          attendanceRate: `${attendanceRate}%`,
-          daysPresent: presentCount || 18,
-          daysAbsent: absentCount || 1,
+          attendanceRate,
+          daysPresent: presentCount,
+          daysAbsent: absentCount,
           totalFees: fee.amountPaid + fee.amountPending,
           paidFees: fee.amountPaid,
           pendingFees: fee.amountPending,
@@ -140,7 +140,7 @@ export const getStats = async (req, res) => {
           designation: teacher.designation,
           department: teacher.department,
           salary: teacher.salary,
-          attendanceRate: `${teacher.attendanceRate || 100}%`,
+          attendanceRate: teacher.attendanceRate ? `${teacher.attendanceRate}%` : "N/A",
           classesCount,
           subjectsCount,
           pendingLeaves,
@@ -165,24 +165,24 @@ export const getStats = async (req, res) => {
         const totalStudents = students.length;
         const totalTeachers = teachers.length;
         const totalClasses = classes.length;
-        const totalStaff = totalTeachers + 5;
+        const totalStaff = totalTeachers;
 
         const today = new Date().toISOString().split("T")[0];
         const todayLog =
           attendance.find((a) => a.date === today) || attendance[0];
-        let todayAttendanceRate = 92;
+        let todayAttendanceRate = "N/A";
         if (todayLog && todayLog.records && todayLog.records.length > 0) {
           const presentCount = todayLog.records.filter(
             (r) => r.status === "present"
           ).length;
-          todayAttendanceRate = Math.round(
+          todayAttendanceRate = `${Math.round(
             (presentCount / todayLog.records.length) * 100
-          );
+          )}%`;
         }
 
         const feeCollectionToday = fees.reduce(
           (acc, f) => acc + (f.amountPaid > 0 ? f.amountPaid * 0.05 : 0),
-          2500
+          0
         );
         const pendingFees = fees.reduce((acc, f) => acc + f.amountPending, 0);
         const schoolExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
@@ -199,7 +199,7 @@ export const getStats = async (req, res) => {
           totalTeachers,
           totalClasses,
           totalStaff,
-          todayAttendance: `${todayAttendanceRate}%`,
+          todayAttendance: todayAttendanceRate,
           feeCollectionToday: Math.round(feeCollectionToday),
           pendingFees,
           schoolExpenses,
@@ -246,12 +246,12 @@ export const getStats = async (req, res) => {
         });
         const totalDays = presentCount + absentCount;
         const attendanceRate =
-          totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 95;
+          totalDays > 0 ? `${Math.round((presentCount / totalDays) * 100)}%` : "N/A";
 
         const fee = (await Fee.findOne({ studentId: student._id })) || {
           amountPaid: 0,
-          amountPending: 5000,
-          status: "unpaid",
+          amountPending: 0,
+          status: "N/A",
         };
         const upcomingExamsCount = await Exam.countDocuments({
           status: "upcoming",
@@ -277,9 +277,9 @@ export const getStats = async (req, res) => {
           className: student.classId?.name || "—",
           sectionName: student.sectionId?.name || "—",
           classTeacher: classTeacherName,
-          attendanceRate: `${attendanceRate}%`,
-          daysPresent: presentCount || 24,
-          daysAbsent: absentCount || 1,
+          attendanceRate,
+          daysPresent: presentCount,
+          daysAbsent: absentCount,
           totalFees: fee.amountPaid + fee.amountPending,
           paidFees: fee.amountPaid,
           pendingFees: fee.amountPending,
@@ -331,7 +331,7 @@ export const getStats = async (req, res) => {
           designation: teacher.designation,
           department: teacher.department,
           salary: teacher.salary,
-          attendanceRate: `${teacher.attendanceRate || 100}%`,
+          attendanceRate: teacher.attendanceRate ? `${teacher.attendanceRate}%` : "N/A",
           classesCount,
           subjectsCount,
           pendingLeaves,

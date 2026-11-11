@@ -33,63 +33,6 @@ import {
   sendError
 } from '../utils/responseUtil.js';
 
-const ONLINE_CLASS_SEED = [
-  {
-    id: 'oc-1',
-    _id: 'oc-1',
-    title: 'Mathematics Problem Solving Clinic',
-    subject: 'Mathematics',
-    agenda: 'Linear equations, word problems, and doubt clearing.',
-    className: 'Class 10',
-    sectionName: 'Section A',
-    teacherName: 'Severus Snape',
-    scheduledDate: '2026-09-05',
-    startTime: '10:00',
-    endTime: '10:45',
-    platform: 'Google Meet',
-    meetingLink: 'https://meet.google.com/school-class-10a-maths',
-    meetingId: 'school-class-10a-maths',
-    passcode: 'class10',
-    status: 'scheduled',
-    capacity: 60,
-    resources: [{ title: 'Pre-class worksheet', url: 'https://school.local/resources/math-worksheet', type: 'document' }],
-    attendance: [],
-  },
-  {
-    id: 'oc-2',
-    _id: 'oc-2',
-    title: 'Science Lab Safety Briefing',
-    subject: 'Science',
-    agenda: 'Virtual lab safety rules and experiment preparation.',
-    className: 'Class 11',
-    sectionName: 'All Sections',
-    teacherName: 'Filius Flitwick',
-    scheduledDate: '2026-09-06',
-    startTime: '12:00',
-    endTime: '12:40',
-    platform: 'Zoom',
-    meetingLink: 'https://zoom.us/j/school-class-11-science',
-    meetingId: 'school-class-11-science',
-    passcode: 'science11',
-    status: 'scheduled',
-    capacity: 90,
-    resources: [],
-    attendance: [],
-  },
-];
-
-/**
- * Seeds fallback database with default virtual classroom sessions if none exist.
- *
- * @returns {Array<Object>} Online classes list.
- */
-const seedFallbackOnlineClasses = () => {
-  const current = FallbackDb.find('onlineClasses') || [];
-  if (current.length) return current;
-  ONLINE_CLASS_SEED.forEach((item) => FallbackDb.create('onlineClasses', item));
-  return FallbackDb.find('onlineClasses') || [];
-};
-
 /**
  * Normalizes string for case-insensitive comparison.
  *
@@ -325,7 +268,7 @@ export const getOnlineClasses = async (req, res) => {
     const { page, limit, skip, sort } = parsePagination(req.query);
 
     if (checkFallback()) {
-      const scoped = await filterRecordsForUser(req, seedFallbackOnlineClasses());
+      const scoped = await filterRecordsForUser(req, FallbackDb.find('onlineClasses') || []);
       const filtered = applyFallbackFilters(scoped, req.query);
       const ordered = sortRecords(filtered, sort);
       const data = ordered.slice((page - 1) * limit, page * limit);

@@ -32,12 +32,12 @@ export const getBudgets = async (req, res) => {
   try {
     if (checkFallback()) {
       const budgets = FallbackDb.find('budgetAllocations') || [];
-      return sendSuccess(res, undefined, { budgets });
+      return sendSuccess(res, undefined, { budgets }, 200, { budgets });
     }
     const budgets = await BudgetAllocation.find()
       .populate('sessionId', 'sessionName startDate endDate isCurrent')
       .sort({ createdAt: -1 });
-    return sendSuccess(res, undefined, { budgets });
+    return sendSuccess(res, undefined, { budgets }, 200, { budgets });
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
   }
@@ -62,17 +62,18 @@ export const getBudgetBySession = async (req, res) => {
         // Find session to get name
         const sessions = FallbackDb.find('academicSessions') || [];
         const sess = sessions.find((s) => String(s._id) === String(sessionId));
+        const sessionName = sess ? sess.sessionName : '';
         return sendSuccess(res, 'No budget allocated yet for this session', {
           budget: null,
-          sessionName: sess ? sess.sessionName : '',
-        });
+          sessionName,
+        }, 200, { budget: null, sessionName });
       }
 
       const salaryRemaining = Math.max(0, (budget.salaryBudget || 0) - (budget.salarySpent || 0));
       const reqRemaining = Math.max(0, (budget.schoolRequirementsBudget || 0) - (budget.schoolRequirementsSpent || 0));
       const bufferRemaining = Math.max(0, (budget.operationalBufferBudget || 0) - (budget.operationalBufferSpent || 0));
 
-      return sendSuccess(res, undefined, {
+      const payload = {
         budget: {
           ...budget,
           salaryRemaining,
@@ -81,7 +82,9 @@ export const getBudgetBySession = async (req, res) => {
           totalSpent: (budget.salarySpent || 0) + (budget.schoolRequirementsSpent || 0) + (budget.operationalBufferSpent || 0),
           totalRemaining: Math.max(0, (budget.totalBudget || 0) - ((budget.salarySpent || 0) + (budget.schoolRequirementsSpent || 0) + (budget.operationalBufferSpent || 0))),
         },
-      });
+      };
+
+      return sendSuccess(res, undefined, payload, 200, payload);
     }
 
     const budget = (sessionId && isValidObjectId(sessionId))
@@ -92,10 +95,11 @@ export const getBudgetBySession = async (req, res) => {
       const session = (sessionId && isValidObjectId(sessionId))
         ? await AcademicSession.findById(sessionId)
         : null;
+      const sessionName = session ? session.sessionName : '';
       return sendSuccess(res, 'No budget allocated yet for this session', {
         budget: null,
-        sessionName: session ? session.sessionName : '',
-      });
+        sessionName,
+      }, 200, { budget: null, sessionName });
     }
 
     const salaryRemaining = Math.max(0, budget.salaryBudget - budget.salarySpent);
@@ -104,7 +108,7 @@ export const getBudgetBySession = async (req, res) => {
     const totalSpent = budget.salarySpent + budget.schoolRequirementsSpent + budget.operationalBufferSpent;
     const totalRemaining = Math.max(0, budget.totalBudget - totalSpent);
 
-    return sendSuccess(res, undefined, {
+    const payload = {
       budget: {
         ...budget.toObject(),
         salaryRemaining,
@@ -113,7 +117,9 @@ export const getBudgetBySession = async (req, res) => {
         totalSpent,
         totalRemaining,
       },
-    });
+    };
+
+    return sendSuccess(res, undefined, payload, 200, payload);
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
   }
@@ -185,7 +191,7 @@ export const saveBudget = async (req, res) => {
         updatedAt: new Date().toISOString(),
       };
       budgets.push(newBudget);
-      return sendCreated(res, 'Budget allocated successfully', { budget: newBudget });
+      return sendCreated(res, 'Budget allocated successfully', { budget: newBudget }, { budget: newBudget });
     }
 
     let budget = await BudgetAllocation.findOne({ sessionId });
@@ -197,7 +203,7 @@ export const saveBudget = async (req, res) => {
       if (notes) budget.notes = notes;
       if (sessionName) budget.sessionName = sessionName;
       await budget.save();
-      return sendSuccess(res, 'Budget updated successfully', { budget });
+      return sendSuccess(res, 'Budget updated successfully', { budget }, 200, { budget });
     }
 
     // Lookup session name if omitted
@@ -223,7 +229,7 @@ export const saveBudget = async (req, res) => {
     });
 
     await budget.save();
-    return sendCreated(res, 'Budget allocated successfully', { budget });
+    return sendCreated(res, 'Budget allocated successfully', { budget }, { budget });
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
   }
@@ -303,7 +309,7 @@ export const reviseBudget = async (req, res) => {
         revisedAt: new Date().toISOString(),
       });
 
-      return sendSuccess(res, 'Revised budget committed successfully', { budget });
+      return sendSuccess(res, 'Revised budget committed successfully', { budget }, 200, { budget });
     }
 
     const searchOr = [{ sessionName: sessionId }];
@@ -354,7 +360,7 @@ export const reviseBudget = async (req, res) => {
     });
 
     await budget.save();
-    return sendSuccess(res, 'Revised budget committed successfully', { budget });
+    return sendSuccess(res, 'Revised budget committed successfully', { budget }, 200, { budget });
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
   }
