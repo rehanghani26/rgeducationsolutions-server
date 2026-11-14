@@ -144,3 +144,121 @@ export const cleanAttachments = (attachments = []) => {
     }));
 };
 
+/**
+ * Formats a number into Indian Rupee Currency string.
+ *
+ * @param {number|string} [val=0] - Numeric amount.
+ * @param {string} [currency='₹'] - Currency symbol.
+ * @returns {string} Formatted currency.
+ */
+export const formatCurrency = (val = 0, currency = '₹') => {
+  const n = Number(val);
+  if (Number.isNaN(n)) return `${currency}0`;
+  return `${currency}${n.toLocaleString('en-IN')}`;
+};
+
+/**
+ * Formats a date into a localized string representation.
+ *
+ * @param {Date|string|number} date - Date to format.
+ * @param {Intl.DateTimeFormatOptions} [options] - Format options.
+ * @param {string} [fallback='—'] - Fallback string.
+ * @returns {string}
+ */
+export const formatDate = (
+  date,
+  options = { day: 'numeric', month: 'short', year: 'numeric' },
+  fallback = '—'
+) => {
+  if (!date) return fallback;
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return String(date || fallback);
+  return d.toLocaleDateString('en-IN', options);
+};
+
+/**
+ * Formats date and time into a readable timestamp.
+ *
+ * @param {Date|string|number} date
+ * @param {string} [fallback='—']
+ * @returns {string}
+ */
+export const formatDateTime = (date, fallback = '—') => {
+  if (!date) return fallback;
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return String(date || fallback);
+  return d.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
+
+/**
+ * Month names list for server-side lookup.
+ */
+export const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+/**
+ * Converts a month name into a 1-based index (e.g., "January" -> 1).
+ *
+ * @param {string} monthName - Month name string.
+ * @returns {number} 1-based month index (1-12).
+ */
+export const getMonthNumber = (monthName) => {
+  if (!monthName) return new Date().getMonth() + 1;
+  const target = String(monthName).toLowerCase().trim();
+  const idx = MONTH_NAMES.findIndex((m) => m.toLowerCase() === target);
+  return idx > -1 ? idx + 1 : new Date().getMonth() + 1;
+};
+
+/**
+ * Converts a month number (1-12 or 0-11) into a month name.
+ *
+ * @param {number|string} monthNum - Month number.
+ * @param {boolean} [isZeroBased=false] - Whether monthNum is 0-indexed.
+ * @returns {string} Month name.
+ */
+export const getMonthName = (monthNum, isZeroBased = false) => {
+  const num = Number(monthNum);
+  if (Number.isNaN(num)) return '';
+  const idx = isZeroBased ? num : num - 1;
+  return MONTH_NAMES[idx] || '';
+};
+
+/**
+ * Parses and resolves month string and year number.
+ *
+ * @param {string} [monthStr] - e.g. "November 2026" or "November"
+ * @param {number|string} [yearVal] - e.g. 2026
+ * @returns {{ month: string, monthName: string, monthNumber: number, year: number }}
+ */
+export const parseMonthYear = (monthStr, yearVal) => {
+  const now = new Date();
+  const year = yearVal ? Number(yearVal) : now.getFullYear();
+  let month = monthStr;
+  if (!month) {
+    month = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(now);
+  }
+  const monthName = String(month).split(' ')[0];
+  const monthNumber = getMonthNumber(monthName);
+  return { month, monthName, monthNumber, year };
+};
+
+

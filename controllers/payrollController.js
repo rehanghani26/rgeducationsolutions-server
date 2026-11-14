@@ -16,8 +16,18 @@ import Expense from '../models/Expense.js';
 import Attendance from '../models/Attendance.js';
 import Leave from '../models/Leave.js';
 
-// Utilities
-import { isValidObjectId, escapeRegex } from '../utils/commonUtil.js';
+// Utilities & Constants
+import {
+  isValidObjectId,
+  escapeRegex,
+  getMonthNumber as getCommonMonthNumber,
+  parseMonthYear as parseCommonMonthYear,
+  formatCurrency,
+} from '../utils/commonUtil.js';
+import {
+  EXCLUDED_PAYROLL_ROLES as CENTRAL_EXCLUDED_ROLES,
+  MONTH_NAMES as CENTRAL_MONTH_NAMES,
+} from '../constants/index.js';
 import {
   sendSuccess,
   sendCreated,
@@ -30,29 +40,9 @@ import {
 /**
  * Roles that are strictly excluded from staff payroll processing.
  */
-export const EXCLUDED_PAYROLL_ROLES = [
-  'super-admin',
-  'school-admin',
-  'admin',
-  'director',
-  'student',
-  'parent',
-];
+export const EXCLUDED_PAYROLL_ROLES = CENTRAL_EXCLUDED_ROLES;
 
-const MONTH_NAMES = [
-  'january',
-  'february',
-  'march',
-  'april',
-  'may',
-  'june',
-  'july',
-  'august',
-  'september',
-  'october',
-  'november',
-  'december',
-];
+const MONTH_NAMES = CENTRAL_MONTH_NAMES;
 
 /**
  * Converts a month name into a 1-based index (e.g., "January" -> 1).
@@ -60,10 +50,7 @@ const MONTH_NAMES = [
  * @param {string} monthName - Month name string.
  * @returns {number} 1-based month index.
  */
-export const getMonthNumber = (monthName) => {
-  const idx = MONTH_NAMES.indexOf(String(monthName).toLowerCase().trim());
-  return idx > -1 ? idx + 1 : new Date().getMonth() + 1;
-};
+export const getMonthNumber = getCommonMonthNumber;
 
 /**
  * Parses and resolves month string and year number.
@@ -72,17 +59,7 @@ export const getMonthNumber = (monthName) => {
  * @param {number|string} [yearVal] - e.g. 2026
  * @returns {{ month: string, monthName: string, monthNumber: number, year: number }}
  */
-export const parseMonthYear = (monthStr, yearVal) => {
-  const now = new Date();
-  const year = yearVal ? Number(yearVal) : now.getFullYear();
-  let month = monthStr;
-  if (!month) {
-    month = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(now);
-  }
-  const monthName = String(month).split(' ')[0];
-  const monthNumber = getMonthNumber(monthName);
-  return { month, monthName, monthNumber, year };
-};
+export const parseMonthYear = parseCommonMonthYear;
 
 /**
  * Resolves the target academic session by ID or falls back to active session.
@@ -1028,10 +1005,7 @@ export const getStaffPayrollDetails = async (req, res) => {
     const sessionSummaries = Array.from(sessionMap.values());
 
     // 6. Chronological Month-wise Status Ledger (From joining date to current cycle)
-    const monthNames = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
-    ];
+    const monthNames = MONTH_NAMES;
     const now = new Date();
     const curYear = now.getFullYear();
     const curMonthIndex = now.getMonth();

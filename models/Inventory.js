@@ -1,5 +1,29 @@
 import mongoose from 'mongoose';
 
+const InventoryItemLineSchema = new mongoose.Schema(
+  {
+    catalogId: { type: String, default: '' },
+    name: { type: String, required: true, trim: true },
+    sku: { type: String, required: true, trim: true, uppercase: true },
+    description: { type: String, default: '', trim: true },
+    imageUrl: { type: String, default: '', trim: true },
+    category: { type: String, default: 'General' },
+    subcategory: { type: String, default: '', trim: true },
+    quantity: { type: Number, required: true, default: 1, min: 0 },
+    unit: { type: String, default: 'pcs', trim: true },
+    unitCost: { type: Number, default: 0, min: 0 },
+    price: { type: Number, default: 0, min: 0 },
+    gstRate: { type: Number, default: 12, min: 0 },
+    gstAmount: { type: Number, default: 0, min: 0 },
+    totalCostWithTax: { type: Number, default: 0, min: 0 },
+    minStockLevel: { type: Number, default: 5 },
+    maxStockLevel: { type: Number, default: 500 },
+    reorderQuantity: { type: Number, default: 20 },
+    location: { type: String, default: 'Main Store' },
+  },
+  { _id: true }
+);
+
 const InventorySchema = new mongoose.Schema(
   {
     name: {
@@ -15,6 +39,11 @@ const InventorySchema = new mongoose.Schema(
       uppercase: true,
     },
     description: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    imageUrl: {
       type: String,
       trim: true,
       default: '',
@@ -45,6 +74,27 @@ const InventorySchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: '',
+    },
+    items: [InventoryItemLineSchema],
+    itemCount: {
+      type: Number,
+      default: 1,
+    },
+    totalQuantity: {
+      type: Number,
+      default: 0,
+    },
+    subtotal: {
+      type: Number,
+      default: 0,
+    },
+    totalGst: {
+      type: Number,
+      default: 0,
+    },
+    grandTotal: {
+      type: Number,
+      default: 0,
     },
     quantity: {
       type: Number,
@@ -83,6 +133,54 @@ const InventorySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    gstRate: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    gstAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    shippingCharges: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    otherCharges: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalCostWithTax: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    expectedDeliveryDate: {
+      type: Date,
+    },
+    actualPurchaseDate: {
+      type: Date,
+    },
+    invoiceAttachment: {
+      filename: { type: String, default: '' },
+      originalName: { type: String, default: '' },
+      url: { type: String, default: '' },
+      mimeType: { type: String, default: '' },
+      size: { type: Number, default: 0 },
+    },
+    additionalAttachments: [
+      {
+        filename: { type: String, default: '' },
+        originalName: { type: String, default: '' },
+        url: { type: String, default: '' },
+        mimeType: { type: String, default: '' },
+        size: { type: Number, default: 0 },
+      },
+    ],
     location: {
       type: String,
       trim: true,

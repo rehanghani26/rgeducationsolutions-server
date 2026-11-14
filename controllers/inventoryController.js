@@ -1,13 +1,19 @@
 // server/controllers/inventoryController.js
-import mongoose from 'mongoose';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { checkFallback } from '../config/db.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const INVENTORY_UPLOAD_DIR = path.join(__dirname, '../uploads/inventory');
 
 // Models
 import Inventory from '../models/Inventory.js';
 import Vendor from '../models/Vendor.js';
+import InventoryTransaction from '../models/InventoryTransaction.js';
 import InventoryPurchase from '../models/InventoryPurchase.js';
 import InventoryIssuance from '../models/InventoryIssuance.js';
-import InventoryTransaction from '../models/InventoryTransaction.js';
 import BudgetAllocation from '../models/BudgetAllocation.js';
 import AcademicSession from '../models/AcademicSession.js';
 
@@ -114,14 +120,19 @@ export const getInventoryById = async (req, res) => {
     } else {
       item = await Inventory.findById(id).populate('vendorId');
       if (item) {
-        const [txList, pList, iList] = await Promise.all([
-          InventoryTransaction.find({ itemId: id }).sort({ timestamp: -1 }).limit(50),
-          InventoryPurchase.find({ 'items.itemId': id }).populate('vendorId').sort({ billDate: -1 }),
-          InventoryIssuance.find({ 'items.itemId': id }).sort({ issuanceDate: -1 }),
-        ]);
-        transactions = txList;
-        purchases = pList;
-        issuances = iList;
+        transactions = await InventoryTransaction.find({ itemId: id }).sort({ timestamp: -1 }).limit(50);
+
+        try {
+          purchases = await InventoryPurchase.find({ 'items.itemId': id }).populate('vendorId').sort({ billDate: -1 });
+        } catch (_) {
+          purchases = [];
+        }
+
+        try {
+          issuances = await InventoryIssuance.find({ 'items.itemId': id }).sort({ issuanceDate: -1 });
+        } catch (_) {
+          issuances = [];
+        }
       }
     }
 
@@ -176,6 +187,55 @@ export const getInventoryById = async (req, res) => {
 };
 
 /**
+ * Normalizes incoming inventory product fields including GST, delivery dates, and attachments.
+ */
+const buildInventoryPayload = (data, sku) => {
+  const quantity = Number(data.quantity) || 0;
+  const unitCost = Number(data.unitCost) || Number(data.price) || 0;
+  const price = Number(data.price) || unitCost;
+  const gstRate = Math.max(0, Number(data.gstRate) || 0);
+  const baseSubtotal = quantity * unitCost;
+  const gstAmount = data.gstAmount !== undefined ? Number(data.gstAmount) || 0 : (baseSubtotal * gstRate) / 100;
+  const shippingCharges = Math.max(0, Number(data.shippingCharges) || 0);
+  const otherCharges = Math.max(0, Number(data.otherCharges) || 0);
+  const totalCostWithTax =
+    data.totalCostWithTax !== undefined
+      ? Number(data.totalCostWithTax) || 0
+      : baseSubtotal + gstAmount + shippingCharges + otherCharges;
+  const minStockLevel = Number(data.minStockLevel) || 5;
+  const items = Array.isArray(data.items) && data.items.length > 0 ? data.items : [];
+
+  return {
+    ...data,
+    sku,
+    imageUrl: data.imageUrl || (items[0]?.imageUrl || ''),
+    quantity,
+    totalQuantity: data.totalQuantity !== undefined ? Number(data.totalQuantity) : quantity,
+    unit: data.unit || 'pcs',
+    minStockLevel,
+    maxStockLevel: Number(data.maxStockLevel) || 1000,
+    reorderQuantity: Number(data.reorderQuantity) || 20,
+    price,
+    unitCost,
+    gstRate,
+    gstAmount,
+    shippingCharges,
+    otherCharges,
+    totalCostWithTax,
+    grandTotal: data.grandTotal !== undefined ? Number(data.grandTotal) : totalCostWithTax,
+    subtotal: data.subtotal !== undefined ? Number(data.subtotal) : baseSubtotal,
+    totalGst: data.totalGst !== undefined ? Number(data.totalGst) : gstAmount,
+    items,
+    itemCount: items.length || 1,
+    expectedDeliveryDate: data.expectedDeliveryDate || null,
+    actualPurchaseDate: data.actualPurchaseDate || null,
+    invoiceAttachment: data.invoiceAttachment || undefined,
+    additionalAttachments: Array.isArray(data.additionalAttachments) ? data.additionalAttachments : [],
+    status: quantity <= 0 ? 'out-of-stock' : quantity <= minStockLevel ? 'low-stock' : 'in-stock',
+  };
+};
+
+/**
  * Creates a new inventory stock record.
  */
 export const createInventoryItem = async (req, res) => {
@@ -189,6 +249,7 @@ export const createInventoryItem = async (req, res) => {
     const sku = data.sku
       ? data.sku.toUpperCase()
       : `SKU-${Date.now().toString(36).toUpperCase()}`;
+    const payload = buildInventoryPayload(data, sku);
 
     if (checkFallback()) {
       const existing = FallbackDb.find('inventory') || [];
@@ -197,21 +258,12 @@ export const createInventoryItem = async (req, res) => {
       }
 
       newRecord = FallbackDb.create('inventory', {
-        ...data,
-        sku,
-        quantity: Number(data.quantity) || 0,
-        unit: data.unit || 'pcs',
-        minStockLevel: Number(data.minStockLevel) || 5,
-        maxStockLevel: Number(data.maxStockLevel) || 1000,
-        reorderQuantity: Number(data.reorderQuantity) || 20,
-        price: Number(data.price) || Number(data.unitCost) || 0,
-        unitCost: Number(data.unitCost) || Number(data.price) || 0,
-        status: (Number(data.quantity) || 0) <= (Number(data.minStockLevel) || 5) ? 'low-stock' : 'in-stock',
+        ...payload,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
     } else {
-      const item = new Inventory({ ...data, sku });
+      const item = new Inventory(payload);
       newRecord = await item.save();
     }
 
@@ -252,6 +304,232 @@ export const createInventoryItem = async (req, res) => {
     });
 
     return sendCreated(res, 'Inventory item created successfully', { item: newRecord });
+  } catch (error) {
+    return sendError(res, error.message || 'Server error', 500, error);
+  }
+};
+
+/**
+ * Uploads invoice PDF and additional inventory attachments (PDF, PSD, Excel, images, docs).
+ */
+export const uploadInventoryAttachments = async (req, res) => {
+  try {
+    const uploadedFiles = req.files && req.files.length > 0 ? req.files : req.file ? [req.file] : [];
+    if (uploadedFiles.length === 0) {
+      return sendBadRequest(res, 'No file(s) provided for upload.');
+    }
+
+    if (!fs.existsSync(INVENTORY_UPLOAD_DIR)) {
+      fs.mkdirSync(INVENTORY_UPLOAD_DIR, { recursive: true });
+    }
+
+    const files = uploadedFiles.map((file) => {
+      const ext = path.extname(file.originalname || '');
+      const safeBase = path
+        .basename(file.originalname || 'file', ext)
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 40);
+      const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e6)}-${safeBase}${ext}`;
+      const destPath = path.join(INVENTORY_UPLOAD_DIR, uniqueName);
+      fs.writeFileSync(destPath, file.buffer);
+
+      return {
+        filename: uniqueName,
+        originalName: file.originalname,
+        url: `/uploads/inventory/${uniqueName}`,
+        mimeType: file.mimetype,
+        size: file.size,
+      };
+    });
+
+    return sendCreated(res, 'Attachment(s) uploaded successfully', { files });
+  } catch (error) {
+    return sendError(res, error.message || 'Failed to upload attachment(s)', 500, error);
+  }
+};
+
+/**
+ * Creates multiple inventory products in one batch with shared procurement metadata,
+ * GST calculations, shipping/other charges, delivery dates, and attachments.
+ */
+export const createBulkInventoryItems = async (req, res) => {
+  try {
+    const {
+      items = [],
+      vendorId = '',
+      expectedDeliveryDate = null,
+      actualPurchaseDate = null,
+      shippingCharges = 0,
+      otherCharges = 0,
+      invoiceAttachment = null,
+      additionalAttachments = [],
+    } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return sendBadRequest(res, 'At least one product is required.');
+    }
+
+    const formattedItems = items.map((raw, idx) => {
+      const qty = Math.max(0, Number(raw.quantity) || 0);
+      const unitCost = Math.max(0, Number(raw.unitCost) || 0);
+      const price = Math.max(0, Number(raw.price) || unitCost);
+      const gstRate = Math.max(0, Number(raw.gstRate) || 0);
+      const base = qty * unitCost;
+      const gstAmount = raw.gstAmount !== undefined ? Number(raw.gstAmount) || 0 : (base * gstRate) / 100;
+      const itemSku = raw.sku
+        ? String(raw.sku).trim().toUpperCase()
+        : `SKU-${Date.now().toString(36).toUpperCase()}-${idx + 1}`;
+
+      return {
+        catalogId: raw.catalogId || '',
+        name: String(raw.name || '').trim(),
+        sku: itemSku,
+        description: (raw.description || '').trim(),
+        imageUrl: raw.imageUrl || '',
+        category: raw.category || 'General',
+        subcategory: (raw.subcategory || '').trim(),
+        quantity: qty,
+        unit: raw.unit || 'pcs',
+        unitCost,
+        price,
+        gstRate,
+        gstAmount,
+        totalCostWithTax: base + gstAmount,
+        minStockLevel: Number(raw.minStockLevel) || 5,
+        maxStockLevel: Number(raw.maxStockLevel) || 500,
+        reorderQuantity: Number(raw.reorderQuantity) || 20,
+        location: raw.location || 'Main Store',
+      };
+    });
+
+    for (let idx = 0; idx < formattedItems.length; idx += 1) {
+      if (!formattedItems[idx].name || !formattedItems[idx].category) {
+        return sendBadRequest(res, `Row ${idx + 1}: Product name and category are required.`);
+      }
+    }
+
+    const totalUnits = formattedItems.reduce((s, it) => s + it.quantity, 0);
+    const subtotal = formattedItems.reduce((s, it) => s + (it.quantity * it.unitCost), 0);
+    const totalGst = formattedItems.reduce((s, it) => s + it.gstAmount, 0);
+    const numShipping = Math.max(0, Number(shippingCharges) || 0);
+    const numOther = Math.max(0, Number(otherCharges) || 0);
+    const grandTotal = subtotal + totalGst + numShipping + numOther;
+
+    // Generate unique order/inventory SKU
+    let primarySku = formattedItems[0].sku;
+    if (formattedItems.length > 1) {
+      primarySku = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+    } else {
+      if (checkFallback()) {
+        const existing = FallbackDb.find('inventory') || [];
+        if (existing.some((x) => x.sku === primarySku)) {
+          primarySku = `${primarySku}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+        }
+      } else {
+        const exists = await Inventory.findOne({ sku: primarySku }).select('_id').lean();
+        if (exists) {
+          primarySku = `${primarySku}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+        }
+      }
+    }
+
+    const primaryName = formattedItems.length === 1
+      ? formattedItems[0].name
+      : formattedItems.length === 2
+      ? `${formattedItems[0].name} & ${formattedItems[1].name}`
+      : `${formattedItems[0].name} (+${formattedItems.length - 1} items)`;
+
+    const minStock = Math.min(...formattedItems.map((i) => i.minStockLevel || 5));
+    const maxStock = Math.max(...formattedItems.map((i) => i.maxStockLevel || 500));
+
+    const payload = {
+      name: primaryName,
+      sku: primarySku,
+      description: formattedItems.length === 1
+        ? formattedItems[0].description
+        : `Inventory intake of ${formattedItems.length} products: ${formattedItems.map((i) => i.name).join(', ')}`,
+      imageUrl: formattedItems[0].imageUrl || '',
+      category: formattedItems[0].category || 'General',
+      subcategory: formattedItems[0].subcategory || (formattedItems.length > 1 ? 'Multi-Product Order' : ''),
+      quantity: totalUnits,
+      totalQuantity: totalUnits,
+      unit: formattedItems.every((i) => i.unit === formattedItems[0].unit) ? formattedItems[0].unit : 'items',
+      unitCost: subtotal,
+      price: subtotal,
+      gstRate: formattedItems[0].gstRate || 0,
+      gstAmount: totalGst,
+      totalGst,
+      subtotal,
+      shippingCharges: numShipping,
+      otherCharges: numOther,
+      totalCostWithTax: grandTotal,
+      grandTotal,
+      expectedDeliveryDate: expectedDeliveryDate || null,
+      actualPurchaseDate: actualPurchaseDate || null,
+      invoiceAttachment: invoiceAttachment || undefined,
+      additionalAttachments: Array.isArray(additionalAttachments) ? additionalAttachments : [],
+      location: formattedItems[0].location || 'Main Store',
+      vendorId: vendorId || undefined,
+      itemCount: formattedItems.length,
+      items: formattedItems,
+      minStockLevel: minStock,
+      maxStockLevel: maxStock,
+      reorderQuantity: formattedItems[0].reorderQuantity || 20,
+      status: totalUnits <= 0 ? 'out-of-stock' : totalUnits <= minStock ? 'low-stock' : 'in-stock',
+    };
+
+    let newRecord = null;
+    if (checkFallback()) {
+      newRecord = FallbackDb.create('inventory', {
+        ...payload,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      const doc = new Inventory(payload);
+      newRecord = await doc.save();
+    }
+
+    if (newRecord.quantity > 0) {
+      const txData = {
+        transactionNumber: `TXN-ORD-${newRecord.sku}`,
+        timestamp: new Date(),
+        type: 'STOCK_ADJUST_ADD',
+        itemId: newRecord.id || newRecord._id,
+        itemName: newRecord.name,
+        sku: newRecord.sku,
+        quantity: newRecord.quantity,
+        unit: newRecord.unit,
+        unitPrice: newRecord.unitCost,
+        totalValue: newRecord.totalCostWithTax,
+        partyName: 'Inventory Order Intake',
+        balanceAfter: newRecord.quantity,
+        performedByName: req.user?.name || 'Admin',
+        reason: `Intake of ${formattedItems.length} product(s)`,
+      };
+
+      if (checkFallback()) {
+        FallbackDb.create('inventoryTransactions', txData);
+      } else {
+        await InventoryTransaction.create(txData);
+      }
+    }
+
+    await logActivity({
+      userId: req.user?._id || req.user?.id,
+      action: 'CREATE',
+      module: 'inventory',
+      recordId: newRecord.id || newRecord._id,
+      details: `Added inventory order ${newRecord.name} (${newRecord.sku}) containing ${formattedItems.length} product(s)`,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
+    return sendCreated(
+      res,
+      `Inventory product record created successfully (${formattedItems.length} item${formattedItems.length === 1 ? '' : 's'})`,
+      { item: newRecord, items: [newRecord], count: 1 }
+    );
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
   }

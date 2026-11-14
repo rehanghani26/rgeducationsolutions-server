@@ -6,6 +6,7 @@
 import ClassTimetable from '../../models/ClassTimetable.js';
 import { checkFallback } from '../../config/db.js';
 import { FallbackDb } from '../../services/dbFallback.js';
+import { DAY_NAMES } from '../../constants/index.js';
 
 export const timetableToolDefinitions = [
   {
@@ -36,7 +37,7 @@ export const timetableToolDefinitions = [
   },
 ];
 
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAYS = DAY_NAMES;
 
 export const timetableToolExecutors = {
   async getClassTimetable(args, context) {

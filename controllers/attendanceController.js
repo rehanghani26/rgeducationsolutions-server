@@ -17,6 +17,7 @@ import { FallbackDb } from "../services/dbFallback.js";
 import { parsePagination, paginateResult } from "../utils/paginateQuery.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { escapeRegex, isValidObjectId } from "../utils/commonUtil.js";
+import { MONTH_NAMES } from "../constants/index.js";
 import {
   sendSuccess,
   sendCreated,
@@ -275,10 +276,7 @@ function extractAvailableFilters(records = []) {
   const classSet = new Set();
   const sectionSet = new Set();
 
-  const monthNames = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-  ];
+  const monthNames = MONTH_NAMES;
 
   records.forEach((r) => {
     const dVal = r.attendanceDate || r.date || r.createdAt;
