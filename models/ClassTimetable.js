@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const SlotAllocationSchema = new mongoose.Schema({
   day: { type: String, required: true }, // e.g. 'monday', 'tuesday', etc.
@@ -59,4 +60,5 @@ const ClassTimetableSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.model('ClassTimetable', ClassTimetableSchema);
+const ClassTimetable = mongoose.models.ClassTimetable || mongoose.model('ClassTimetable', ClassTimetableSchema);
+export default createDynamicModelProxy('ClassTimetable', ClassTimetable);

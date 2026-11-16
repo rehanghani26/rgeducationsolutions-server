@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const VendorSchema = new mongoose.Schema(
   {
@@ -136,4 +137,5 @@ VendorSchema.pre('save', async function (next) {
   next();
 });
 
-export default mongoose.model('Vendor', VendorSchema);
+const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', VendorSchema);
+export default createDynamicModelProxy('Vendor', Vendor);

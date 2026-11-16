@@ -19,6 +19,7 @@ import Subject from '../models/Subject.js';
 import Teacher from '../models/Teacher.js';
 import Transport from '../models/Transport.js';
 import User from '../models/User.js';
+import School from '../models/School.js';
 
 // 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
@@ -415,6 +416,15 @@ export const getSettings = async (req, res) => {
   try {
     const { category, includePortal, includeTemplates } = req.query;
 
+    const schoolId = req.user?.schoolId || req.schoolId;
+
+    let currentSchool = null;
+    if (schoolId) {
+      currentSchool = await School.findOne({
+        $or: [{ _id: schoolId }, { schoolId }],
+      }).lean();
+    }
+
     let config = null;
     if (checkFallback()) {
       config = FallbackDb.getSettings();
@@ -429,9 +439,37 @@ export const getSettings = async (req, res) => {
       }
 
       config = await query;
-      if (!config) {
-        config = new Setting({});
-        await config.save();
+
+      // If settings document doesn't exist for this school, initialize from onboarded School
+      if (!config || !config.schoolName) {
+        const seedData = {
+          schoolId: schoolId || (currentSchool ? currentSchool.schoolId || currentSchool._id : undefined),
+        };
+        if (currentSchool) {
+          seedData.schoolName = currentSchool.schoolName || '';
+          seedData.schoolCode = currentSchool.schoolCode || '';
+          seedData.contactEmail = currentSchool.contactEmail || '';
+          seedData.schoolPhone = currentSchool.schoolPhone || '';
+          seedData.alternatePhone = currentSchool.alternatePhone || '';
+          seedData.addressLine1 = currentSchool.address?.addressLine1 || '';
+          seedData.addressLine2 = currentSchool.address?.addressLine2 || '';
+          seedData.city = currentSchool.address?.city || '';
+          seedData.state = currentSchool.address?.state || '';
+          seedData.country = currentSchool.address?.country || 'India';
+          seedData.postalCode = currentSchool.address?.postalCode || '';
+          seedData.affiliationNumber = currentSchool.affiliationNumber || '';
+          seedData.board = currentSchool.board || 'CBSE';
+          seedData.schoolLogo = currentSchool.schoolLogo || '';
+          seedData.companyLogo = currentSchool.schoolLogo || '';
+          seedData.schoolMotto = currentSchool.schoolMotto || '';
+        }
+        if (!config) {
+          config = new Setting(seedData);
+          await config.save();
+        } else {
+          Object.assign(config, seedData);
+          await config.save();
+        }
       }
     }
 
@@ -460,6 +498,27 @@ export const getSettings = async (req, res) => {
       settings.schoolBanner = resolvedBanner;
     }
 
+    const schoolPayload = currentSchool || {
+      schoolId: schoolId || '',
+      schoolName: settings.schoolName || '',
+      schoolCode: settings.schoolCode || '',
+      collectionName: currentSchool?.collectionName || currentSchool?.schoolId || schoolId || settings.schoolCode || '',
+      contactEmail: settings.contactEmail || '',
+      schoolPhone: settings.schoolPhone || '',
+      address: {
+        addressLine1: settings.addressLine1 || '',
+        addressLine2: settings.addressLine2 || '',
+        city: settings.city || '',
+        state: settings.state || '',
+        country: settings.country || 'India',
+        postalCode: settings.postalCode || '',
+      },
+      board: settings.board || 'CBSE',
+      affiliationNumber: settings.affiliationNumber || '',
+      schoolLogo: settings.schoolLogo || '',
+      schoolMotto: settings.schoolMotto || '',
+    };
+
     if (category) {
       const categoryFilters = {
         profile: [
@@ -485,14 +544,23 @@ export const getSettings = async (req, res) => {
         allowedFields.forEach((key) => {
           if (settings[key] !== undefined) filtered[key] = settings[key];
         });
-        return res.json({ success: true, category, settings: filtered });
+        return res.json({ success: true, category, settings: filtered, school: schoolPayload });
       }
     }
 
-    return res.json({ success: true, settings });
+    return res.json({ success: true, settings, school: schoolPayload });
   } catch (err) {
     return sendError(res, 'Server error', 500, err);
   }
+};
+
+/**
+ * Retrieve current school institutional profile
+ *
+ * @route GET /api/erp/school
+ */
+export const getSchoolProfile = async (req, res) => {
+  return getSettings(req, res);
 };
 
 /**
@@ -522,22 +590,63 @@ export const updateSettings = async (req, res) => {
       data.companyLogo = data.schoolLogo;
     }
 
+    const schoolId = req.user?.schoolId || req.schoolId;
+
     let config = null;
     if (checkFallback()) {
       config = FallbackDb.updateSettings(data);
     } else {
       config = await Setting.findOneAndUpdate(
-        {},
+        { schoolId },
         { $set: data },
         { new: true, upsert: true }
       ).select('-portalSettings -defaultDocumentTemplates');
+
+      // Sync changes back to School master record if present
+      if (schoolId) {
+        const syncUpdates = {};
+        if (data.schoolName) syncUpdates.schoolName = data.schoolName;
+        if (data.schoolCode) syncUpdates.schoolCode = data.schoolCode;
+        if (data.contactEmail) syncUpdates.contactEmail = data.contactEmail;
+        if (data.schoolPhone) syncUpdates.schoolPhone = data.schoolPhone;
+        if (data.schoolLogo) syncUpdates.schoolLogo = data.schoolLogo;
+        if (data.schoolMotto) syncUpdates.schoolMotto = data.schoolMotto;
+        if (data.board) syncUpdates.board = data.board;
+        if (data.affiliationNumber) syncUpdates.affiliationNumber = data.affiliationNumber;
+        if (data.addressLine1 || data.city || data.state || data.country || data.postalCode) {
+          syncUpdates['address.addressLine1'] = data.addressLine1 || '';
+          syncUpdates['address.city'] = data.city || '';
+          syncUpdates['address.state'] = data.state || '';
+          syncUpdates['address.country'] = data.country || 'India';
+          syncUpdates['address.postalCode'] = data.postalCode || '';
+        }
+        if (Object.keys(syncUpdates).length > 0) {
+          await School.findOneAndUpdate(
+            { $or: [{ _id: schoolId }, { schoolId }] },
+            { $set: syncUpdates }
+          );
+        }
+      }
     }
 
     const settings = config?.toObject ? config.toObject() : { ...(config || {}) };
     delete settings.portalSettings;
     delete settings.defaultDocumentTemplates;
 
-    return res.json({ success: true, message: 'Configuration settings updated', settings });
+    return res.json({
+      success: true,
+      message: 'Configuration settings updated',
+      settings,
+      school: {
+        schoolId: schoolId || settings.schoolId || '',
+        schoolName: settings.schoolName || '',
+        schoolCode: settings.schoolCode || '',
+        collectionName: settings.schoolCode || schoolId || '',
+        contactEmail: settings.contactEmail || '',
+        schoolPhone: settings.schoolPhone || '',
+        schoolLogo: settings.schoolLogo || '',
+      },
+    });
   } catch (err) {
     return sendError(res, 'Server error', 500, err);
   }

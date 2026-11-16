@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 /**
  * StudentSessionHistory — one record per student per academic session.
@@ -133,4 +134,5 @@ StudentSessionHistorySchema.index(
   { unique: true }
 );
 
-export default mongoose.model('StudentSessionHistory', StudentSessionHistorySchema);
+const StudentSessionHistory = mongoose.models.StudentSessionHistory || mongoose.model('StudentSessionHistory', StudentSessionHistorySchema);
+export default createDynamicModelProxy('StudentSessionHistory', StudentSessionHistory);

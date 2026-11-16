@@ -1,6 +1,14 @@
 import mongoose from 'mongoose';
+import tenantContext, { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const AuditLogSchema = new mongoose.Schema({
+  schoolId: {
+    type: String,
+    default: () => tenantContext.getSchoolId() || 'GLOBAL',
+    uppercase: true,
+    trim: true,
+    index: true,
+  },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   action: {
     type: String,
@@ -20,4 +28,5 @@ AuditLogSchema.index({ timestamp: -1 });
 AuditLogSchema.index({ userId: 1 });
 AuditLogSchema.index({ module: 1, recordId: 1 });
 
-export default mongoose.model('AuditLog', AuditLogSchema);
+const AuditLog = mongoose.models.AuditLog || mongoose.model('AuditLog', AuditLogSchema);
+export default createDynamicModelProxy('AuditLog', AuditLog);

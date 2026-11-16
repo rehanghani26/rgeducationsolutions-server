@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const noticeSchema = new mongoose.Schema(
   {
@@ -16,4 +17,4 @@ const noticeSchema = new mongoose.Schema(
 );
 
 const Notice = mongoose.models.Notice || mongoose.model('Notice', noticeSchema);
-export default Notice;
+export default createDynamicModelProxy('Notice', Notice);

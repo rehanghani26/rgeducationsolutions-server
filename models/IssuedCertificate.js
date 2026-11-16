@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 /**
  * @model IssuedCertificate
@@ -190,4 +191,5 @@ IssuedCertificateSchema.index({ recipientId: 1, recipientType: 1, status: 1 });
 // Year-wise ordering for certificate number sequence generation
 IssuedCertificateSchema.index({ issuedAt: -1 });
 
-export default mongoose.model('IssuedCertificate', IssuedCertificateSchema);
+const IssuedCertificate = mongoose.models.IssuedCertificate || mongoose.model('IssuedCertificate', IssuedCertificateSchema);
+export default createDynamicModelProxy('IssuedCertificate', IssuedCertificate);

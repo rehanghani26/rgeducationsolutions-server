@@ -1,7 +1,15 @@
 import mongoose from "mongoose";
+import tenantPlugin from "../utils/tenantPlugin.js";
 
 const StudentSchema = new mongoose.Schema(
   {
+    schoolId: {
+      type: String,
+      required: [true, "schoolId is required for student isolation"],
+      index: true,
+      uppercase: true,
+      trim: true,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -18,11 +26,10 @@ const StudentSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    // Auto-generated globally unique: STD-2026-0001
+    // Scoped per school via compound index
     admissionNumber: {
       type: String,
       required: true,
-      unique: true,
       uppercase: true,
       trim: true,
     },
@@ -218,5 +225,11 @@ StudentSchema.index(
     partialFilterExpression: { rollNumber: { $ne: null } },
   }
 );
+
+// Multi-tenant scoped compound indexes
+StudentSchema.index({ schoolId: 1, admissionNumber: 1 }, { unique: true });
+StudentSchema.index({ schoolId: 1, class: 1, section: 1 });
+
+StudentSchema.plugin(tenantPlugin);
 
 export default mongoose.model("Student", StudentSchema);

@@ -1072,14 +1072,14 @@ async function findStudentByAnyIdentifier(identifier) {
 
 async function getSchoolBrandingInfo() {
   const defaults = {
-    schoolName: 'RGES International Academy',
+    schoolName: '',
     schoolLogo: '',
-    schoolAddress: 'Knowledge Park, Academic City',
-    schoolPhone: '+91 98765 43210',
-    schoolEmail: 'contact@rgesacademy.edu',
-    schoolWebsite: 'www.rgesacademy.edu',
-    principalName: 'Dr. Zafar Iqbal',
-    academicYear: '2026-27',
+    schoolAddress: '',
+    schoolPhone: '',
+    schoolEmail: '',
+    schoolWebsite: '',
+    principalName: '',
+    academicYear: '',
   };
 
   try {

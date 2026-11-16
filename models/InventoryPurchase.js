@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const PurchaseItemSchema = new mongoose.Schema({
   itemId: {
@@ -167,5 +168,6 @@ InventoryPurchaseSchema.pre('save', function (next) {
   next();
 });
 
-export default mongoose.model('InventoryPurchase', InventoryPurchaseSchema);
+const InventoryPurchase = mongoose.models.InventoryPurchase || mongoose.model('InventoryPurchase', InventoryPurchaseSchema);
+export default createDynamicModelProxy('InventoryPurchase', InventoryPurchase);
 

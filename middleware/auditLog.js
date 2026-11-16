@@ -1,5 +1,6 @@
 // 7. Utilities
 import { logActivity } from "../utils/activityLogger.js";
+import tenantContext from "../utils/tenantContext.js";
 
 /**
  * @file auditLog.js
@@ -66,6 +67,7 @@ export const auditMiddleware = (req, res, next) => {
         : methodToAction(req.method);
 
       logActivity({
+        schoolId: req.tenant?.schoolId || req.schoolId || req.user?.schoolId || tenantContext.getSchoolId(),
         userId: req.user._id || req.user.id,
         action,
         module: extractModule(req.originalUrl || req.path),

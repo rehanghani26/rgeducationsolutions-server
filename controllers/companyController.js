@@ -45,7 +45,7 @@ const ALLOWED_MIME_TYPES = new Set([
  *
  * @param {string} logoValue - S3 key (new uploads) or empty string (removal)
  */
-const saveCompanyLogo = async (logoValue) => {
+const saveCompanyLogo = async (req, logoValue) => {
   const updateData = {
     companyLogo: logoValue || "",
     schoolLogo: logoValue || "",
@@ -56,17 +56,23 @@ const saveCompanyLogo = async (logoValue) => {
     return FallbackDb.updateSettings(updateData);
   }
 
-  return Setting.findOneAndUpdate({}, updateData, { new: true, upsert: true });
+  const schoolId = req.user?.schoolId || req.schoolId;
+  return Setting.findOneAndUpdate(
+    { schoolId },
+    { $set: updateData },
+    { new: true, upsert: true }
+  );
 };
 
-const getCompanySettings = async () => {
+const getCompanySettings = async (req) => {
   if (checkFallback()) {
     return FallbackDb.getSettings();
   }
 
+  const schoolId = req.user?.schoolId || req.schoolId;
   let settings = await Setting.findOne();
-  if (!settings) {
-    settings = await Setting.create({});
+  if (!settings && schoolId) {
+    settings = await Setting.create({ schoolId });
   }
   return settings;
 };
@@ -81,10 +87,10 @@ const getCompanySettings = async () => {
  */
 export const getCompanyProfile = async (req, res) => {
   try {
-    const settings = await getCompanySettings();
-    const rawLogo = settings?.companyLogo || settings?.schoolLogo || "";
-    const name = settings?.schoolName || "RG EduCore";
-    const motto = settings?.schoolMotto || "School ERP";
+    const settings = await getCompanySettings(req);
+    const rawLogo = settings?.companyLogo || settings?.schoolLogo || req.tenant?.schoolLogo || "";
+    const name = settings?.schoolName || req.tenant?.schoolName || "RG EduCore";
+    const motto = settings?.schoolMotto || req.tenant?.schoolMotto || "School ERP";
 
     const logo = await resolveFileUrl(rawLogo, 3600);
 

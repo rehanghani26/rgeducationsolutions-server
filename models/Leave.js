@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const LeaveSchema = new mongoose.Schema(
   {
@@ -78,5 +79,6 @@ LeaveSchema.index({ studentId: 1, status: 1 });
 LeaveSchema.index({ applicantRole: 1, status: 1 });
 LeaveSchema.index({ startDate: 1, endDate: 1 });
 
-export default mongoose.models.Leave || mongoose.model("Leave", LeaveSchema);
+const Leave = mongoose.models.Leave || mongoose.model('Leave', LeaveSchema);
+export default createDynamicModelProxy('Leave', Leave);
 

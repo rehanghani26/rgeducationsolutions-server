@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const BudgetRevisionSchema = new mongoose.Schema({
   revisedBy: {
@@ -109,5 +110,6 @@ const BudgetAllocationSchema = new mongoose.Schema(
   }
 );
 
-export default mongoose.model('BudgetAllocation', BudgetAllocationSchema);
+const BudgetAllocation = mongoose.models.BudgetAllocation || mongoose.model('BudgetAllocation', BudgetAllocationSchema);
+export default createDynamicModelProxy('BudgetAllocation', BudgetAllocation);
 

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const PeriodSlotSchema = new mongoose.Schema({
   order: { type: Number, default: 1 },
@@ -42,5 +43,6 @@ const MasterPeriodSchema = new mongoose.Schema(
   { timestamps: true, strict: false }
 );
 
-export default mongoose.model('MasterPeriod', MasterPeriodSchema);
+const MasterPeriod = mongoose.models.MasterPeriod || mongoose.model('MasterPeriod', MasterPeriodSchema);
+export default createDynamicModelProxy('MasterPeriod', MasterPeriod);
 

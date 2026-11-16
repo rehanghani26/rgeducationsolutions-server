@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const SyllabusSubjectSchema = new mongoose.Schema(
   {
@@ -50,4 +51,5 @@ const ClassSyllabusSchema = new mongoose.Schema(
 
 ClassSyllabusSchema.index({ classId: 1, academicYear: 1 }, { unique: true });
 
-export default mongoose.model("ClassSyllabus", ClassSyllabusSchema);
+const ClassSyllabus = mongoose.models.ClassSyllabus || mongoose.model('ClassSyllabus', ClassSyllabusSchema);
+export default createDynamicModelProxy('ClassSyllabus', ClassSyllabus);

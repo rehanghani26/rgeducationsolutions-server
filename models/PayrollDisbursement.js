@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const PayrollDisbursementSchema = new mongoose.Schema(
   {
@@ -199,4 +200,5 @@ const PayrollDisbursementSchema = new mongoose.Schema(
 // Composite index to prevent double payment for same user + month + year
 PayrollDisbursementSchema.index({ userId: 1, month: 1, year: 1 }, { unique: true });
 
-export default mongoose.model('PayrollDisbursement', PayrollDisbursementSchema);
+const PayrollDisbursement = mongoose.models.PayrollDisbursement || mongoose.model('PayrollDisbursement', PayrollDisbursementSchema);
+export default createDynamicModelProxy('PayrollDisbursement', PayrollDisbursement);

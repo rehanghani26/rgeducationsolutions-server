@@ -3,6 +3,10 @@ import dns from "node:dns";
 
 // 2. External packages
 import mongoose from "mongoose";
+import tenantPlugin from "../utils/tenantPlugin.js";
+
+// Apply global multi-tenant schema plugin across all school collections
+mongoose.plugin(tenantPlugin);
 
 /**
  * @file db.js
@@ -96,27 +100,44 @@ export const connectDB = async () => {
     }
     console.log("✨ MongoDB Connected successfully.");
 
-    // Fix legacy non-sparse indexes on User collection to prevent duplicate null key errors
+    // Clean up legacy single-field indexes on User collection that conflict with multi-tenant compound indexes
     try {
       const usersCollection = mongoose.connection.collection("users");
       const indexes = await usersCollection.indexes();
 
       const empIndex = indexes.find(
-        (idx) => idx.name === "employeeId_1" || (idx.key && idx.key.employeeId)
+        (idx) => idx.name === "employeeId_1" || (idx.key && idx.key.employeeId && !idx.key.schoolId)
       );
-      if (empIndex && !empIndex.sparse) {
-        console.log(`🔄 Dropping legacy non-sparse index ${empIndex.name}...`);
+      if (empIndex) {
+        console.log(`🔄 Dropping legacy single-field index ${empIndex.name}...`);
         await usersCollection.dropIndex(empIndex.name);
       }
 
       const admIndex = indexes.find(
         (idx) =>
           idx.name === "admissionNumber_1" ||
-          (idx.key && idx.key.admissionNumber)
+          (idx.key && idx.key.admissionNumber && !idx.key.schoolId)
       );
-      if (admIndex && !admIndex.sparse) {
-        console.log(`🔄 Dropping legacy non-sparse index ${admIndex.name}...`);
+      if (admIndex) {
+        console.log(`🔄 Dropping legacy single-field index ${admIndex.name}...`);
         await usersCollection.dropIndex(admIndex.name);
+      }
+
+      // Drop non-partial compound indexes that fail on null employeeId/admissionNumber
+      const legacyEmpCompound = indexes.find(
+        (idx) => idx.name === "schoolId_1_employeeId_1" && !idx.partialFilterExpression
+      );
+      if (legacyEmpCompound) {
+        console.log(`🔄 Dropping non-partial compound index ${legacyEmpCompound.name}...`);
+        await usersCollection.dropIndex(legacyEmpCompound.name);
+      }
+
+      const legacyAdmCompound = indexes.find(
+        (idx) => idx.name === "schoolId_1_admissionNumber_1" && !idx.partialFilterExpression
+      );
+      if (legacyAdmCompound) {
+        console.log(`🔄 Dropping non-partial compound index ${legacyAdmCompound.name}...`);
+        await usersCollection.dropIndex(legacyAdmCompound.name);
       }
 
       // Remove null and empty string fields so sparse indexes ignore them
@@ -133,16 +154,7 @@ export const connectDB = async () => {
         { $unset: { accountExpiryDate: "" } }
       );
 
-      // Ensure sparse unique indexes
-      await usersCollection.createIndex(
-        { employeeId: 1 },
-        { unique: true, sparse: true, background: true }
-      );
-      await usersCollection.createIndex(
-        { admissionNumber: 1 },
-        { unique: true, sparse: true, background: true }
-      );
-      console.log("✅ Users collection sparse indexes ensured.");
+      console.log("✅ Users collection multi-tenant indexes verified.");
     } catch (idxErr) {
       console.warn("Index migration note:", idxErr.message);
     }

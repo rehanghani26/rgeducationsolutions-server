@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const OtpSchema = new mongoose.Schema({
   email: {
@@ -32,4 +33,5 @@ const OtpSchema = new mongoose.Schema({
   },
 });
 
-export default mongoose.models.Otp || mongoose.model('Otp', OtpSchema);
+const Otp = mongoose.models.Otp || mongoose.model('Otp', OtpSchema);
+export default createDynamicModelProxy('Otp', Otp);

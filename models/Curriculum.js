@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const UnitSchema = new mongoose.Schema({
   id: { type: Number },
@@ -97,4 +98,5 @@ const CurriculumSchema = new mongoose.Schema(
 
 CurriculumSchema.index({ className: 1, sectionName: 1, code: 1 });
 
-export default mongoose.model('Curriculum', CurriculumSchema);
+const Curriculum = mongoose.models.Curriculum || mongoose.model('Curriculum', CurriculumSchema);
+export default createDynamicModelProxy('Curriculum', Curriculum);

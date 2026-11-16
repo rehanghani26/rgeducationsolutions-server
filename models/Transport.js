@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const TransportSchema = new mongoose.Schema({
   routeName: {
@@ -34,4 +35,5 @@ const TransportSchema = new mongoose.Schema({
   timestamps: true
 });
 
-export default mongoose.model('Transport', TransportSchema);
+const Transport = mongoose.models.Transport || mongoose.model('Transport', TransportSchema);
+export default createDynamicModelProxy('Transport', Transport);

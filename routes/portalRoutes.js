@@ -30,32 +30,32 @@ const getPortalSettings = async () => {
     return (
       raw?.portalSettings || {
         enabled: true,
-        schoolName: raw?.schoolName || 'Iqra Public School',
-        affiliation: 'Affiliated to CBSE Pattern & Modern Curriculum',
-        tagline: 'Knowledge, Character & Excellence for a Better Tomorrow',
+        schoolName: raw?.schoolName || '',
+        affiliation: raw?.affiliationNumber ? `Affiliation No. ${raw.affiliationNumber}` : 'Affiliated to Recognized Board',
+        tagline: raw?.schoolMotto || 'Knowledge, Character & Excellence',
         heroImage:
           'https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=1600&auto=format&fit=crop',
         heroSubtitle:
-          'At Iqra Public School Motihari, we nurture young minds with quality education, moral integrity, and modern learning tools to inspire confident future leaders.',
-        admissionBadge: 'Admissions Open for Session 2026 – 2027',
-        aboutTitle: 'About Iqra Public School',
+          'Nurturing young minds with quality education, moral integrity, and modern learning tools to inspire confident future leaders.',
+        admissionBadge: 'Admissions Open for New Academic Session',
+        aboutTitle: raw?.schoolName ? `About ${raw.schoolName}` : 'About Our School',
         aboutDescription:
-          'Established with a vision to deliver value-based academic distinction, Iqra Public School provides a safe, disciplined, and stimulating atmosphere where every child in Motihari and East Champaran is encouraged to realize their highest potential.',
-        directorName: 'Hasan Shahid',
-        directorRole: 'Director, Iqra Public School',
+          'Established with a vision to deliver value-based academic distinction, providing a safe, disciplined, and stimulating atmosphere where every child is encouraged to realize their highest potential.',
+        directorName: '',
+        directorRole: 'Director',
         directorQuote:
           'Our endeavor is to enlighten minds with beneficial knowledge and deep-rooted moral values so our children can excel in modern society with dignity and purpose.',
         directorImage: '',
-        principalName: 'Dr. Zafar Iqbal',
+        principalName: raw?.principalName || '',
         principalRole: 'Principal & Head of Academic Council',
         principalMessage:
           'Education is not merely the transmission of facts, but the ignition of curiosity, compassion, and leadership in every young mind that walks through our gates.',
         principalImage:
           'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=400&auto=format&fit=crop',
         socialLinks: {
-          facebook: 'https://www.facebook.com/profile.php?id=100054487419314',
-          youtube: 'https://www.youtube.com/@IqraPublicSchoolMotihari',
-          website: 'https://www.iqrapublicschool.com',
+          facebook: '',
+          youtube: '',
+          website: raw?.websiteUrl || '',
         },
         facilities: [
           {
@@ -110,29 +110,29 @@ const getPortalSettings = async () => {
   const ps = settings.portalSettings || {};
   return {
     enabled: ps.enabled ?? true,
-    schoolName: ps.schoolName || settings.schoolName || 'Iqra Public School',
+    schoolName: ps.schoolName || settings.schoolName || '',
     schoolLogo: settings.companyLogo || settings.schoolLogo || '',
-    affiliation: ps.affiliation || 'Affiliated to CBSE Pattern & Modern Curriculum',
-    affiliationCode: ps.affiliationCode || 'SCH-2026-CBSE-845401',
-    tagline: ps.tagline || 'Knowledge, Character & Excellence for a Better Tomorrow',
+    affiliation: ps.affiliation || (settings.affiliationNumber ? `Affiliation No. ${settings.affiliationNumber}` : 'Affiliated to Recognized Board'),
+    affiliationCode: ps.affiliationCode || settings.affiliationNumber || '',
+    tagline: ps.tagline || settings.schoolMotto || 'Knowledge, Character & Excellence',
     heroImage:
       ps.heroImage ||
       'https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=1600&auto=format&fit=crop',
     heroSubtitle:
       ps.heroSubtitle ||
-      'At Iqra Public School Motihari, we nurture young minds with quality education, moral integrity, and modern learning tools to inspire confident future leaders.',
-    admissionBadge: ps.admissionBadge || 'Admissions Open for Session 2026 – 2027',
-    aboutTitle: ps.aboutTitle || 'About Iqra Public School',
+      'Nurturing young minds with quality education, moral integrity, and modern learning tools to inspire confident future leaders.',
+    admissionBadge: ps.admissionBadge || 'Admissions Open for New Academic Session',
+    aboutTitle: ps.aboutTitle || (settings.schoolName ? `About ${settings.schoolName}` : 'About Our School'),
     aboutDescription:
       ps.aboutDescription ||
-      'Established with a vision to deliver value-based academic distinction, Iqra Public School provides a safe, disciplined, and stimulating atmosphere where every child in Motihari and East Champaran is encouraged to realize their highest potential.',
-    directorName: ps.directorName || 'Hasan Shahid',
-    directorRole: ps.directorRole || 'Director, Iqra Public School',
+      'Established with a vision to deliver value-based academic distinction, providing a safe, disciplined, and stimulating atmosphere where every child is encouraged to realize their highest potential.',
+    directorName: ps.directorName || '',
+    directorRole: ps.directorRole || 'Director',
     directorQuote:
       ps.directorQuote ||
       'Our endeavor is to enlighten minds with beneficial knowledge and deep-rooted moral values so our children can excel in modern society with dignity and purpose.',
     directorImage: ps.directorImage || '',
-    principalName: ps.principalName || 'Dr. Zafar Iqbal',
+    principalName: ps.principalName || settings.principalName || '',
     principalRole: ps.principalRole || 'Principal & Head of Academic Council',
     principalMessage:
       ps.principalMessage ||
@@ -465,44 +465,44 @@ const getPortalSettings = async () => {
         ? ps.leadership
         : [
             {
-              name: 'Hasan Shahid',
-              role: 'Director, Iqra Public School',
+              name: ps.directorName || 'Institutional Leadership',
+              role: ps.directorRole || 'Director',
               degrees: 'Educational Visionary & Founder',
               quote:
-                'Our endeavor is to enlighten minds with beneficial knowledge and deep-rooted moral values so our children can excel in modern society with dignity and purpose.',
+                ps.directorQuote || 'Our endeavor is to enlighten minds with beneficial knowledge and deep-rooted moral values so our children can excel in modern society with dignity and purpose.',
             },
             {
-              name: 'Dr. Zafar Iqbal',
-              role: 'Principal & Head of Academic Council',
-              degrees: 'Ph.D. Education, Senior Academician',
+              name: ps.principalName || settings.principalName || 'Academic Council',
+              role: ps.principalRole || 'Principal & Head of Academic Council',
+              degrees: 'Senior Academician',
               quote:
-                'Education is not merely the transmission of facts, but the ignition of curiosity, compassion, and leadership in every young mind that walks through our gates.',
+                ps.principalMessage || 'Education is not merely the transmission of facts, but the ignition of curiosity, compassion, and leadership in every young mind that walks through our gates.',
             },
             {
               name: 'Senior Academic Faculty',
               role: 'Head of Curriculum & Student Mentorship',
-              degrees: 'CBSE Pedagogy Experts & Master Teachers',
+              degrees: 'Pedagogy Experts & Master Teachers',
               quote:
-                'A warm, disciplined, and stimulating atmosphere where every child in Motihari is encouraged to realize their highest potential.',
+                'A warm, disciplined, and stimulating atmosphere where every child is encouraged to realize their highest potential.',
             },
           ],
     socialLinks: ps.socialLinks || {
-      facebook: 'https://www.facebook.com/profile.php?id=100054487419314',
-      youtube: 'https://www.youtube.com/@IqraPublicSchoolMotihari',
-      website: 'https://www.iqrapublicschool.com',
+      facebook: '',
+      youtube: '',
+      website: settings.websiteUrl || '',
     },
     contact: {
       address:
         ps.contact?.address ||
         settings.addressLine1 ||
-        'Near Hanuman Gadhi Masjid, Nakshey Tola, Eidgah Road, Motihari, East Champaran, Bihar - 845401',
-      phone: ps.contact?.phone || settings.schoolPhone || '+91 94314 26252',
-      alternatePhone: ps.contact?.alternatePhone || '+91 99342 66252',
-      email: ps.contact?.email || settings.contactEmail || 'info@iqrapublicschool.com',
-      admissionsEmail: ps.contact?.admissionsEmail || 'admissions@iqrapublicschool.com',
+        '',
+      phone: ps.contact?.phone || settings.schoolPhone || '',
+      alternatePhone: ps.contact?.alternatePhone || settings.alternatePhone || '',
+      email: ps.contact?.email || settings.contactEmail || '',
+      admissionsEmail: ps.contact?.admissionsEmail || settings.contactEmail || '',
       timing:
         ps.contact?.timing ||
-        'Monday – Thursday: 09:00 AM – 02:30 PM | Friday: 09:00 AM – 11:00 AM | Saturday: 09:00 AM – 02:00 PM',
+        'Monday – Friday: 08:00 AM – 03:00 PM | Saturday: 08:00 AM – 01:00 PM',
     },
   };
 };

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const InventoryItemLineSchema = new mongoose.Schema(
   {
@@ -220,4 +221,5 @@ InventorySchema.pre('save', function (next) {
   next();
 });
 
-export default mongoose.model('Inventory', InventorySchema);
+const Inventory = mongoose.models.Inventory || mongoose.model('Inventory', InventorySchema);
+export default createDynamicModelProxy('Inventory', Inventory);

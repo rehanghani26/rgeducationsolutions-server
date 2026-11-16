@@ -1,38 +1,47 @@
-// 2. External packages
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
-
-// 3. Configuration
 import { checkFallback } from "../config/db.js";
-
-// 4. Models
 import User from "../models/User.js";
-
-// 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
-
-// 7. Utilities
+import tenantContext from "../utils/tenantContext.js";
 import { sendForbidden, sendUnauthorized } from "../utils/responseUtil.js";
 
 /**
  * @file auth.js
- * @description Authentication middleware for JWT verification and token generation.
+ * @description Centralized multi-tenant authentication middleware.
+ * Generates and verifies JWT tokens embedding { userId, schoolId, role }.
+ * Attaches authenticated tenant context to req and tenantContext AsyncLocalStorage.
  */
 
-const getJwtSecret = () => process.env.JWT_SECRET || "super_secret_jwt_access_key_ChangeMe";
-const getJwtRefreshSecret = () => process.env.JWT_REFRESH_SECRET || "super_secret_jwt_refresh_key_ChangeMe";
+const getJwtSecret = () =>
+  process.env.JWT_SECRET || "super_secret_jwt_access_key_ChangeMe";
+const getJwtRefreshSecret = () =>
+  process.env.JWT_REFRESH_SECRET ||
+  "super_secret_jwt_refresh_key_ChangeMe";
 
 /**
- * Generates access and refresh JWT tokens for a verified user.
+ * Generates access and refresh JWT tokens containing userId, schoolId, and role.
  *
  * @param {Object} user - User document or fallback record.
+ * @param {Object} [school=null] - School tenant metadata.
  * @returns {{ accessToken: string, refreshToken: string }} Token pair.
  */
-export const generateTokens = (user) => {
+export const generateTokens = (user, school = null) => {
+  const schoolId =
+    user.schoolId ||
+    school?.schoolId ||
+    school?._id ||
+    user._schoolId ||
+    undefined;
+
+  const userId = String(user.id || user._id);
+
   const payload = {
-    id: user.id || user._id,
+    userId,
+    id: userId,
+    schoolId,
     role: user.role,
-    permissions: user.permissions || [],
+    name: user.name || "User",
   };
 
   const accessToken = jwt.sign(payload, getJwtSecret(), { expiresIn: "7d" });
@@ -44,7 +53,9 @@ export const generateTokens = (user) => {
 };
 
 /**
- * Middleware that protects routes by verifying Bearer JWT tokens in Authorization headers or cookies.
+ * Middleware that protects routes by verifying Bearer JWT tokens.
+ * Validates user, extracts userId, schoolId, and role, and wraps downstream handlers
+ * within tenantContext AsyncLocalStorage for automatic query scoping.
  *
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
@@ -68,19 +79,21 @@ export const protect = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, getJwtSecret());
+    const userId = decoded.userId || decoded.id;
 
     let user = null;
     if (checkFallback()) {
-      user = FallbackDb.findById("users", decoded.id);
+      user = FallbackDb.findById("users", userId);
     } else {
-      if (decoded.id && mongoose.Types.ObjectId.isValid(decoded.id)) {
-        user = await User.findById(decoded.id).select("-password");
+      if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+        user = await User.findById(userId)
+          .setOptions({ skipTenantFilter: true })
+          .select("-password");
       }
-      if (!user && decoded.id) {
-        user = await User.findOne({ username: decoded.id }).select("-password");
-      }
-      if (!user && decoded.id) {
-        user = FallbackDb.findById("users", decoded.id);
+      if (!user && decoded.username) {
+        user = await User.findOne({ username: decoded.username })
+          .setOptions({ skipTenantFilter: true })
+          .select("-password");
       }
     }
 
@@ -91,14 +104,39 @@ export const protect = async (req, res, next) => {
       );
     }
 
+    const schoolId = user?.schoolId || decoded.schoolId;
+
     req.user = user || {
-      id: decoded.id,
-      _id: decoded.id,
+      id: userId,
+      _id: userId,
+      userId,
+      schoolId,
       role: decoded.role,
       name: decoded.name || "User",
-      permissions: decoded.permissions || [],
     };
-    next();
+
+    req.schoolId = schoolId;
+    if (req.user) {
+      req.user.schoolId = schoolId;
+      req.user.userId = userId;
+    }
+
+    // Attach schoolId header for downstream compatibility
+    if (schoolId) {
+      req.headers["x-school-id"] = schoolId;
+    }
+
+    // Wrap downstream execution inside tenantContext AsyncLocalStorage
+    tenantContext.run(
+      {
+        schoolId,
+        user: req.user,
+        skipTenantFilter: decoded.role === "platform-super-admin",
+      },
+      () => {
+        next();
+      }
+    );
   } catch (error) {
     console.error("JWT Verification Error:", error.message);
     return sendUnauthorized(res, "Not authorized, token invalid or expired");

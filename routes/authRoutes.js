@@ -6,6 +6,8 @@ import { protect } from "../middleware/auth.js";
 
 // 8. Controllers
 import {
+  checkSchoolStatus,
+  forgotPassword,
   getMe,
   getSetupStatus,
   login,
@@ -17,6 +19,23 @@ import {
 } from "../controllers/authController.js";
 
 const router = express.Router();
+
+/**
+ * @route   GET /api/v1/auth/school-check
+ * @route   POST /api/v1/auth/school-check
+ * @desc    Verify school details and active/suspended status before user login
+ * @access  Public
+ */
+router.get("/school-check", checkSchoolStatus);
+router.post("/school-check", checkSchoolStatus);
+
+/**
+ * @route   POST /api/v1/auth/forgot-password
+ * @desc    Public student and staff password reset
+ * @access  Public
+ */
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password", forgotPassword);
 
 /**
  * @route   GET /api/v1/auth/setup-status

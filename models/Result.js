@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const SubjectMarkSchema = new mongoose.Schema({
   subjectId: { type: mongoose.Schema.Types.Mixed },
@@ -82,4 +83,5 @@ ResultSchema.statics.calcGrade = function(pct) {
   return { grade: 'F', gpa: 0.0 };
 };
 
-export default mongoose.model('Result', ResultSchema);
+const Result = mongoose.models.Result || mongoose.model('Result', ResultSchema);
+export default createDynamicModelProxy('Result', Result);

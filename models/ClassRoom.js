@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 /**
  * ClassRoom — a session-scoped instantiation of a Class + Section.
@@ -130,4 +131,5 @@ ClassRoomSchema.pre('save', function (next) {
   next();
 });
 
-export default mongoose.model('ClassRoom', ClassRoomSchema);
+const ClassRoom = mongoose.models.ClassRoom || mongoose.model('ClassRoom', ClassRoomSchema);
+export default createDynamicModelProxy('ClassRoom', ClassRoom);

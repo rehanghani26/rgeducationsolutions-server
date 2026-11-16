@@ -1,6 +1,9 @@
+import tenantContext from './tenantContext.js';
+
 /**
  * @file responseUtil.js
  * @description Standardized API response utilities for consistent HTTP JSON responses.
+ * Automatically injects active tenant schoolId into all success envelopes.
  */
 
 /**
@@ -14,12 +17,27 @@
  * @returns {import('express').Response}
  */
 export const sendSuccess = (res, message = 'Success', data = null, statusCode = 200, extra = {}) => {
+  const activeSchoolId =
+    tenantContext.getSchoolId() ||
+    res?.req?.user?.schoolId ||
+    res?.req?.schoolId ||
+    res?.req?.headers?.['x-school-id'] ||
+    extra?.schoolId ||
+    (data && typeof data === 'object' && !Array.isArray(data) ? data.schoolId : null) ||
+    null;
+
   const response = {
     success: true,
+    ...(activeSchoolId ? { schoolId: activeSchoolId } : {}),
     ...(message ? { message } : {}),
     ...(data !== null && data !== undefined ? { data } : {}),
     ...extra,
   };
+
+  if (activeSchoolId && !response.schoolId) {
+    response.schoolId = activeSchoolId;
+  }
+
   return res.status(statusCode).json(response);
 };
 

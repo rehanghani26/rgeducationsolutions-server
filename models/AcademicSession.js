@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const AcademicSessionSchema = new mongoose.Schema(
   {
@@ -46,4 +47,5 @@ const AcademicSessionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.model('AcademicSession', AcademicSessionSchema);
+const AcademicSession = mongoose.models.AcademicSession || mongoose.model('AcademicSession', AcademicSessionSchema);
+export default createDynamicModelProxy('AcademicSession', AcademicSession);

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const PurchaseSchema = new mongoose.Schema({
   orderNumber: {
@@ -42,4 +43,5 @@ const PurchaseSchema = new mongoose.Schema({
   timestamps: true
 });
 
-export default mongoose.model('Purchase', PurchaseSchema);
+const Purchase = mongoose.models.Purchase || mongoose.model('Purchase', PurchaseSchema);
+export default createDynamicModelProxy('Purchase', Purchase);

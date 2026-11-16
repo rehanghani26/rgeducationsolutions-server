@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const PortalInquirySchema = new mongoose.Schema(
   {
@@ -49,4 +50,5 @@ const PortalInquirySchema = new mongoose.Schema(
   }
 );
 
-export default mongoose.model("PortalInquiry", PortalInquirySchema);
+const PortalInquiry = mongoose.models.PortalInquiry || mongoose.model('PortalInquiry', PortalInquirySchema);
+export default createDynamicModelProxy('PortalInquiry', PortalInquiry);

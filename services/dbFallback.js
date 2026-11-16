@@ -44,6 +44,7 @@ const initialDb = {
   budgetAllocations: [],
   payrollRecords: [],
   payrollDisbursements: [],
+  rolePermissions: [],
 };
 
 let db = { ...initialDb };

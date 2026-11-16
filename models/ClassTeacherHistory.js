@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 /**
  * ClassTeacherHistory — one record every time a teacher is assigned to or
@@ -100,4 +101,5 @@ const ClassTeacherHistorySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.model('ClassTeacherHistory', ClassTeacherHistorySchema);
+const ClassTeacherHistory = mongoose.models.ClassTeacherHistory || mongoose.model('ClassTeacherHistory', ClassTeacherHistorySchema);
+export default createDynamicModelProxy('ClassTeacherHistory', ClassTeacherHistory);

@@ -7,6 +7,9 @@ import AuditLog from "../models/AuditLog.js";
 // 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
 
+// 7. Context
+import tenantContext from "./tenantContext.js";
+
 /**
  * @file activityLogger.js
  * @description Centralized activity and audit logging helper for database and fallback modes.
@@ -27,6 +30,7 @@ import { FallbackDb } from "../services/dbFallback.js";
  * @returns {Promise<void>}
  */
 export const logActivity = async ({
+  schoolId,
   userId,
   action,
   module,
@@ -36,7 +40,14 @@ export const logActivity = async ({
   userAgent,
   metadata,
 }) => {
+  const activeTenant = tenantContext.getSchoolId();
+  const resolvedSchoolId =
+    (schoolId && schoolId !== 'GLOBAL')
+      ? schoolId
+      : (activeTenant || schoolId || 'GLOBAL');
+
   const entry = {
+    schoolId: resolvedSchoolId,
     userId: userId || null,
     action,
     module,

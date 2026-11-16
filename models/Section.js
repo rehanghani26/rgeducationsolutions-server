@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const SectionSchema = new mongoose.Schema({
   name: {
@@ -32,4 +33,5 @@ const SectionSchema = new mongoose.Schema({
 // Compound index to prevent duplicate section names in the same class
 SectionSchema.index({ name: 1, classId: 1 }, { unique: true });
 
-export default mongoose.model('Section', SectionSchema);
+const Section = mongoose.models.Section || mongoose.model('Section', SectionSchema);
+export default createDynamicModelProxy('Section', Section);

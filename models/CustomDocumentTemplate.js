@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 /**
  * @model CustomDocumentTemplate
@@ -89,4 +90,5 @@ const CustomDocumentTemplateSchema = new mongoose.Schema(
 CustomDocumentTemplateSchema.index({ category: 1, isActive: 1 });
 CustomDocumentTemplateSchema.index({ createdBy: 1, isActive: 1 });
 
-export default mongoose.model('CustomDocumentTemplate', CustomDocumentTemplateSchema);
+const CustomDocumentTemplate = mongoose.models.CustomDocumentTemplate || mongoose.model('CustomDocumentTemplate', CustomDocumentTemplateSchema);
+export default createDynamicModelProxy('CustomDocumentTemplate', CustomDocumentTemplate);

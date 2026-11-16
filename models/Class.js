@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const ClassSchema = new mongoose.Schema({
   name: {
@@ -22,4 +23,5 @@ const ClassSchema = new mongoose.Schema({
   timestamps: true
 });
 
-export default mongoose.model('Class', ClassSchema);
+const Class = mongoose.models.Class || mongoose.model('Class', ClassSchema);
+export default createDynamicModelProxy('Class', Class);

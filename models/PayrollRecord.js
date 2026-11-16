@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const PayrollRecordSchema = new mongoose.Schema(
   {
@@ -124,5 +125,6 @@ PayrollRecordSchema.pre('save', function (next) {
   next();
 });
 
-export default mongoose.model('PayrollRecord', PayrollRecordSchema);
+const PayrollRecord = mongoose.models.PayrollRecord || mongoose.model('PayrollRecord', PayrollRecordSchema);
+export default createDynamicModelProxy('PayrollRecord', PayrollRecord);
 

@@ -29,6 +29,7 @@ import {
   getNotices,
   getSections,
   getSettings,
+  getSchoolProfile,
   getSubjects,
   getTransport,
   issueBook,
@@ -175,8 +176,15 @@ router.get("/notifications", protect, getNotifications);
 
 // System settings Routes
 router.get("/settings", protect, getSettings);
+router.get("/school", protect, getSchoolProfile);
 router.put(
   "/settings",
+  protect,
+  authorize("super-admin", "school-admin"),
+  updateSettings
+);
+router.put(
+  "/school",
   protect,
   authorize("super-admin", "school-admin"),
   updateSettings

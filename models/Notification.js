@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const NotificationSchema = new mongoose.Schema({
   title: {
@@ -26,4 +27,5 @@ const NotificationSchema = new mongoose.Schema({
   timestamps: true
 });
 
-export default mongoose.model('Notification', NotificationSchema);
+const Notification = mongoose.models.Notification || mongoose.model('Notification', NotificationSchema);
+export default createDynamicModelProxy('Notification', Notification);

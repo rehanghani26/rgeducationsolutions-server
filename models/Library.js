@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const LibrarySchema = new mongoose.Schema({
   bookId: {
@@ -31,4 +32,5 @@ const LibrarySchema = new mongoose.Schema({
   timestamps: true
 });
 
-export default mongoose.model('Library', LibrarySchema);
+const Library = mongoose.models.Library || mongoose.model('Library', LibrarySchema);
+export default createDynamicModelProxy('Library', Library);

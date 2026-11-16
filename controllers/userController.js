@@ -122,22 +122,28 @@ export const getRoles = async (req, res) => {
   try {
     let userCounts = {};
 
-    if (checkFallback()) {
-      const users = FallbackDb.find('users') || [];
-      users.forEach((u) => {
-        const role = (u.role || '').toLowerCase();
-        if (!EXCLUDED_ROLES.includes(role)) {
-          userCounts[role] = (userCounts[role] || 0) + 1;
+    try {
+      if (checkFallback()) {
+        const users = FallbackDb.find('users') || [];
+        users.forEach((u) => {
+          const role = (u.role || '').toLowerCase();
+          if (!EXCLUDED_ROLES.includes(role)) {
+            userCounts[role] = (userCounts[role] || 0) + 1;
+          }
+        });
+      } else {
+        const counts = await User.aggregate([
+          { $match: { role: { $nin: EXCLUDED_ROLES } } },
+          { $group: { _id: { $toLower: '$role' }, count: { $sum: 1 } } }
+        ]).catch(() => []);
+        if (Array.isArray(counts)) {
+          counts.forEach((item) => {
+            if (item && item._id) userCounts[item._id] = item.count;
+          });
         }
-      });
-    } else {
-      const counts = await User.aggregate([
-        { $match: { role: { $nin: EXCLUDED_ROLES } } },
-        { $group: { _id: { $toLower: '$role' }, count: { $sum: 1 } } }
-      ]);
-      counts.forEach((item) => {
-        if (item._id) userCounts[item._id] = item.count;
-      });
+      }
+    } catch (_cntErr) {
+      console.warn('Role count resolution warning in getRoles:', _cntErr);
     }
 
     const rolesWithCounts = SYSTEM_ROLES.map((role) => ({
@@ -448,7 +454,7 @@ export const createUser = async (req, res) => {
         sectionsAssigned: Array.isArray(sectionsAssigned) ? sectionsAssigned : [],
         subjectsAssigned: Array.isArray(subjectsAssigned) ? subjectsAssigned : [],
         isActive: Boolean(isActive),
-        permissions: permissions || [],
+        permissions: [],
         twoFactorEnabled: Boolean(twoFactorEnabled),
         forcePasswordChange: Boolean(forcePasswordChange),
         lastLogin: null,
@@ -505,7 +511,7 @@ export const createUser = async (req, res) => {
       sectionsAssigned: Array.isArray(sectionsAssigned) ? sectionsAssigned : [],
       subjectsAssigned: Array.isArray(subjectsAssigned) ? subjectsAssigned : [],
       isActive: Boolean(isActive),
-      permissions: permissions || [],
+      permissions: [],
       twoFactorEnabled: Boolean(twoFactorEnabled),
       forcePasswordChange: Boolean(forcePasswordChange)
     };
@@ -632,7 +638,6 @@ export const updateUser = async (req, res) => {
     if (sectionsAssigned !== undefined) updateData.sectionsAssigned = Array.isArray(sectionsAssigned) ? sectionsAssigned : [];
     if (subjectsAssigned !== undefined) updateData.subjectsAssigned = Array.isArray(subjectsAssigned) ? subjectsAssigned : [];
     if (isActive !== undefined) updateData.isActive = Boolean(isActive);
-    if (permissions !== undefined) updateData.permissions = permissions;
     if (forcePasswordChange !== undefined) updateData.forcePasswordChange = Boolean(forcePasswordChange);
     if (twoFactorEnabled !== undefined) updateData.twoFactorEnabled = Boolean(twoFactorEnabled);
 

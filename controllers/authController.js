@@ -1,23 +1,24 @@
 // 3. Configuration
-import { checkFallback } from "../config/db.js";
-import { resolveFileUrl } from "../config/s3.js";
+import { checkFallback } from '../config/db.js';
+import { resolveFileUrl } from '../config/s3.js';
 
 // 4. Models
-import Otp from "../models/Otp.js";
-import Setting from "../models/Setting.js";
-import Student from "../models/Student.js";
-import User from "../models/User.js";
+import Otp from '../models/Otp.js';
+import Setting from '../models/Setting.js';
+import Student from '../models/Student.js';
+import User from '../models/User.js';
+import School from '../models/School.js';
 
 // 5. Middleware
-import { generateTokens } from "../middleware/auth.js";
+import { generateTokens } from '../middleware/auth.js';
 
 // 6. Services
-import { FallbackDb } from "../services/dbFallback.js";
-import { sendOtpEmail } from "../services/emailService.js";
+import { FallbackDb } from '../services/dbFallback.js';
+import { sendOtpEmail } from '../services/emailService.js';
 
 // 7. Utilities
-import { logActivity } from "../utils/activityLogger.js";
-import { normalizeEmail } from "../utils/commonUtil.js";
+import { logActivity } from '../utils/activityLogger.js';
+import { normalizeEmail } from '../utils/commonUtil.js';
 import {
   sendBadRequest,
   sendCreated,
@@ -25,7 +26,7 @@ import {
   sendForbidden,
   sendSuccess,
   sendUnauthorized,
-} from "../utils/responseUtil.js";
+} from '../utils/responseUtil.js';
 
 /**
  * @file authController.js
@@ -42,84 +43,118 @@ export const login = async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
-    return sendBadRequest(res, "Please provide email/username and password");
+    return sendBadRequest(res, 'Please provide email/username and password');
   }
 
   try {
     let user = null;
+    let schoolInfo = null;
+
+    const cleanInput = username.toLowerCase().trim();
+    const cleanUpper = username.trim().toUpperCase();
 
     if (checkFallback()) {
-      // Look up in fallback memory DB
       user =
-        FallbackDb.findOne("users", { username: username.toLowerCase() }) ||
-        FallbackDb.findOne("users", { email: username.toLowerCase() }) ||
-        FallbackDb.findOne("users", { admissionNumber: username.trim().toUpperCase() });
+        FallbackDb.findOne('users', { username: cleanInput }) ||
+        FallbackDb.findOne('users', { email: cleanInput }) ||
+        FallbackDb.findOne('users', { admissionNumber: cleanUpper });
 
       if (!user) {
-        return sendUnauthorized(res, "Invalid credentials");
+        return sendUnauthorized(res, 'Invalid credentials');
       }
 
-      // In fallback mode, accept simple passwords matching credentials for local dev ease
       const isMatch =
         password === user.password ||
         password === username ||
-        password === "admin" ||
-        password === "password";
+        password === 'admin' ||
+        password === 'password';
 
       if (!isMatch) {
-        return sendUnauthorized(res, "Invalid credentials");
+        return sendUnauthorized(res, 'Invalid credentials');
       }
     } else {
-      // Look up in real MongoDB
+      // Find user in central User collection (skip tenant filter during initial login lookup)
       user = await User.findOne({
         $or: [
-          { username: username.toLowerCase() },
-          { email: username.toLowerCase() },
-          { admissionNumber: username.trim().toUpperCase() },
+          { username: cleanInput },
+          { email: cleanInput },
+          { admissionNumber: cleanUpper },
+          { employeeId: cleanUpper },
         ],
-      });
+      }).setOptions({ skipTenantFilter: true });
 
       if (!user) {
-        return sendUnauthorized(res, "Invalid credentials");
+        return sendUnauthorized(res, 'Invalid credentials');
       }
 
       const isMatch = await user.comparePassword(password);
       if (!isMatch) {
-        return sendUnauthorized(res, "Invalid credentials");
+        return sendUnauthorized(res, 'Invalid credentials');
       }
     }
 
     if (user.isActive === false) {
       return sendForbidden(
         res,
-        "Your account has been deactivated by the administrator. You cannot log in or access the system."
+        'Your account has been deactivated by the administrator. You cannot log in or access the system.'
       );
     }
 
+    // Load user's school metadata
+    if (user.schoolId) {
+      req.schoolId = user.schoolId;
+      const school = await School.findOne({
+        $or: [{ _id: user.schoolId }, { schoolId: user.schoolId }],
+      }).lean();
+
+      if (school) {
+        // Enforce school suspension check on login
+        if (school.status === 'suspended' || school.status === 'SUSPENDED') {
+          return res.status(403).json({
+            success: false,
+            status: 'suspended',
+            schoolStatus: 'suspended',
+            schoolId: school.schoolId || school._id,
+            schoolName: school.schoolName,
+            message: `Access to '${school.schoolName}' has been suspended. Please contact RGES Support.`,
+          });
+        }
+
+        schoolInfo = {
+          schoolId: school.schoolId || school._id,
+          schoolName: school.schoolName,
+          schoolCode: school.schoolCode,
+          schoolLogo: school.schoolLogo || '',
+          schoolMotto: school.schoolMotto || '',
+          status: school.status || 'active',
+        };
+      }
+    }
+
     if (user.accountExpiryDate && new Date(user.accountExpiryDate) < new Date()) {
-      if (user.role === "student") {
+      if (user.role === 'student') {
         user.accountExpiryDate = null;
         if (!checkFallback() && user.save) {
           user.save().catch(() => null);
         }
       } else {
-        return sendForbidden(res, "Account has expired");
+        return sendForbidden(res, 'Account has expired');
       }
     }
 
     // Generate tokens
-    const { accessToken, refreshToken } = generateTokens(user);
+    const { accessToken, refreshToken } = generateTokens(user, schoolInfo);
 
     const loginEntry = {
-      ip: req.ip || req.headers["x-forwarded-for"],
-      userAgent: req.headers["user-agent"],
+      ip: req.ip || req.headers['x-forwarded-for'],
+      userAgent: req.headers['user-agent'],
       timestamp: new Date(),
     };
 
     // Save refresh token and login history
     if (checkFallback()) {
       const history = [...(user.loginHistory || []), loginEntry].slice(-20);
-      FallbackDb.update("users", user.id, {
+      FallbackDb.update('users', user.id, {
         refreshToken,
         lastLogin: loginEntry.timestamp,
         loginHistory: history,
@@ -132,32 +167,33 @@ export const login = async (req, res) => {
     }
 
     await logActivity({
+      schoolId: user.schoolId,
       userId: user.id || user._id,
-      action: "LOGIN",
-      module: "auth",
+      action: 'LOGIN',
+      module: 'auth',
       details: `User ${user.name} logged in`,
       ipAddress: loginEntry.ip,
       userAgent: loginEntry.userAgent,
     });
 
     // Set secure HTTP-only refresh cookie
-    res.cookie("refreshToken", refreshToken, {
+    res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    let resolvedAvatar = user.avatar || user.photo || user.imagesRef?.img || "";
-    let resolvedImagesRef = user.imagesRef || { id: "", img: resolvedAvatar };
+    let resolvedAvatar = user.avatar || user.photo || user.imagesRef?.img || '';
+    let resolvedImagesRef = user.imagesRef || { id: '', img: resolvedAvatar };
 
-    if (!resolvedAvatar && user.role === "student") {
+    if (!resolvedAvatar && user.role === 'student') {
       try {
         let studentRecord = null;
         if (checkFallback()) {
           studentRecord =
-            FallbackDb.findOne("students", { email: user.email }) ||
-            FallbackDb.findOne("students", { admissionNumber: user.admissionNumber });
+            FallbackDb.findOne('students', { email: user.email }) ||
+            FallbackDb.findOne('students', { admissionNumber: user.admissionNumber });
         } else {
           studentRecord = await Student.findOne({
             $or: [
@@ -168,11 +204,11 @@ export const login = async (req, res) => {
           });
         }
         if (studentRecord) {
-          resolvedAvatar = studentRecord.photo || studentRecord.imagesRef?.img || "";
-          resolvedImagesRef = studentRecord.imagesRef || { id: "", img: resolvedAvatar };
+          resolvedAvatar = studentRecord.photo || studentRecord.imagesRef?.img || '';
+          resolvedImagesRef = studentRecord.imagesRef || { id: '', img: resolvedAvatar };
         }
       } catch (e) {
-        console.warn("Student photo lookup error during login:", e);
+        console.warn('Student photo lookup error during login:', e);
       }
     }
 
@@ -180,19 +216,21 @@ export const login = async (req, res) => {
       try {
         resolvedAvatar = await resolveFileUrl(resolvedAvatar, 3600);
       } catch (err) {
-        console.warn("resolveFileUrl failed for avatar:", err);
+        console.warn('resolveFileUrl failed for avatar:', err);
       }
     }
     if (resolvedImagesRef?.img) {
       try {
         resolvedImagesRef.img = await resolveFileUrl(resolvedImagesRef.img, 3600);
       } catch (err) {
-        console.warn("resolveFileUrl failed for imagesRef.img:", err);
+        console.warn('resolveFileUrl failed for imagesRef.img:', err);
       }
     }
 
-    return sendSuccess(res, "Login successful", null, 200, {
+    return sendSuccess(res, 'Login successful', null, 200, {
+      schoolId: user.schoolId || schoolInfo?.schoolId,
       accessToken,
+      school: schoolInfo,
       user: {
         id: user.id || user._id,
         username: user.username,
@@ -200,7 +238,6 @@ export const login = async (req, res) => {
         admissionNumber: user.admissionNumber,
         email: user.email,
         role: user.role,
-        permissions: user.permissions || [],
         name: user.name,
         avatar: resolvedAvatar,
         photo: resolvedAvatar,
@@ -211,8 +248,8 @@ export const login = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Login error:", error);
-    return sendError(res, "Server error during login", 500);
+    console.error('Login error:', error);
+    return sendError(res, 'Server error during login', 500);
   }
 };
 
@@ -227,9 +264,9 @@ export const logout = async (req, res) => {
 
   if (refreshToken) {
     if (checkFallback()) {
-      const user = FallbackDb.findOne("users", { refreshToken });
+      const user = FallbackDb.findOne('users', { refreshToken });
       if (user) {
-        FallbackDb.update("users", user.id, { refreshToken: null });
+        FallbackDb.update('users', user.id, { refreshToken: null });
       }
     } else {
       try {
@@ -239,13 +276,13 @@ export const logout = async (req, res) => {
           await user.save();
         }
       } catch (error) {
-        console.error("Error clearing refresh token:", error);
+        console.error('Error clearing refresh token:', error);
       }
     }
   }
 
-  res.clearCookie("refreshToken");
-  return sendSuccess(res, "Logged out successfully");
+  res.clearCookie('refreshToken');
+  return sendSuccess(res, 'Logged out successfully');
 };
 
 /**
@@ -258,37 +295,37 @@ export const refresh = async (req, res) => {
   const refreshToken = req.cookies?.refreshToken;
 
   if (!refreshToken) {
-    return sendUnauthorized(res, "Refresh token missing");
+    return sendUnauthorized(res, 'Refresh token missing');
   }
 
   try {
     let user = null;
 
     if (checkFallback()) {
-      user = FallbackDb.findOne("users", { refreshToken });
+      user = FallbackDb.findOne('users', { refreshToken });
       if (!user) {
-        return sendUnauthorized(res, "Invalid refresh token");
+        return sendUnauthorized(res, 'Invalid refresh token');
       }
     } else {
       user = await User.findOne({ refreshToken });
       if (!user) {
-        return sendUnauthorized(res, "Invalid refresh token");
+        return sendUnauthorized(res, 'Invalid refresh token');
       }
     }
 
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(user);
 
     if (checkFallback()) {
-      FallbackDb.update("users", user.id, { refreshToken: newRefreshToken });
+      FallbackDb.update('users', user.id, { refreshToken: newRefreshToken });
     } else {
       user.refreshToken = newRefreshToken;
       await user.save();
     }
 
-    res.cookie("refreshToken", newRefreshToken, {
+    res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -297,8 +334,8 @@ export const refresh = async (req, res) => {
       accessToken,
     });
   } catch (error) {
-    console.error("Refresh token error:", error);
-    return sendUnauthorized(res, "Session expired, please login again");
+    console.error('Refresh token error:', error);
+    return sendUnauthorized(res, 'Session expired, please login again');
   }
 };
 
@@ -310,7 +347,35 @@ export const refresh = async (req, res) => {
  */
 export const getMe = async (req, res) => {
   if (!req.user) {
-    return sendUnauthorized(res, "User context missing");
+    return sendUnauthorized(res, 'User context missing');
+  }
+
+  let schoolInfo = null;
+  const schoolId = req.user?.schoolId || req.schoolId;
+
+  if (schoolId) {
+    try {
+      const school = await School.findOne({
+        $or: [{ _id: schoolId }, { schoolId }],
+      }).lean();
+
+      if (school) {
+        schoolInfo = {
+          schoolId: school.schoolId || school._id,
+          schoolName: school.schoolName,
+          schoolCode: school.schoolCode,
+          schoolLogo: school.schoolLogo || '',
+          schoolMotto: school.schoolMotto || '',
+          contactEmail: school.contactEmail || '',
+          schoolPhone: school.schoolPhone || '',
+          address: school.address || {},
+          board: school.board || 'CBSE',
+          status: school.status || 'active',
+        };
+      }
+    } catch (_err) {
+      // ignore
+    }
   }
 
   return sendSuccess(res, undefined, null, 200, {
@@ -321,471 +386,295 @@ export const getMe = async (req, res) => {
       admissionNumber: req.user.admissionNumber,
       email: req.user.email,
       role: req.user.role,
-      permissions: req.user.permissions || [],
       name: req.user.name,
-      avatar: req.user.avatar || req.user.photo || req.user.imagesRef?.img || "",
-      photo: req.user.photo || req.user.avatar || req.user.imagesRef?.img || "",
+      avatar: req.user.avatar || req.user.photo || req.user.imagesRef?.img || '',
+      photo: req.user.photo || req.user.avatar || req.user.imagesRef?.img || '',
       imagesRef: req.user.imagesRef || {
-        id: "",
-        img: req.user.avatar || req.user.photo || "",
+        id: '',
+        img: req.user.avatar || req.user.photo || '',
       },
       profileId: req.user.profileId,
       forcePasswordChange: req.user.forcePasswordChange || false,
       twoFactorEnabled: req.user.twoFactorEnabled || false,
     },
+    school: schoolInfo,
   });
 };
 
 /**
  * Super Admin registration and initial institution profile setup.
+ * Disabled for public access: institutional onboarding is exclusively via RGES Admin Portal.
  *
  * @param {import('express').Request} req - Express request
  * @param {import('express').Response} res - Express response
  */
 export const signup = async (req, res) => {
-  const {
-    name,
-    username,
-    email,
-    password,
-    schoolName,
-    schoolCode,
-    schoolType,
-    establishedYear,
-    academicYear,
-    contactEmail,
-    schoolPhone,
-    alternatePhone,
-    websiteUrl,
-    addressLine1,
-    addressLine2,
-    city,
-    state,
-    country,
-    postalCode,
-    schoolMotto,
-    principalName,
-  } = req.body;
-
-  if (!name || !username || !email || !password || !schoolName) {
-    return sendBadRequest(res, "Please provide all required fields");
-  }
-
-  const normalizedUserEmail = normalizeEmail(email);
-
-  try {
-    let user = null;
-
-    if (checkFallback()) {
-      const existingUser =
-        FallbackDb.findOne("users", { username: username.toLowerCase() }) ||
-        FallbackDb.findOne("users", { email: normalizedUserEmail });
-
-      if (existingUser) {
-        return sendBadRequest(res, "Username or email already exists");
-      }
-
-      user = FallbackDb.create("users", {
-        username: username.toLowerCase(),
-        email: normalizedUserEmail,
-        password,
-        role: "super-admin",
-        name,
-        isActive: true,
-      });
-
-      // Update fallback settings
-      FallbackDb.updateSettings({
-        schoolName,
-        schoolCode: schoolCode || "",
-        schoolType: schoolType || "secondary",
-        establishedYear: Number(establishedYear) || new Date().getFullYear(),
-        academicYear: academicYear || "2026-2027",
-        contactEmail: contactEmail || normalizedUserEmail,
-        schoolPhone: schoolPhone || "",
-        alternatePhone: alternatePhone || "",
-        websiteUrl: websiteUrl || "",
-        addressLine1: addressLine1 || "",
-        addressLine2: addressLine2 || "",
-        city: city || "",
-        state: state || "",
-        country: country || "",
-        postalCode: postalCode || "",
-        schoolMotto: schoolMotto || "",
-        principalName: principalName || "",
-      });
-    } else {
-      const existingUser = await User.findOne({
-        $or: [
-          { username: username.toLowerCase() },
-          { email: normalizedUserEmail },
-        ],
-      });
-
-      if (existingUser) {
-        return sendBadRequest(res, "Username or email already exists");
-      }
-
-      user = await User.create({
-        name,
-        username: username.toLowerCase(),
-        email: normalizedUserEmail,
-        password,
-        role: "super-admin",
-        isActive: true,
-      });
-
-      await Setting.findOneAndUpdate(
-        {},
-        {
-          schoolName,
-          schoolCode: schoolCode || "",
-          schoolType: schoolType || "secondary",
-          establishedYear: Number(establishedYear) || new Date().getFullYear(),
-          academicYear: academicYear || "2026-2027",
-          contactEmail: contactEmail || normalizedUserEmail,
-          schoolPhone: schoolPhone || "",
-          alternatePhone: alternatePhone || "",
-          websiteUrl: websiteUrl || "",
-          addressLine1: addressLine1 || "",
-          addressLine2: addressLine2 || "",
-          city: city || "",
-          state: state || "",
-          country: country || "",
-          postalCode: postalCode || "",
-          schoolMotto: schoolMotto || "",
-          principalName: principalName || "",
-        },
-        { new: true, upsert: true }
-      );
-    }
-
-    const { accessToken, refreshToken } = generateTokens(user);
-
-    const loginEntry = {
-      ip: req.ip || req.headers["x-forwarded-for"],
-      userAgent: req.headers["user-agent"],
-      timestamp: new Date(),
-    };
-
-    if (checkFallback()) {
-      const history = [...(user.loginHistory || []), loginEntry].slice(-20);
-      FallbackDb.update("users", user.id, {
-        refreshToken,
-        lastLogin: loginEntry.timestamp,
-        loginHistory: history,
-      });
-    } else {
-      user.refreshToken = refreshToken;
-      user.lastLogin = loginEntry.timestamp;
-      user.loginHistory = [...(user.loginHistory || []), loginEntry].slice(-20);
-      await user.save();
-    }
-
-    await logActivity({
-      userId: user.id || user._id,
-      action: "SIGNUP",
-      module: "auth",
-      details: `Super Admin ${user.name} signed up and registered school ${schoolName}`,
-      ipAddress: loginEntry.ip,
-      userAgent: loginEntry.userAgent,
-    });
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    return sendCreated(res, "Registration successful", null, {
-      accessToken,
-      user: {
-        id: user.id || user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        permissions: user.permissions || [],
-        name: user.name,
-        isActive: user.isActive,
-      },
-    });
-  } catch (error) {
-    console.error("Registration error:", error);
-    return sendError(res, "Server error during registration", 500);
-  }
+  return sendForbidden(
+    res,
+    'Public registration is disabled. Institutional onboarding is managed exclusively via the RGES Super Admin Portal.'
+  );
 };
 
 /**
  * Checks whether the platform requires initial Super Admin onboarding.
+ * In multi-tenant RGES, onboarding is strictly managed via Admin Portal.
  *
  * @param {import('express').Request} req - Express request
  * @param {import('express').Response} res - Express response
  */
 export const getSetupStatus = async (req, res) => {
-  try {
-    let count = 0;
-    if (checkFallback()) {
-      count = FallbackDb.findAll("users")?.length || 0;
-    } else {
-      count = await User.countDocuments();
-    }
-
-    const hasUsers = count > 0;
-
-    return sendSuccess(res, undefined, null, 200, {
-      hasUsers,
-      exists: hasUsers,
-      isSetupRequired: !hasUsers,
-    });
-  } catch (error) {
-    console.error("Setup status check error:", error);
-    return sendError(res, "Failed to check setup status", 500);
-  }
+  return sendSuccess(res, undefined, null, 200, {
+    hasUsers: true,
+    exists: true,
+    isSetupRequired: false,
+    registrationMode: 'admin-portal',
+    message: 'Institutional onboarding is managed exclusively via RGES Super Admin Portal.',
+  });
 };
 
 /**
- * Generates and delivers OTP via Resend for initial Super Admin setup.
+ * Setup OTP endpoint is disabled.
+ * Institutional onboarding is managed via Admin Portal.
  *
  * @param {import('express').Request} req - Express request
  * @param {import('express').Response} res - Express response
  */
 export const sendSetupOtp = async (req, res) => {
-  const { name, email, password, confirmPassword } = req.body;
-
-  if (!name || !email || !password) {
-    return sendBadRequest(
-      res,
-      "Please provide Super Admin Name, Email Address, and Password."
-    );
-  }
-
-  if (password.length < 5) {
-    return sendBadRequest(res, "Password must be at least 5 characters long.");
-  }
-
-  if (confirmPassword && password !== confirmPassword) {
-    return sendBadRequest(res, "Passwords do not match.");
-  }
-
-  const normalizedEmailAddress = normalizeEmail(email);
-
-  try {
-    let existingCount = 0;
-    if (checkFallback()) {
-      existingCount = FallbackDb.findAll("users")?.length || 0;
-    } else {
-      existingCount = await User.countDocuments();
-    }
-
-    if (existingCount > 0) {
-      return sendForbidden(
-        res,
-        "System setup is already complete. New administrators cannot be registered from this screen."
-      );
-    }
-
-    let existingUser = null;
-    if (checkFallback()) {
-      existingUser = FallbackDb.findOne("users", { email: normalizedEmailAddress });
-    } else {
-      existingUser = await User.findOne({ email: normalizedEmailAddress });
-    }
-
-    if (existingUser) {
-      return sendBadRequest(
-        res,
-        "A user with this email address already exists."
-      );
-    }
-
-    // Generate secure 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    if (!checkFallback()) {
-      await Otp.deleteMany({ email: normalizedEmailAddress });
-      await Otp.create({
-        email: normalizedEmailAddress,
-        name: name.trim(),
-        password,
-        otp,
-      });
-    } else {
-      FallbackDb.create("otps", {
-        email: normalizedEmailAddress,
-        name: name.trim(),
-        password,
-        otp,
-        createdAt: new Date(),
-      });
-    }
-
-    await sendOtpEmail({
-      to: normalizedEmailAddress,
-      name: name.trim(),
-      otp,
-    });
-
-    return sendSuccess(
-      res,
-      `A 6-digit verification code was sent to ${normalizedEmailAddress}.`,
-      null,
-      200,
-      { email: normalizedEmailAddress }
-    );
-  } catch (error) {
-    console.error("Error sending setup OTP:", error);
-    return sendError(
-      res,
-      error.message || "Failed to send verification code. Please try again.",
-      500
-    );
-  }
+  return sendForbidden(
+    res,
+    'Public registration is disabled. Institutional onboarding is managed exclusively via the RGES Super Admin Portal.'
+  );
 };
 
 /**
- * Validates OTP and activates the primary Super Admin profile.
+ * OTP Verification endpoint is disabled.
+ * Institutional onboarding is managed via Admin Portal.
  *
  * @param {import('express').Request} req - Express request
  * @param {import('express').Response} res - Express response
  */
 export const verifySetupOtp = async (req, res) => {
-  const { email, otp } = req.body;
+  return sendForbidden(
+    res,
+    'Public registration is disabled. Institutional onboarding is managed exclusively via the RGES Super Admin Portal.'
+  );
+};
 
-  if (!email || !otp) {
-    return sendBadRequest(
-      res,
-      "Email address and 6-digit OTP code are required."
-    );
-  }
-
-  const normalizedEmailAddress = normalizeEmail(email);
-  const cleanOtp = otp.toString().trim();
-
+/**
+ * Public endpoint to verify school status and metadata prior to user login.
+ * Resolves school by identifier (email, username, admissionNumber, employeeId, or direct schoolId/code).
+ *
+ * @route GET /api/v1/auth/school-check
+ * @route POST /api/v1/auth/school-check
+ */
+export const checkSchoolStatus = async (req, res) => {
   try {
-    let otpRecord = null;
-    if (checkFallback()) {
-      otpRecord = FallbackDb.findOne("otps", {
-        email: normalizedEmailAddress,
-        otp: cleanOtp,
-      });
-    } else {
-      otpRecord = await Otp.findOne({
-        email: normalizedEmailAddress,
-        otp: cleanOtp,
-      });
+    const rawIdentifier =
+      req.query.identifier ||
+      req.body?.identifier ||
+      req.query.schoolId ||
+      req.body?.schoolId ||
+      '';
+
+    if (!rawIdentifier || !String(rawIdentifier).trim()) {
+      return sendBadRequest(res, 'Identifier is required to verify school status');
     }
 
-    if (!otpRecord) {
-      return sendBadRequest(
-        res,
-        "Invalid or expired verification code. Please check and try again."
-      );
-    }
+    const cleanInput = String(rawIdentifier).trim().toLowerCase();
+    const cleanUpper = String(rawIdentifier).trim().toUpperCase();
 
-    let existingUser = null;
-    if (checkFallback()) {
-      existingUser = FallbackDb.findOne("users", { email: normalizedEmailAddress });
-    } else {
-      existingUser = await User.findOne({
+    // 1. Direct school lookup (by schoolId, _id, schoolCode, or collectionName)
+    let school = await School.findOne({
+      $or: [
+        { schoolId: cleanUpper },
+        { _id: cleanUpper },
+        { schoolCode: cleanUpper },
+        { collectionName: cleanInput },
+        { schoolId: cleanInput },
+      ],
+    }).lean();
+
+    // 2. If not found by direct school code, look up user
+    if (!school) {
+      const user = await User.findOne({
         $or: [
-          { email: normalizedEmailAddress },
-          { username: normalizedEmailAddress },
+          { email: cleanInput },
+          { username: cleanInput },
+          { admissionNumber: cleanUpper },
+          { employeeId: cleanUpper },
         ],
+      })
+        .setOptions({ skipTenantFilter: true })
+        .lean();
+
+      if (user && user.schoolId) {
+        school = await School.findOne({
+          $or: [{ _id: user.schoolId }, { schoolId: user.schoolId }],
+        }).lean();
+      }
+    }
+
+    if (!school) {
+      return res.status(200).json({
+        success: true,
+        status: 'unknown',
+        schoolStatus: 'unknown',
+        message: 'No school associated with this identifier yet.',
       });
     }
 
-    if (existingUser) {
+    const schoolId = school.schoolId || school._id;
+    const isSuspended =
+      school.status === 'suspended' || school.status === 'SUSPENDED';
+
+    if (isSuspended) {
+      return res.status(403).json({
+        success: false,
+        status: 'suspended',
+        schoolStatus: 'suspended',
+        schoolId,
+        schoolName: school.schoolName,
+        schoolCode: school.schoolCode,
+        schoolLogo: school.schoolLogo || '',
+        message: `Access to '${school.schoolName}' has been suspended. Please contact RGES Support.`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      status: 'active',
+      schoolStatus: 'active',
+      schoolId,
+      school: {
+        schoolId,
+        schoolName: school.schoolName,
+        schoolCode: school.schoolCode,
+        schoolLogo: school.schoolLogo || '',
+        schoolMotto: school.schoolMotto || '',
+        contactEmail: school.contactEmail || '',
+        schoolPhone: school.schoolPhone || '',
+        status: 'active',
+      },
+    });
+  } catch (error) {
+    console.error('checkSchoolStatus error:', error);
+    return sendError(res, 'Failed to verify school status', 500);
+  }
+};
+
+/**
+ * Public endpoint to handle forgotten password reset requests for students, staff, and parents.
+ *
+ * @route POST /api/v1/auth/forgot-password
+ * @access Public
+ */
+export const forgotPassword = async (req, res) => {
+  try {
+    const { identifier, newPassword } = req.body;
+    if (!identifier || !String(identifier).trim()) {
       return sendBadRequest(
         res,
-        "An account with this email address already exists."
+        'Please provide your registered Email, Username, or Admission Number'
       );
     }
 
-    let user = null;
-    if (checkFallback()) {
-      user = FallbackDb.create("users", {
-        username: normalizedEmailAddress,
-        email: normalizedEmailAddress,
-        password: otpRecord.password,
-        role: "super-admin",
-        name: otpRecord.name,
-        isActive: true,
-      });
-      if (otpRecord.id) FallbackDb.delete("otps", otpRecord.id);
-    } else {
-      user = await User.create({
-        name: otpRecord.name,
-        username: normalizedEmailAddress,
-        email: normalizedEmailAddress,
-        password: otpRecord.password,
-        role: "super-admin",
-        isActive: true,
+    const cleanInput = String(identifier).trim().toLowerCase();
+    const cleanUpper = String(identifier).trim().toUpperCase();
+
+    // Find user across User collection
+    let user = await User.findOne({
+      $or: [
+        { email: cleanInput },
+        { username: cleanInput },
+        { admissionNumber: cleanUpper },
+        { employeeId: cleanUpper },
+      ],
+    }).setOptions({ skipTenantFilter: true });
+
+    // If user record not found yet, check student collection
+    if (!user) {
+      const student = await Student.findOne({
+        $or: [{ email: cleanInput }, { admissionNumber: cleanUpper }],
       });
 
-      await Otp.deleteMany({ email: normalizedEmailAddress });
+      if (student) {
+        // Automatically provision or link the user account
+        user = await User.create({
+          schoolId: student.schoolId || 'IQRA_P01001',
+          username: student.admissionNumber
+            ? student.admissionNumber.toLowerCase()
+            : student.email.toLowerCase(),
+          admissionNumber: student.admissionNumber,
+          email: student.email ? student.email.toLowerCase() : undefined,
+          password: newPassword || 'Pass@123',
+          role: 'student',
+          permissions: student.permissions || [],
+          name: student.name,
+          profileId: student._id,
+          isActive: true,
+          forcePasswordChange: false,
+          accountExpiryDate: null,
+        });
+        student.user = user._id;
+        await student.save();
+
+        return sendSuccess(
+          res,
+          'Password reset successfully. You can now sign in with your new password.',
+          null,
+          200,
+          {
+            schoolId: user.schoolId,
+            user: {
+              username: user.username,
+              email: user.email,
+              admissionNumber: user.admissionNumber,
+              name: user.name,
+            },
+          }
+        );
+      }
     }
 
-    const { accessToken, refreshToken } = generateTokens(user);
-
-    const loginEntry = {
-      ip: req.ip || req.headers["x-forwarded-for"],
-      userAgent: req.headers["user-agent"],
-      timestamp: new Date(),
-    };
-
-    if (checkFallback()) {
-      FallbackDb.update("users", user.id, {
-        refreshToken,
-        lastLogin: loginEntry.timestamp,
-        loginHistory: [loginEntry],
-      });
-    } else {
-      user.refreshToken = refreshToken;
-      user.lastLogin = loginEntry.timestamp;
-      user.loginHistory = [loginEntry];
-      await user.save();
+    if (!user) {
+      return sendNotFound(
+        res,
+        'No account found matching this identifier. Please check your email or admission number.'
+      );
     }
 
-    await logActivity({
-      userId: user.id || user._id,
-      action: "SIGNUP_SUPER_ADMIN",
-      module: "auth",
-      details: `Super Admin ${user.name} (${user.email}) registered and verified via Resend OTP`,
-      ipAddress: loginEntry.ip,
-      userAgent: loginEntry.userAgent,
-    });
+    if (!newPassword || newPassword.length < 6) {
+      return sendBadRequest(
+        res,
+        'New password must be at least 6 characters long'
+      );
+    }
 
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    user.password = newPassword;
+    user.tempPassword = newPassword;
+    user.isActive = true;
+    user.accountExpiryDate = null;
+    user.forcePasswordChange = false;
+    await user.save();
 
-    return sendCreated(
+    return sendSuccess(
       res,
-      "Super Admin verified and registered successfully!",
+      'Password reset successfully. You can now log in with your new password.',
       null,
+      200,
       {
-        accessToken,
+        schoolId: user.schoolId,
         user: {
-          id: user.id || user._id,
           username: user.username,
           email: user.email,
-          role: user.role,
-          permissions: user.permissions || [],
+          admissionNumber: user.admissionNumber,
+          employeeId: user.employeeId,
           name: user.name,
-          isActive: user.isActive,
         },
       }
     );
   } catch (error) {
-    console.error("Error verifying setup OTP:", error);
-    return sendError(
-      res,
-      "Server error during verification. Please try again.",
-      500
-    );
+    console.error('forgotPassword error:', error);
+    return sendError(res, 'Failed to reset password', 500, error);
   }
 };

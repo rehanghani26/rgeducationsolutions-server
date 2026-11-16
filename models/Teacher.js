@@ -1,7 +1,16 @@
 import mongoose from "mongoose";
+import tenantPlugin from "../utils/tenantPlugin.js";
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const TeacherSchema = new mongoose.Schema(
   {
+    schoolId: {
+      type: String,
+      required: [true, "schoolId is required for teacher isolation"],
+      index: true,
+      uppercase: true,
+      trim: true,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -23,7 +32,6 @@ const TeacherSchema = new mongoose.Schema(
     employeeId: {
       type: String,
       required: true,
-      unique: true,
       uppercase: true,
       trim: true,
     },
@@ -162,4 +170,10 @@ const TeacherSchema = new mongoose.Schema(
   }
 );
 
-export default mongoose.model("Teacher", TeacherSchema);
+// Multi-tenant scoped compound index
+TeacherSchema.index({ schoolId: 1, employeeId: 1 }, { unique: true });
+
+TeacherSchema.plugin(tenantPlugin);
+
+const Teacher = mongoose.models.Teacher || mongoose.model('Teacher', TeacherSchema);
+export default createDynamicModelProxy('Teacher', Teacher);

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const passwordChangeRequestSchema = new mongoose.Schema(
   {
@@ -42,4 +43,4 @@ const PasswordChangeRequest =
   mongoose.models.PasswordChangeRequest ||
   mongoose.model('PasswordChangeRequest', passwordChangeRequestSchema);
 
-export default PasswordChangeRequest;
+export default createDynamicModelProxy('PasswordChangeRequest', PasswordChangeRequest);

@@ -13,7 +13,7 @@ import {
   generateS3Key,
   getPresignedUrl,
   resolveFileUrl,
-  isS3Key
+  isS3Key,
 } from '../config/s3.js';
 
 // 4. Models
@@ -31,22 +31,14 @@ import { sendStudentOtpEmail } from '../services/emailService.js';
 
 // 7. Utilities
 import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
-import {
-  normalizeEmail,
-  formatFullName,
-  generateSecurePassword
-} from '../utils/commonUtil.js';
-import {
-  parsePagination,
-  paginateResult,
-  paginateArray
-} from '../utils/paginateQuery.js';
+import { normalizeEmail, formatFullName, generateSecurePassword } from '../utils/commonUtil.js';
+import { parsePagination, paginateResult, paginateArray } from '../utils/paginateQuery.js';
 import {
   sendSuccess,
   sendCreated,
   sendBadRequest,
   sendNotFound,
-  sendError
+  sendError,
 } from '../utils/responseUtil.js';
 
 // ─── Default Permission Constants ─────────────────────────────────────────────
@@ -56,15 +48,10 @@ const DEFAULT_STUDENT_PERMISSIONS = [
   'academics',
   'timetable',
   'reports',
-  'communication'
+  'communication',
 ];
 
-const DEFAULT_PARENT_PERMISSIONS = [
-  'dashboard',
-  'student-management',
-  'fee',
-  'communication'
-];
+const DEFAULT_PARENT_PERMISSIONS = ['dashboard', 'student-management', 'fee', 'communication'];
 
 /**
  * Standardize admission number format.
@@ -72,8 +59,7 @@ const DEFAULT_PARENT_PERMISSIONS = [
  * @param {string} admissionNumber - Raw admission number string.
  * @returns {string} Trimmed uppercase admission number.
  */
-const normalizeAdmissionNumber = (admissionNumber = '') =>
-  admissionNumber.trim().toUpperCase();
+const normalizeAdmissionNumber = (admissionNumber = '') => admissionNumber.trim().toUpperCase();
 
 /**
  * Generate temporary random credentials for new students.
@@ -138,9 +124,8 @@ const getNextRollNumber = async (classId, sectionId) => {
 
   const year = new Date().getFullYear();
   const month = new Date().getMonth();
-  const academicYear = month >= 3
-    ? `${year}-${String(year + 1).slice(-2)}`
-    : `${year - 1}-${String(year).slice(-2)}`;
+  const academicYear =
+    month >= 3 ? `${year}-${String(year + 1).slice(-2)}` : `${year - 1}-${String(year).slice(-2)}`;
 
   if (checkFallback()) {
     const existing = FallbackDb.find('students').filter(
@@ -159,7 +144,7 @@ const getNextRollNumber = async (classId, sectionId) => {
     classId: String(classId),
     sectionId: String(sectionId),
     academicYear,
-    rollNumber: { $ne: null }
+    rollNumber: { $ne: null },
   })
     .sort({ rollNumber: -1 })
     .select('rollNumber');
@@ -171,18 +156,18 @@ const BACKEND_CLASS_OPTIONS = [
   { id: 'cls-nur', name: 'Nursery' },
   { id: 'cls-lkg', name: 'LKG' },
   { id: 'cls-ukg', name: 'UKG' },
-  { id: 'cls-1',   name: 'Class 1' },
-  { id: 'cls-2',   name: 'Class 2' },
-  { id: 'cls-3',   name: 'Class 3' },
-  { id: 'cls-4',   name: 'Class 4' },
-  { id: 'cls-5',   name: 'Class 5' },
-  { id: 'cls-6',   name: 'Class 6' },
-  { id: 'cls-7',   name: 'Class 7' },
-  { id: 'cls-8',   name: 'Class 8' },
-  { id: 'cls-9',   name: 'Class 9' },
-  { id: 'cls-10',  name: 'Class 10' },
-  { id: 'cls-11',  name: 'Class 11' },
-  { id: 'cls-12',  name: 'Class 12' }
+  { id: 'cls-1', name: 'Class 1' },
+  { id: 'cls-2', name: 'Class 2' },
+  { id: 'cls-3', name: 'Class 3' },
+  { id: 'cls-4', name: 'Class 4' },
+  { id: 'cls-5', name: 'Class 5' },
+  { id: 'cls-6', name: 'Class 6' },
+  { id: 'cls-7', name: 'Class 7' },
+  { id: 'cls-8', name: 'Class 8' },
+  { id: 'cls-9', name: 'Class 9' },
+  { id: 'cls-10', name: 'Class 10' },
+  { id: 'cls-11', name: 'Class 11' },
+  { id: 'cls-12', name: 'Class 12' },
 ];
 
 const BACKEND_SECTION_OPTIONS = [
@@ -192,7 +177,7 @@ const BACKEND_SECTION_OPTIONS = [
   { id: 'sec-d', name: 'Section D' },
   { id: 'sec-e', name: 'Section E' },
   { id: 'sec-f', name: 'Section F' },
-  { id: 'sec-g', name: 'Section G' }
+  { id: 'sec-g', name: 'Section G' },
 ];
 
 /**
@@ -271,8 +256,8 @@ const buildStudentPayload = async (data) => {
   const matchedClass = resolveClass(data.class || data.classId || data.className);
   const matchedSection = resolveSection(data.section || data.sectionId || data.sectionName);
 
-  const resolvedClassId = matchedClass ? matchedClass.id : (data.classId || null);
-  const resolvedSectionId = matchedSection ? matchedSection.id : (data.sectionId || null);
+  const resolvedClassId = matchedClass ? matchedClass.id : data.classId || null;
+  const resolvedSectionId = matchedSection ? matchedSection.id : data.sectionId || null;
 
   const rollNumber = await getNextRollNumber(resolvedClassId, resolvedSectionId);
 
@@ -283,9 +268,8 @@ const buildStudentPayload = async (data) => {
 
   const year = new Date().getFullYear();
   const month = new Date().getMonth();
-  const academicYear = month >= 3
-    ? `${year}-${String(year + 1).slice(-2)}`
-    : `${year - 1}-${String(year).slice(-2)}`;
+  const academicYear =
+    month >= 3 ? `${year}-${String(year + 1).slice(-2)}` : `${year - 1}-${String(year).slice(-2)}`;
 
   return {
     ...data,
@@ -301,10 +285,10 @@ const buildStudentPayload = async (data) => {
     bloodGroup: data.bloodGroup || undefined,
     classId: resolvedClassId,
     sectionId: resolvedSectionId,
-    class: matchedClass ? matchedClass.name : (data.class || null),
-    section: matchedSection ? matchedSection.name : (data.section || null),
-    className: matchedClass ? matchedClass.name : (data.className || null),
-    sectionName: matchedSection ? matchedSection.name : (data.sectionName || null),
+    class: matchedClass ? matchedClass.name : data.class || null,
+    section: matchedSection ? matchedSection.name : data.section || null,
+    className: matchedClass ? matchedClass.name : data.className || null,
+    sectionName: matchedSection ? matchedSection.name : data.sectionName || null,
     contactNumber: data.contactNumber || data.phone || data.parentContact || '',
     alternatePhone: data.alternatePhone || '',
     address: data.address || '',
@@ -313,14 +297,21 @@ const buildStudentPayload = async (data) => {
     parentEmail: data.parentEmail || '',
     aadhaarNumber: data.aadhaarNumber ? String(data.aadhaarNumber).trim() : '',
     photo: data.photo || data.imagesRef?.img || data.studentImg || '',
-    aadhaarDocument: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || '',
+    aadhaarDocument:
+      data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || '',
     imagesRef: {
-      id: data.imagesRef?.id || data.photoId || (data.photo || data.imagesRef?.img ? `img_${Date.now()}` : ''),
-      img: data.photo || data.imagesRef?.img || data.studentImg || ''
+      id:
+        data.imagesRef?.id ||
+        data.photoId ||
+        (data.photo || data.imagesRef?.img ? `img_${Date.now()}` : ''),
+      img: data.photo || data.imagesRef?.img || data.studentImg || '',
     },
     AdharRef: {
-      id: data.AdharRef?.id || data.aadhaarRef?.id || (data.aadhaarDocument || data.AdharRef?.pdf ? `doc_${Date.now()}` : ''),
-      pdf: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || ''
+      id:
+        data.AdharRef?.id ||
+        data.aadhaarRef?.id ||
+        (data.aadhaarDocument || data.AdharRef?.pdf ? `doc_${Date.now()}` : ''),
+      pdf: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || '',
     },
     joiningDate: data.joiningDate || new Date(),
     permissions:
@@ -334,7 +325,7 @@ const buildStudentPayload = async (data) => {
     loginRestriction: data.loginRestriction || 'none',
     documents: data.documents || [],
     academicHistory: data.academicHistory || [],
-    isEmailVerified: Boolean(data.isEmailVerified)
+    isEmailVerified: Boolean(data.isEmailVerified),
   };
 };
 
@@ -356,9 +347,7 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
   if (checkFallback()) {
     let parent =
       FallbackDb.findOne('parents', { phone: payload.parentContact }) ||
-      (payload.parentEmail
-        ? FallbackDb.findOne('parents', { email: parentEmail })
-        : null);
+      (payload.parentEmail ? FallbackDb.findOne('parents', { email: parentEmail }) : null);
 
     if (!parent) {
       const parentUser = FallbackDb.create('users', {
@@ -369,7 +358,7 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
         permissions: DEFAULT_PARENT_PERMISSIONS,
         name: payload.parentName,
         isActive: true,
-        forcePasswordChange: true
+        forcePasswordChange: true,
       });
       parent = FallbackDb.create('parents', {
         user: parentUser.id,
@@ -377,13 +366,13 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
         phone: payload.parentContact,
         email: parentEmail,
         children: [studentId],
-        status: 'active'
+        status: 'active',
       });
       FallbackDb.update('users', parentUser.id, { profileId: parent.id });
       parentAccount = {
         email: parentEmail,
         temporaryPassword: parentPassword,
-        created: true
+        created: true,
       };
     } else {
       const children = [...new Set([...(parent.children || []), studentId])];
@@ -397,8 +386,8 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
   let parent = await Parent.findOne({
     $or: [
       { phone: payload.parentContact },
-      ...(payload.parentEmail ? [{ email: parentEmail }] : [])
-    ]
+      ...(payload.parentEmail ? [{ email: parentEmail }] : []),
+    ],
   });
 
   if (!parent) {
@@ -410,7 +399,7 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
       permissions: DEFAULT_PARENT_PERMISSIONS,
       name: payload.parentName,
       isActive: true,
-      forcePasswordChange: true
+      forcePasswordChange: true,
     });
     parent = await Parent.create({
       user: parentUser._id,
@@ -418,14 +407,14 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
       phone: payload.parentContact,
       email: parentEmail,
       children: [studentId],
-      status: 'active'
+      status: 'active',
     });
     parentUser.profileId = parent._id;
     await parentUser.save();
     parentAccount = {
       email: parentEmail,
       temporaryPassword: parentPassword,
-      created: true
+      created: true,
     };
   } else {
     if (!parent.children.includes(studentId)) {
@@ -454,10 +443,14 @@ const enrichStudent = (stud) => {
 
   const className = matchedClass
     ? matchedClass.name
-    : (s.class && s.class !== 'null' && s.class !== 'undefined' ? s.class : (s.className || 'N/A'));
+    : s.class && s.class !== 'null' && s.class !== 'undefined'
+      ? s.class
+      : s.className || 'N/A';
   const sectionName = matchedSection
     ? matchedSection.name
-    : (s.section && s.section !== 'null' && s.section !== 'undefined' ? s.section : (s.sectionName || 'N/A'));
+    : s.section && s.section !== 'null' && s.section !== 'undefined'
+      ? s.section
+      : s.sectionName || 'N/A';
 
   const classId = s.classId || (matchedClass ? matchedClass.id : null);
   const sectionId = s.sectionId || (matchedSection ? matchedSection.id : null);
@@ -473,8 +466,10 @@ const enrichStudent = (stud) => {
     classDetails: { id: classId, name: className },
     sectionDetails: { id: sectionId, name: sectionName },
     parentDetails: s.parentId
-      ? (typeof s.parentId === 'object' ? s.parentId : FallbackDb.findById('parents', s.parentId))
-      : null
+      ? typeof s.parentId === 'object'
+        ? s.parentId
+        : FallbackDb.findById('parents', s.parentId)
+      : null,
   };
 };
 
@@ -491,7 +486,7 @@ const resolveStudentFileUrls = async (student) => {
     resolveFileUrl(student.photo, 3600),
     resolveFileUrl(student.aadhaarDocument, 3600),
     resolveFileUrl(student.imagesRef?.img, 3600),
-    resolveFileUrl(student.AdharRef?.pdf, 3600)
+    resolveFileUrl(student.AdharRef?.pdf, 3600),
   ]);
 
   return {
@@ -500,12 +495,12 @@ const resolveStudentFileUrls = async (student) => {
     aadhaarDocument: aadhaarUrl,
     imagesRef: {
       id: student.imagesRef?.id || '',
-      img: imagesRefImg
+      img: imagesRefImg,
     },
     AdharRef: {
       id: student.AdharRef?.id || '',
-      pdf: adharRefPdf
-    }
+      pdf: adharRefPdf,
+    },
   };
 };
 
@@ -523,7 +518,7 @@ export const getStudents = async (req, res) => {
       'rollNumber',
       'email',
       'parentName',
-      'contactNumber'
+      'contactNumber',
     ];
 
     const queryClassRaw = req.query.className || req.query.class || req.query.classId;
@@ -549,9 +544,10 @@ export const getStudents = async (req, res) => {
     }
 
     const targetClass = resolveClass(parsedClassStr);
-    const targetSection = (parsedSectionStr && parsedSectionStr.toLowerCase() !== 'all')
-      ? resolveSection(parsedSectionStr)
-      : null;
+    const targetSection =
+      parsedSectionStr && parsedSectionStr.toLowerCase() !== 'all'
+        ? resolveSection(parsedSectionStr)
+        : null;
 
     if (checkFallback()) {
       let list = FallbackDb.find('students').map(enrichStudent);
@@ -594,7 +590,7 @@ export const getStudents = async (req, res) => {
         limit,
         search,
         status,
-        searchFields
+        searchFields,
       });
 
       const resolved = await Promise.all(result.data.map(resolveStudentFileUrls));
@@ -619,9 +615,11 @@ export const getStudents = async (req, res) => {
       try {
         const parent = await Parent.findOne({
           $or: [
-            ...(req.user.profileId && mongoose.Types.ObjectId.isValid(req.user.profileId) ? [{ _id: req.user.profileId }] : []),
-            { user: req.user._id }
-          ]
+            ...(req.user.profileId && mongoose.Types.ObjectId.isValid(req.user.profileId)
+              ? [{ _id: req.user.profileId }]
+              : []),
+            { user: req.user._id },
+          ],
         });
         if (parent?.children?.length) {
           childIds = parent.children;
@@ -641,7 +639,7 @@ export const getStudents = async (req, res) => {
         { admissionNumber: regex },
         { email: regex },
         { parentName: regex },
-        { contactNumber: regex }
+        { contactNumber: regex },
       ];
       const numVal = Number(search);
       if (!isNaN(numVal) && search.trim() !== '') {
@@ -664,8 +662,8 @@ export const getStudents = async (req, res) => {
           { class: classRegex },
           { class: classPrefixRegex },
           { className: classPrefixRegex },
-          { classId: targetClass.name }
-        ]
+          { classId: targetClass.name },
+        ],
       });
     }
 
@@ -679,16 +677,13 @@ export const getStudents = async (req, res) => {
           { sectionName: secRegex },
           { section: secRegex },
           { section: secCodeRegex },
-          { sectionId: targetSection.name }
-        ]
+          { sectionId: targetSection.name },
+        ],
       });
     }
 
-    const filter = conditions.length > 1
-      ? { $and: conditions }
-      : conditions.length === 1
-      ? conditions[0]
-      : {};
+    const filter =
+      conditions.length > 1 ? { $and: conditions } : conditions.length === 1 ? conditions[0] : {};
 
     const sortObj = {};
     const sortField = sort.startsWith('-') ? sort.slice(1) : sort;
@@ -703,16 +698,18 @@ export const getStudents = async (req, res) => {
         .sort(sortObj)
         .skip(skip)
         .limit(limit),
-      Student.countDocuments(filter)
+      Student.countDocuments(filter),
     ]);
 
-    const resolvedStudents = await Promise.all(students.map(enrichStudent).map(resolveStudentFileUrls));
+    const resolvedStudents = await Promise.all(
+      students.map(enrichStudent).map(resolveStudentFileUrls)
+    );
 
     return res.json({
       success: true,
       students: resolvedStudents,
       data: resolvedStudents,
-      ...paginateResult(resolvedStudents, total, { page, limit })
+      ...paginateResult(resolvedStudents, total, { page, limit }),
     });
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
@@ -778,9 +775,7 @@ export const getStudentActivity = async (req, res) => {
         : await Student.findById(id).populate('user', 'loginHistory lastLogin');
 
     if (student?.user) {
-      const user = checkFallback()
-        ? FallbackDb.findById('users', student.user)
-        : student.user;
+      const user = checkFallback() ? FallbackDb.findById('users', student.user) : student.user;
       loginHistory = user?.loginHistory || [];
     }
 
@@ -816,7 +811,7 @@ export const sendStudentEmailOtp = async (req, res) => {
         email: normalizedEmail,
         name: (name || 'Student').trim(),
         otp,
-        purpose: 'student-email-verification'
+        purpose: 'student-email-verification',
       });
     } else {
       FallbackDb.create('otps', {
@@ -824,20 +819,20 @@ export const sendStudentEmailOtp = async (req, res) => {
         name: (name || 'Student').trim(),
         otp,
         purpose: 'student-email-verification',
-        createdAt: new Date()
+        createdAt: new Date(),
       });
     }
 
     await sendStudentOtpEmail({
       to: normalizedEmail,
       name: (name || 'Student').trim(),
-      otp
+      otp,
     });
 
     return res.json({
       success: true,
       message: `A 6-digit verification code was sent to ${normalizedEmail}`,
-      email: normalizedEmail
+      email: normalizedEmail,
     });
   } catch (error) {
     return sendError(res, error.message || 'Failed to send verification code', 500, error);
@@ -862,11 +857,14 @@ export const verifyStudentEmailOtp = async (req, res) => {
     if (!checkFallback()) {
       const otpRecord = await Otp.findOne({
         email: normalizedEmail,
-        otp: enteredOtp
+        otp: enteredOtp,
       }).sort({ createdAt: -1 });
 
       if (!otpRecord) {
-        return sendBadRequest(res, 'Invalid or expired verification code. Please request a new code.');
+        return sendBadRequest(
+          res,
+          'Invalid or expired verification code. Please request a new code.'
+        );
       }
 
       await Otp.deleteMany({ email: normalizedEmail });
@@ -876,7 +874,10 @@ export const verifyStudentEmailOtp = async (req, res) => {
         (o) => o.email === normalizedEmail && String(o.otp).trim() === enteredOtp
       );
       if (idx === -1) {
-        return sendBadRequest(res, 'Invalid or expired verification code. Please request a new code.');
+        return sendBadRequest(
+          res,
+          'Invalid or expired verification code. Please request a new code.'
+        );
       }
       FallbackDb.delete('otps', allOtps[idx].id);
     }
@@ -902,7 +903,7 @@ export const verifyStudentEmailOtp = async (req, res) => {
     return res.json({
       success: true,
       isEmailVerified: true,
-      message: 'Student email verified successfully!'
+      message: 'Student email verified successfully!',
     });
   } catch (error) {
     return sendError(res, error.message || 'Failed to verify email code', 500, error);
@@ -923,7 +924,7 @@ export const createStudent = async (req, res) => {
     }
 
     if (!payload.name) payload.name = `Student ${payload.admissionNumber}`;
-    if (!payload.contactNumber) payload.contactNumber = '+919876543210';
+    if (!payload.contactNumber) payload.contactNumber = '';
     if (!payload.parentName) payload.parentName = `Guardian of ${payload.name}`;
     if (!payload.parentContact) payload.parentContact = payload.contactNumber;
 
@@ -931,28 +932,31 @@ export const createStudent = async (req, res) => {
       return sendBadRequest(res, 'Aadhaar number is mandatory for student registration');
     }
     if (!payload.photo || !payload.photo.trim()) {
-      return sendBadRequest(res, 'Student photo (1MB or less) is mandatory for student registration');
+      return sendBadRequest(
+        res,
+        'Student photo (1MB or less) is mandatory for student registration'
+      );
     }
     if (!payload.aadhaarDocument || !payload.aadhaarDocument.trim()) {
-      return sendBadRequest(res, 'Aadhaar PDF document (1MB or less) is mandatory for student registration');
+      return sendBadRequest(
+        res,
+        'Aadhaar PDF document (1MB or less) is mandatory for student registration'
+      );
     }
 
-    if (
-      req.body.confirmPassword !== undefined &&
-      password !== req.body.confirmPassword
-    ) {
+    if (req.body.confirmPassword !== undefined && password !== req.body.confirmPassword) {
       return sendBadRequest(res, 'Password and confirm password do not match');
     }
 
     if (checkFallback()) {
       const duplicate =
         FallbackDb.findOne('students', {
-          admissionNumber: payload.admissionNumber
+          admissionNumber: payload.admissionNumber,
         }) || FallbackDb.findOne('users', { email: payload.email });
       if (duplicate) {
         return res.status(409).json({
           success: false,
-          message: 'Student admission number or email already exists'
+          message: 'Student admission number or email already exists',
         });
       }
 
@@ -961,20 +965,18 @@ export const createStudent = async (req, res) => {
       );
       let parent =
         FallbackDb.findOne('parents', { phone: payload.parentContact }) ||
-        (payload.parentEmail
-          ? FallbackDb.findOne('parents', { email: parentEmail })
-          : null);
+        (payload.parentEmail ? FallbackDb.findOne('parents', { email: parentEmail }) : null);
 
       if (!parent) {
         const existingParentUser =
           FallbackDb.findOne('users', { email: parentEmail }) ||
           FallbackDb.findOne('users', {
-            username: `par_${payload.parentContact}`
+            username: `par_${payload.parentContact}`,
           });
         if (existingParentUser) {
           return res.status(409).json({
             success: false,
-            message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`
+            message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`,
           });
         }
       }
@@ -992,21 +994,17 @@ export const createStudent = async (req, res) => {
         accountExpiryDate: payload.accountExpiryDate,
         loginRestriction: payload.loginRestriction,
         twoFactorEnabled: payload.twoFactorEnabled,
-        isEmailVerified: Boolean(payload.isEmailVerified)
+        isEmailVerified: Boolean(payload.isEmailVerified),
       });
       const studentRecord = FallbackDb.create('students', {
         ...payload,
-        user: userRecord.id
+        user: userRecord.id,
       });
       FallbackDb.update('users', userRecord.id, {
-        profileId: studentRecord.id
+        profileId: studentRecord.id,
       });
 
-      const { parentAccount } = await createOrLinkParent(
-        payload,
-        studentRecord.id,
-        password
-      );
+      const { parentAccount } = await createOrLinkParent(payload, studentRecord.id, password);
 
       await logActivity({
         userId: req.user?._id || req.user?.id,
@@ -1015,7 +1013,7 @@ export const createStudent = async (req, res) => {
         recordId: studentRecord.id,
         details: `Created student ${payload.name}`,
         ipAddress: req.ip,
-        userAgent: req.headers['user-agent']
+        userAgent: req.headers['user-agent'],
       });
 
       return res.status(201).json({
@@ -1025,19 +1023,19 @@ export const createStudent = async (req, res) => {
         accountCreated: {
           admissionNumber: payload.admissionNumber,
           email: payload.email,
-          temporaryPassword: password
+          temporaryPassword: password,
         },
-        parentAccount
+        parentAccount,
       });
     }
 
     const existingStudent = await Student.findOne({
-      admissionNumber: payload.admissionNumber
+      admissionNumber: payload.admissionNumber,
     });
     if (existingStudent) {
       return res.status(409).json({
         success: false,
-        message: `Admission number ${payload.admissionNumber} is already in use.`
+        message: `Admission number ${payload.admissionNumber} is already in use.`,
       });
     }
 
@@ -1045,16 +1043,16 @@ export const createStudent = async (req, res) => {
     if (emailConflict) {
       return res.status(409).json({
         success: false,
-        message: `Email ${payload.email} is already registered to another student.`
+        message: `Email ${payload.email} is already registered to another student.`,
       });
     }
 
     const orphanedUser = await User.findOne({
       $or: [
         { username: payload.admissionNumber.toLowerCase() },
-        { admissionNumber: payload.admissionNumber }
+        { admissionNumber: payload.admissionNumber },
       ],
-      profileId: { $exists: false }
+      profileId: { $exists: false },
     });
     if (orphanedUser) {
       await User.findByIdAndDelete(orphanedUser._id);
@@ -1066,26 +1064,24 @@ export const createStudent = async (req, res) => {
     let parent = await Parent.findOne({
       $or: [
         { phone: payload.parentContact },
-        ...(payload.parentEmail ? [{ email: parentEmail }] : [])
-      ]
+        ...(payload.parentEmail ? [{ email: parentEmail }] : []),
+      ],
     });
     if (!parent) {
       const existingParentUser = await User.findOne({
-        $or: [
-          { username: `par_${payload.parentContact}` },
-          { email: parentEmail }
-        ]
+        $or: [{ username: `par_${payload.parentContact}` }, { email: parentEmail }],
       });
       if (existingParentUser) {
         return res.status(409).json({
           success: false,
-          message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`
+          message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`,
         });
       }
     }
 
     const studentRecord = await Student.create(payload);
     const userRecord = await User.create({
+      schoolId: studentRecord.schoolId || req.schoolId,
       username: payload.admissionNumber.toLowerCase(),
       admissionNumber: payload.admissionNumber,
       email: payload.email,
@@ -1099,16 +1095,12 @@ export const createStudent = async (req, res) => {
       accountExpiryDate: payload.accountExpiryDate,
       loginRestriction: payload.loginRestriction,
       twoFactorEnabled: payload.twoFactorEnabled,
-      isEmailVerified: Boolean(payload.isEmailVerified)
+      isEmailVerified: Boolean(payload.isEmailVerified),
     });
     studentRecord.user = userRecord._id;
     await studentRecord.save();
 
-    const { parentAccount } = await createOrLinkParent(
-      payload,
-      studentRecord._id,
-      password
-    );
+    const { parentAccount } = await createOrLinkParent(payload, studentRecord._id, password);
 
     await logActivity({
       userId: req.user?._id,
@@ -1117,7 +1109,7 @@ export const createStudent = async (req, res) => {
       recordId: studentRecord._id,
       details: `Created student ${payload.name}`,
       ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
+      userAgent: req.headers['user-agent'],
     });
 
     return res.status(201).json({
@@ -1127,9 +1119,9 @@ export const createStudent = async (req, res) => {
       accountCreated: {
         admissionNumber: payload.admissionNumber,
         email: payload.email,
-        temporaryPassword: password
+        temporaryPassword: password,
       },
-      parentAccount
+      parentAccount,
     });
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
@@ -1152,8 +1144,12 @@ export const updateStudent = async (req, res) => {
       updateData.admissionNumber = normalizeAdmissionNumber(updateData.admissionNumber);
     }
 
-    const matchedClass = resolveClass(updateData.class || updateData.classId || updateData.className);
-    const matchedSection = resolveSection(updateData.section || updateData.sectionId || updateData.sectionName);
+    const matchedClass = resolveClass(
+      updateData.class || updateData.classId || updateData.className
+    );
+    const matchedSection = resolveSection(
+      updateData.section || updateData.sectionId || updateData.sectionName
+    );
 
     if (matchedClass) {
       updateData.class = matchedClass.name;
@@ -1167,19 +1163,20 @@ export const updateStudent = async (req, res) => {
     }
 
     if (updateData.firstName || updateData.lastName) {
-      updateData.name =
-        `${updateData.firstName || ''} ${updateData.lastName || ''}`.trim();
+      updateData.name = `${updateData.firstName || ''} ${updateData.lastName || ''}`.trim();
     }
 
     if (updateData.imagesRef || updateData.photo) {
       const pUrl = updateData.imagesRef?.img || updateData.photo || '';
-      const pId = updateData.imagesRef?.id || updateData.photoId || (pUrl ? `img_${Date.now()}` : '');
+      const pId =
+        updateData.imagesRef?.id || updateData.photoId || (pUrl ? `img_${Date.now()}` : '');
       updateData.photo = pUrl;
       updateData.imagesRef = { id: pId, img: pUrl };
     }
     if (updateData.AdharRef || updateData.aadhaarDocument) {
       const aUrl = updateData.AdharRef?.pdf || updateData.aadhaarDocument || '';
-      const aId = updateData.AdharRef?.id || updateData.aadhaarDocId || (aUrl ? `doc_${Date.now()}` : '');
+      const aId =
+        updateData.AdharRef?.id || updateData.aadhaarDocId || (aUrl ? `doc_${Date.now()}` : '');
       updateData.aadhaarDocument = aUrl;
       updateData.AdharRef = { id: aId, pdf: aUrl };
     }
@@ -1202,12 +1199,12 @@ export const updateStudent = async (req, res) => {
           permissions: updatedRecord.permissions,
           name: updatedRecord.name,
           isActive: updatedRecord.status === 'active',
-          isEmailVerified: Boolean(updatedRecord.isEmailVerified)
+          isEmailVerified: Boolean(updatedRecord.isEmailVerified),
         });
       }
     } else {
       updatedRecord = await Student.findByIdAndUpdate(id, updateData, {
-        new: true
+        new: true,
       });
       if (updatedRecord?.user) {
         await User.findByIdAndUpdate(updatedRecord.user, {
@@ -1221,7 +1218,7 @@ export const updateStudent = async (req, res) => {
           accountExpiryDate: updatedRecord.accountExpiryDate,
           loginRestriction: updatedRecord.loginRestriction,
           twoFactorEnabled: updatedRecord.twoFactorEnabled,
-          isEmailVerified: Boolean(updatedRecord.isEmailVerified)
+          isEmailVerified: Boolean(updatedRecord.isEmailVerified),
         });
       }
     }
@@ -1237,13 +1234,13 @@ export const updateStudent = async (req, res) => {
       recordId: id,
       details: `Updated student ${updatedRecord.name}`,
       ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
+      userAgent: req.headers['user-agent'],
     });
 
     return res.json({
       success: true,
       message: 'Student updated successfully',
-      student: enrichStudent(updatedRecord)
+      student: enrichStudent(updatedRecord),
     });
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
@@ -1270,7 +1267,7 @@ export const resetStudentPassword = async (req, res) => {
     const { id } = req.params;
     const password = req.body.generateRandomPassword
       ? generateRandomPassword()
-      : (req.body.password || req.body.newPassword);
+      : req.body.password || req.body.newPassword;
     if (!password || password.length < 6) {
       return sendBadRequest(res, 'Password must be at least 6 characters');
     }
@@ -1295,24 +1292,35 @@ export const resetStudentPassword = async (req, res) => {
           tempPassword: password,
           isActive: true,
           accountExpiryDate: null,
-          forcePasswordChange: Boolean(req.body.forcePasswordChange)
+          forcePasswordChange: Boolean(req.body.forcePasswordChange),
         });
       }
     } else {
-      let user = (student.user && mongoose.Types.ObjectId.isValid(student.user))
-        ? await User.findById(student.user)
-        : null;
+      let user =
+        student.user && mongoose.Types.ObjectId.isValid(student.user)
+          ? await User.findById(student.user).setOptions({ skipTenantFilter: true })
+          : null;
       if (!user && student.admissionNumber) {
-        user = await User.findOne({ admissionNumber: student.admissionNumber });
+        user = await User.findOne({
+          $or: [
+            { admissionNumber: student.admissionNumber },
+            { username: student.admissionNumber.toLowerCase() },
+          ],
+        }).setOptions({ skipTenantFilter: true });
       }
       if (!user && student.email) {
-        user = await User.findOne({ email: student.email });
+        user = await User.findOne({ email: student.email.toLowerCase() }).setOptions({
+          skipTenantFilter: true,
+        });
       }
       if (!user) {
         user = await User.create({
-          username: student.admissionNumber.toLowerCase(),
+          schoolId: student.schoolId || req.schoolId,
+          username: student.admissionNumber
+            ? student.admissionNumber.toLowerCase()
+            : student.email.toLowerCase(),
           admissionNumber: student.admissionNumber,
-          email: student.email,
+          email: student.email ? student.email.toLowerCase() : undefined,
           password,
           tempPassword: password,
           role: 'student',
@@ -1321,18 +1329,21 @@ export const resetStudentPassword = async (req, res) => {
           profileId: student._id,
           isActive: true,
           forcePasswordChange: Boolean(req.body.forcePasswordChange),
-          accountExpiryDate: null
+          accountExpiryDate: null,
         });
         student.user = user._id;
         await student.save();
-      }
-      if (user) {
+      } else {
         user.password = password;
         user.tempPassword = password;
         user.isActive = true;
         user.accountExpiryDate = null;
         user.forcePasswordChange = Boolean(req.body.forcePasswordChange);
         await user.save();
+        if (!student.user || String(student.user) !== String(user._id)) {
+          student.user = user._id;
+          await student.save();
+        }
       }
     }
 
@@ -1342,8 +1353,8 @@ export const resetStudentPassword = async (req, res) => {
       account: {
         admissionNumber: student.admissionNumber,
         email: student.email,
-        temporaryPassword: password
-      }
+        temporaryPassword: password,
+      },
     });
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
@@ -1393,12 +1404,12 @@ export const deleteStudent = async (req, res) => {
       recordId: id,
       details: `Deleted student ${studentName}`,
       ipAddress: req.ip,
-      userAgent: req.headers['user-agent']
+      userAgent: req.headers['user-agent'],
     });
 
     return res.json({
       success: true,
-      message: 'Student and linked user account deleted successfully'
+      message: 'Student and linked user account deleted successfully',
     });
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
@@ -1445,13 +1456,13 @@ export const bulkDeleteStudents = async (req, res) => {
       module: 'students',
       details: `Bulk deleted ${deleted} students`,
       ipAddress: req.ip,
-      metadata: { ids }
+      metadata: { ids },
     });
 
     return res.json({
       success: true,
       message: `${deleted} students deleted`,
-      deleted
+      deleted,
     });
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
@@ -1488,13 +1499,13 @@ export const bulkPromoteStudents = async (req, res) => {
       module: 'students',
       details: `Promoted ${promoted} students to class ${classId}`,
       ipAddress: req.ip,
-      metadata: { ids, classId, sectionId }
+      metadata: { ids, classId, sectionId },
     });
 
     return res.json({
       success: true,
       message: `${promoted} students promoted`,
-      promoted
+      promoted,
     });
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
@@ -1526,7 +1537,7 @@ export const exportStudents = async (req, res) => {
       'Parent',
       'Phone',
       'Status',
-      'Created'
+      'Created',
     ];
     const rows = students.map((s) =>
       [
@@ -1538,7 +1549,7 @@ export const exportStudents = async (req, res) => {
         s.parentName,
         s.contactNumber,
         s.status,
-        s.createdAt
+        s.createdAt,
       ]
         .map((v) => `"${String(v || '').replace(/"/g, '""')}"`)
         .join(',')
@@ -1580,9 +1591,7 @@ export const getStudentCredentials = async (req, res) => {
 
     const username = userRecord?.username || student?.admissionNumber || id;
     const email =
-      userRecord?.email ||
-      student?.email ||
-      `${String(username).toLowerCase()}@school.local`;
+      userRecord?.email || student?.email || `${String(username).toLowerCase()}@school.local`;
 
     let password =
       userRecord?.tempPassword ||
@@ -1602,8 +1611,8 @@ export const getStudentCredentials = async (req, res) => {
         email,
         password,
         name: student?.name || username,
-        admissionNumber: student?.admissionNumber || username
-      }
+        admissionNumber: student?.admissionNumber || username,
+      },
     });
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
@@ -1649,12 +1658,12 @@ export const bulkImportStudents = async (req, res) => {
             role: 'student',
             permissions: payload.permissions,
             name: payload.name,
-            isActive: true
+            isActive: true,
           });
           const createdStudent = FallbackDb.create('students', {
             ...payload,
             user: user.id,
-            tempPassword: password
+            tempPassword: password,
           });
           FallbackDb.update('users', user.id, { profileId: createdStudent.id });
           await createOrLinkParent(payload, createdStudent.id, password);
@@ -1662,15 +1671,15 @@ export const bulkImportStudents = async (req, res) => {
           const orphaned = await User.findOne({
             $or: [
               { username: payload.admissionNumber.toLowerCase() },
-              { admissionNumber: payload.admissionNumber }
+              { admissionNumber: payload.admissionNumber },
             ],
-            profileId: { $exists: false }
+            profileId: { $exists: false },
           });
           if (orphaned) await User.findByIdAndDelete(orphaned._id);
 
           const studentRecord = await Student.create({
             ...payload,
-            tempPassword: password
+            tempPassword: password,
           });
 
           const userRecord = await User.create({
@@ -1686,7 +1695,7 @@ export const bulkImportStudents = async (req, res) => {
             isActive: payload.status === 'active',
             forcePasswordChange: Boolean(payload.forcePasswordChange),
             loginRestriction: payload.loginRestriction || 'none',
-            twoFactorEnabled: Boolean(payload.twoFactorEnabled)
+            twoFactorEnabled: Boolean(payload.twoFactorEnabled),
           });
 
           studentRecord.user = userRecord._id;
@@ -1696,7 +1705,11 @@ export const bulkImportStudents = async (req, res) => {
         }
         successCount++;
       } catch (err) {
-        errors.push({ index: i, name: raw.firstName || raw.name || `Row ${i + 1}`, error: err.message });
+        errors.push({
+          index: i,
+          name: raw.firstName || raw.name || `Row ${i + 1}`,
+          error: err.message,
+        });
       }
     }
 
@@ -1706,7 +1719,7 @@ export const bulkImportStudents = async (req, res) => {
       module: 'students',
       details: `Bulk imported ${successCount} students`,
       ipAddress: req.ip,
-      metadata: { total: students.length, successCount, errorCount: errors.length }
+      metadata: { total: students.length, successCount, errorCount: errors.length },
     });
 
     return res.json({
@@ -1714,7 +1727,7 @@ export const bulkImportStudents = async (req, res) => {
       count: successCount,
       total: students.length,
       errors,
-      message: `Successfully imported ${successCount} out of ${students.length} students.${errors.length ? ` (${errors.length} failed)` : ''}`
+      message: `Successfully imported ${successCount} out of ${students.length} students.${errors.length ? ` (${errors.length} failed)` : ''}`,
     });
   } catch (error) {
     return sendError(res, 'Bulk import failed', 500, error);
@@ -1724,9 +1737,21 @@ export const bulkImportStudents = async (req, res) => {
 // ─── PROMOTE / DEMOTE STUDENTS (Bulk Whole School, Class-wise, or Individual) ───
 
 const CLASS_ORDER = [
-  'Nursery', 'LKG', 'UKG',
-  'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6',
-  'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12'
+  'Nursery',
+  'LKG',
+  'UKG',
+  'Class 1',
+  'Class 2',
+  'Class 3',
+  'Class 4',
+  'Class 5',
+  'Class 6',
+  'Class 7',
+  'Class 8',
+  'Class 9',
+  'Class 10',
+  'Class 11',
+  'Class 12',
 ];
 
 /**
@@ -1772,7 +1797,7 @@ export const promoteStudents = async (req, res) => {
       action = 'promote',
       sourceClass = '',
       studentIds = [],
-      targetSession = ''
+      targetSession = '',
     } = req.body;
 
     const isPromote = action === 'promote';
@@ -1787,8 +1812,11 @@ export const promoteStudents = async (req, res) => {
         if (mode === 'whole_school') {
           shouldUpdate = true;
         } else if (mode === 'class_wise') {
-          const sClass = String(s.className || s.class || '').split(' - ')[0].trim();
-          shouldUpdate = sClass.toLowerCase() === String(sourceClass).split(' - ')[0].trim().toLowerCase();
+          const sClass = String(s.className || s.class || '')
+            .split(' - ')[0]
+            .trim();
+          shouldUpdate =
+            sClass.toLowerCase() === String(sourceClass).split(' - ')[0].trim().toLowerCase();
         } else if (mode === 'individual') {
           shouldUpdate = studentIds.includes(String(s.id)) || studentIds.includes(String(s._id));
         }
@@ -1805,7 +1833,11 @@ export const promoteStudents = async (req, res) => {
             ...s,
             className: newCls,
             class: newCls,
-            status: isPassout ? 'Passout' : (isPromote && s.status === 'Passout' ? 'Passout' : 'active'),
+            status: isPassout
+              ? 'Passout'
+              : isPromote && s.status === 'Passout'
+                ? 'Passout'
+                : 'active',
             academicYear: targetSession || s.academicYear,
             promotionHistory: [
               ...(s.promotionHistory || []),
@@ -1815,9 +1847,9 @@ export const promoteStudents = async (req, res) => {
                 action: isPassout ? 'passout' : action,
                 sessionName: targetSession,
                 promotedAt: new Date().toISOString(),
-                promotedBy: req.user?.name || 'admin'
-              }
-            ]
+                promotedBy: req.user?.name || 'admin',
+              },
+            ],
           };
         }
         return s;
@@ -1830,14 +1862,14 @@ export const promoteStudents = async (req, res) => {
         action: isPromote ? 'PROMOTE' : 'DEMOTE',
         module: 'students',
         details: `${isPromote ? 'Promoted' : 'Demoted'} ${updatedCount} students (${mode})`,
-        ipAddress: req.ip
+        ipAddress: req.ip,
       });
 
       return res.json({
         success: true,
         updatedCount,
         message: `Successfully ${isPromote ? 'promoted' : 'demoted'} ${updatedCount} student(s)!`,
-        logs: updateLogs
+        logs: updateLogs,
       });
     }
 
@@ -1850,8 +1882,8 @@ export const promoteStudents = async (req, res) => {
       query = {
         $or: [
           { className: { $regex: new RegExp(`^${clsName}`, 'i') } },
-          { class: { $regex: new RegExp(`^${clsName}`, 'i') } }
-        ]
+          { class: { $regex: new RegExp(`^${clsName}`, 'i') } },
+        ],
       };
     } else if (mode === 'individual') {
       query = { _id: { $in: studentIds } };
@@ -1861,12 +1893,18 @@ export const promoteStudents = async (req, res) => {
 
     for (const student of students) {
       const currentCls = student.className || student.class || 'Class 1';
-      const newCls = isPromote ? getNextClass(currentCls) : getPrevClass(currentCls, student.status);
+      const newCls = isPromote
+        ? getNextClass(currentCls)
+        : getPrevClass(currentCls, student.status);
       const isPassout = newCls === 'Passout';
 
       student.className = newCls;
       student.class = newCls;
-      student.status = isPassout ? 'Passout' : (isPromote && student.status === 'Passout' ? 'Passout' : 'active');
+      student.status = isPassout
+        ? 'Passout'
+        : isPromote && student.status === 'Passout'
+          ? 'Passout'
+          : 'active';
       if (targetSession) student.academicYear = targetSession;
 
       student.promotionHistory = student.promotionHistory || [];
@@ -1877,7 +1915,7 @@ export const promoteStudents = async (req, res) => {
         sessionName: targetSession || activeSession?.sessionName || '',
         sessionId: activeSession?._id || null,
         promotedAt: new Date(),
-        promotedBy: req.user?.name || 'admin'
+        promotedBy: req.user?.name || 'admin',
       });
 
       await student.save();
@@ -1889,7 +1927,7 @@ export const promoteStudents = async (req, res) => {
             status: 'completed',
             completedAt: new Date(),
             completedBy: req.user?.name || 'admin',
-            action: isPassout ? 'passout' : action
+            action: isPassout ? 'passout' : action,
           }
         );
 
@@ -1910,7 +1948,7 @@ export const promoteStudents = async (req, res) => {
               action: 'promoted',
               status: 'active',
               enrolledAt: new Date(),
-              enrolledBy: req.user?.name || 'admin'
+              enrolledBy: req.user?.name || 'admin',
             },
             { upsert: true, new: true }
           );
@@ -1926,14 +1964,14 @@ export const promoteStudents = async (req, res) => {
       action: isPromote ? 'PROMOTE' : 'DEMOTE',
       module: 'students',
       details: `${isPromote ? 'Promoted' : 'Demoted'} ${updatedCount} students (${mode})`,
-      ipAddress: req.ip
+      ipAddress: req.ip,
     });
 
     return res.json({
       success: true,
       updatedCount,
       message: `Successfully ${isPromote ? 'promoted' : 'demoted'} ${updatedCount} student(s)!`,
-      logs: updateLogs
+      logs: updateLogs,
     });
   } catch (error) {
     return sendError(res, error.message || 'Promotion operation failed', 500, error);
@@ -1970,7 +2008,7 @@ export const rollbackPromotion = async (req, res) => {
             studentId: s.id || s._id,
             name: s.name,
             from: s.className || s.class,
-            revertedTo: prevClass
+            revertedTo: prevClass,
           });
 
           return {
@@ -1984,9 +2022,9 @@ export const rollbackPromotion = async (req, res) => {
                 ...lastEntry,
                 action: 'rolled_back',
                 rolledBackAt: new Date().toISOString(),
-                rolledBackBy: req.user?.name || 'admin'
-              }
-            ]
+                rolledBackBy: req.user?.name || 'admin',
+              },
+            ],
           };
         }
         return s;
@@ -2001,22 +2039,23 @@ export const rollbackPromotion = async (req, res) => {
         action: 'ROLLBACK_PROMOTION',
         module: 'students',
         details: `Rolled back promotion for ${revertedCount} students within ${maxHours}h window`,
-        ipAddress: req.ip
+        ipAddress: req.ip,
       });
 
       return res.json({
         success: true,
         revertedCount,
-        message: revertedCount > 0
-          ? `Successfully rolled back promotion for ${revertedCount} student(s) to previous state!`
-          : `No student promotions found within the last ${maxHours} hours to rollback.`,
-        logs: revertLogs
+        message:
+          revertedCount > 0
+            ? `Successfully rolled back promotion for ${revertedCount} student(s) to previous state!`
+            : `No student promotions found within the last ${maxHours} hours to rollback.`,
+        logs: revertLogs,
       });
     }
 
     // MongoDB Mode
     const students = await Student.find({
-      'promotionHistory.promotedAt': { $gte: cutoffTime }
+      'promotionHistory.promotedAt': { $gte: cutoffTime },
     });
 
     for (const student of students) {
@@ -2043,7 +2082,7 @@ export const rollbackPromotion = async (req, res) => {
           studentId: student._id,
           name: student.name,
           from: student.className,
-          revertedTo: prevClass
+          revertedTo: prevClass,
         });
       }
     }
@@ -2053,16 +2092,17 @@ export const rollbackPromotion = async (req, res) => {
       action: 'ROLLBACK_PROMOTION',
       module: 'students',
       details: `Rolled back promotion for ${revertedCount} students within ${maxHours}h window`,
-      ipAddress: req.ip
+      ipAddress: req.ip,
     });
 
     return res.json({
       success: true,
       revertedCount,
-      message: revertedCount > 0
-        ? `Successfully rolled back promotion for ${revertedCount} student(s) to previous state!`
-        : `No student promotions found within the last ${maxHours} hours to rollback.`,
-      logs: revertLogs
+      message:
+        revertedCount > 0
+          ? `Successfully rolled back promotion for ${revertedCount} student(s) to previous state!`
+          : `No student promotions found within the last ${maxHours} hours to rollback.`,
+      logs: revertLogs,
     });
   } catch (error) {
     return sendError(res, error.message || 'Rollback operation failed', 500, error);
@@ -2088,7 +2128,12 @@ export const getPromotionStatus = async (req, res) => {
         history.forEach((entry) => {
           const rawDate = entry.promotedAt || entry.createdAt;
           const entryMs = rawDate ? new Date(rawDate).getTime() : 0;
-          if (!isNaN(entryMs) && entryMs >= cutoffMs && entry.action !== 'rolled_back' && entry.action !== 'demote') {
+          if (
+            !isNaN(entryMs) &&
+            entryMs >= cutoffMs &&
+            entry.action !== 'rolled_back' &&
+            entry.action !== 'demote'
+          ) {
             activePromotionsCount++;
           }
         });
@@ -2097,7 +2142,7 @@ export const getPromotionStatus = async (req, res) => {
       return res.json({
         success: true,
         canRollback: activePromotionsCount > 0,
-        activePromotionsCount
+        activePromotionsCount,
       });
     }
 
@@ -2105,15 +2150,15 @@ export const getPromotionStatus = async (req, res) => {
       promotionHistory: {
         $elemMatch: {
           promotedAt: { $gte: cutoffTime },
-          action: { $nin: ['rolled_back', 'demote'] }
-        }
-      }
+          action: { $nin: ['rolled_back', 'demote'] },
+        },
+      },
     });
 
     return res.json({
       success: true,
       canRollback: activePromotionsCountMongo > 0,
-      activePromotionsCount: activePromotionsCountMongo
+      activePromotionsCount: activePromotionsCountMongo,
     });
   } catch (error) {
     return sendError(res, 'Failed to get promotion status', 500, error);
@@ -2140,9 +2185,8 @@ export const uploadStudentFile = async (req, res) => {
       (req.file.originalname && req.file.originalname.toLowerCase().endsWith('.pdf'));
 
     const uploadType = req.body.type || (isPdf ? 'aadhaar' : 'photo');
-    const folder = uploadType === 'photo'
-      ? 'school-erp/students/photos'
-      : 'school-erp/students/aadhaar';
+    const folder =
+      uploadType === 'photo' ? 'school-erp/students/photos' : 'school-erp/students/aadhaar';
 
     try {
       if (!process.env.AWS_S3_BUCKET_NAME) {
@@ -2158,14 +2202,15 @@ export const uploadStudentFile = async (req, res) => {
         buffer: req.file.buffer,
         key: s3Key,
         contentType: isPdf ? 'application/pdf' : req.file.mimetype,
-        contentDisposition: isPdf ? 'inline' : undefined
+        contentDisposition: isPdf ? 'inline' : undefined,
       });
 
       const presignedUrl = await getPresignedUrl(s3Key, 3600);
 
-      const ref = uploadType === 'photo'
-        ? { id: s3Key, img: presignedUrl }
-        : { id: s3Key, pdf: presignedUrl };
+      const ref =
+        uploadType === 'photo'
+          ? { id: s3Key, img: presignedUrl }
+          : { id: s3Key, pdf: presignedUrl };
 
       return res.json({
         success: true,
@@ -2173,13 +2218,13 @@ export const uploadStudentFile = async (req, res) => {
         url: presignedUrl,
         id: s3Key,
         publicId: s3Key,
-        format: isPdf ? 'pdf' : (req.file.originalname?.split('.').pop() || 'jpg'),
+        format: isPdf ? 'pdf' : req.file.originalname?.split('.').pop() || 'jpg',
         bytes: req.file.size,
         originalName: req.file.originalname,
         type: uploadType,
         imagesRef: uploadType === 'photo' ? ref : undefined,
         AdharRef: uploadType !== 'photo' ? ref : undefined,
-        ref
+        ref,
       });
     } catch (s3Err) {
       const uploadsDir = path.join(process.cwd(), 'uploads', 'students');
@@ -2194,9 +2239,8 @@ export const uploadStudentFile = async (req, res) => {
       fs.writeFileSync(destPath, req.file.buffer);
       const fileUrl = `/uploads/students/${safeFilename}`;
       const fileId = safeFilename;
-      const ref = uploadType === 'photo'
-        ? { id: fileId, img: fileUrl }
-        : { id: fileId, pdf: fileUrl };
+      const ref =
+        uploadType === 'photo' ? { id: fileId, img: fileUrl } : { id: fileId, pdf: fileUrl };
 
       return res.json({
         success: true,
@@ -2208,7 +2252,7 @@ export const uploadStudentFile = async (req, res) => {
         type: uploadType,
         imagesRef: uploadType === 'photo' ? ref : undefined,
         AdharRef: uploadType !== 'photo' ? ref : undefined,
-        ref
+        ref,
       });
     }
   } catch (error) {
@@ -2233,12 +2277,16 @@ export const getStudentFileById = async (req, res) => {
 
     if (checkFallback()) {
       const allStudents = FallbackDb.find('students') || [];
-      const studentWithPhoto = allStudents.find((s) => s.imagesRef?.id === fileId || s.photoId === fileId);
+      const studentWithPhoto = allStudents.find(
+        (s) => s.imagesRef?.id === fileId || s.photoId === fileId
+      );
       if (studentWithPhoto) {
         fileUrl = studentWithPhoto.imagesRef?.img || studentWithPhoto.photo;
         fileType = 'image';
       } else {
-        const studentWithDoc = allStudents.find((s) => s.AdharRef?.id === fileId || s.aadhaarRef?.id === fileId);
+        const studentWithDoc = allStudents.find(
+          (s) => s.AdharRef?.id === fileId || s.aadhaarRef?.id === fileId
+        );
         if (studentWithDoc) {
           fileUrl = studentWithDoc.AdharRef?.pdf || studentWithDoc.aadhaarDocument;
           fileType = 'pdf';
@@ -2246,14 +2294,14 @@ export const getStudentFileById = async (req, res) => {
       }
     } else {
       const studentWithPhoto = await Student.findOne({
-        $or: [{ 'imagesRef.id': fileId }, { photo: new RegExp(fileId, 'i') }]
+        $or: [{ 'imagesRef.id': fileId }, { photo: new RegExp(fileId, 'i') }],
       });
       if (studentWithPhoto) {
         fileUrl = studentWithPhoto.imagesRef?.img || studentWithPhoto.photo;
         fileType = 'image';
       } else {
         const studentWithDoc = await Student.findOne({
-          $or: [{ 'AdharRef.id': fileId }, { aadhaarDocument: new RegExp(fileId, 'i') }]
+          $or: [{ 'AdharRef.id': fileId }, { aadhaarDocument: new RegExp(fileId, 'i') }],
         });
         if (studentWithDoc) {
           fileUrl = studentWithDoc.AdharRef?.pdf || studentWithDoc.aadhaarDocument;
@@ -2266,9 +2314,12 @@ export const getStudentFileById = async (req, res) => {
       try {
         if (isS3Key(fileId)) {
           fileUrl = await getPresignedUrl(fileId, 3600);
-          fileType = fileId.toLowerCase().includes('aadhaar') ||
-                     fileId.toLowerCase().includes('adhar') ||
-                     fileId.toLowerCase().endsWith('.pdf') ? 'pdf' : 'image';
+          fileType =
+            fileId.toLowerCase().includes('aadhaar') ||
+            fileId.toLowerCase().includes('adhar') ||
+            fileId.toLowerCase().endsWith('.pdf')
+              ? 'pdf'
+              : 'image';
         } else {
           try {
             const cloudinary = configureCloudinary();
@@ -2305,7 +2356,7 @@ export const getStudentFileById = async (req, res) => {
       url: fileUrl,
       type: fileType,
       imagesRef: fileType === 'image' ? { id: fileId, img: fileUrl } : undefined,
-      AdharRef: fileType === 'pdf' ? { id: fileId, pdf: fileUrl } : undefined
+      AdharRef: fileType === 'pdf' ? { id: fileId, pdf: fileUrl } : undefined,
     });
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);

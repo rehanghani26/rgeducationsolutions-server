@@ -1,7 +1,17 @@
 import mongoose from "mongoose";
+import tenantPlugin from "../utils/tenantPlugin.js";
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const SettingSchema = new mongoose.Schema(
   {
+    schoolId: {
+      type: String,
+      required: [true, "schoolId is required for settings separation"],
+      unique: true,
+      index: true,
+      uppercase: true,
+      trim: true,
+    },
     // School Information
     schoolName: {
       type: String,
@@ -343,12 +353,12 @@ const SettingSchema = new mongoose.Schema(
     // Public School Portal Settings
     portalSettings: {
       enabled: { type: Boolean, default: true },
-      schoolName: { type: String, default: "Apex International Academy" },
+      schoolName: { type: String, default: "" },
       affiliation: {
         type: String,
-        default: "Affiliated to Central Board & Cambridge Curriculum",
+        default: "",
       },
-      affiliationCode: { type: String, default: "SCH-2026-CBSE-9912" },
+      affiliationCode: { type: String, default: "" },
       tagline: {
         type: String,
         default: "Quality Education for a Better Future",
@@ -365,7 +375,7 @@ const SettingSchema = new mongoose.Schema(
       },
       admissionBadge: {
         type: String,
-        default: "Admissions Open for 2026-2027",
+        default: "Admissions Open for New Session",
       },
       aboutTitle: { type: String, default: "About Our School" },
       aboutDescription: {
@@ -373,8 +383,8 @@ const SettingSchema = new mongoose.Schema(
         default:
           "Our school provides quality education in a safe and friendly environment with experienced teachers and modern learning facilities.",
       },
-      principalName: { type: String, default: "Dr. Eleanor Vance, Ph.D." },
-      principalRole: { type: String, default: "Principal & Head of School" },
+      principalName: { type: String, default: "" },
+      principalRole: { type: String, default: "Principal" },
       principalMessage: {
         type: String,
         default:
@@ -749,4 +759,7 @@ const SettingSchema = new mongoose.Schema(
   }
 );
 
-export default mongoose.model("Setting", SettingSchema);
+SettingSchema.plugin(tenantPlugin);
+
+const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
+export default createDynamicModelProxy('Setting', Setting);

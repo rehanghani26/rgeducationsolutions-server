@@ -16,8 +16,11 @@ import { connectDB, getDbState, reconnectDB } from "./config/db.js";
 // 5. Middleware
 import { auditMiddleware } from "./middleware/auditLog.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { tenantMiddleware } from "./middleware/tenant.js";
+import tenantContext from "./utils/tenantContext.js";
 
 // 8. Other internal modules (Routes)
+import adminRoutes from "./routes/adminRoutes.js";
 import aiRoutes from "./ai/ai.routes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
 import auditLogRoutes from "./routes/auditLogRoutes.js";
@@ -39,6 +42,7 @@ import periodRoutes from "./routes/periodRoutes.js";
 import portalRoutes from "./routes/portalRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import resultRoutes from "./routes/resultRoutes.js";
+import roleAccessRoutes from "./routes/roleAccessRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
 import setupRoutes from "./routes/setupRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
@@ -95,8 +99,55 @@ app.use(
 // Connect database
 connectDB();
 
+// Global response middleware: ensures schoolId is automatically attached to all API JSON responses
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = function (body) {
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const activeSchoolId =
+        tenantContext.getSchoolId() ||
+        req.user?.schoolId ||
+        req.schoolId ||
+        req.tenant?.schoolId ||
+        req.headers["x-school-id"] ||
+        body.schoolId ||
+        null;
+
+      if (activeSchoolId) {
+        if (body.schoolId === undefined) {
+          body.schoolId = activeSchoolId;
+        }
+        if (
+          body.stats &&
+          typeof body.stats === "object" &&
+          !Array.isArray(body.stats) &&
+          body.stats.schoolId === undefined
+        ) {
+          body.stats.schoolId = activeSchoolId;
+        }
+        if (
+          body.data &&
+          typeof body.data === "object" &&
+          !Array.isArray(body.data) &&
+          body.data.schoolId === undefined
+        ) {
+          body.data.schoolId = activeSchoolId;
+        }
+      }
+    }
+    return originalJson(body);
+  };
+  next();
+});
+
 // Audit logging for authenticated API requests
 app.use("/api/v1", auditMiddleware);
+
+// Super Admin API routes (bypass tenant requirements)
+app.use("/api/v1/admin", adminRoutes);
+
+// Multi-tenant resolution middleware for School ERP routes
+app.use(["/api/v1", "/api"], tenantMiddleware);
 
 // Register API Routes
 app.use("/api/v1/auth", authRoutes);
@@ -129,6 +180,7 @@ app.use("/api/v1/results", resultRoutes);
 app.use("/api/v1/syllabus", syllabusRoutes);
 app.use("/api/v1/documents", documentRoutes);
 app.use("/api/v1/setup", setupRoutes);
+app.use(["/api/v1/role-access", "/api/role-access"], roleAccessRoutes);
 
 app.use("/api/v1/classes", classRoutes); // ClassRoom module
 app.use(["/api/v1/leaves", "/api/leaves"], leaveRoutes); // Universal Leave Management module

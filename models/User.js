@@ -1,18 +1,24 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import tenantPlugin from '../utils/tenantPlugin.js';
 
 const UserSchema = new mongoose.Schema({
+  schoolId: {
+    type: String,
+    required: [true, 'schoolId is mandatory for school user separation'],
+    index: true,
+    uppercase: true,
+    trim: true,
+  },
   username: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
     lowercase: true
   },
   email: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
     lowercase: true
   },
@@ -24,15 +30,11 @@ const UserSchema = new mongoose.Schema({
     type: String,
     trim: true,
     uppercase: true,
-    sparse: true,
-    unique: true
   },
   admissionNumber: {
     type: String,
     trim: true,
     uppercase: true,
-    sparse: true,
-    unique: true
   },
   password: {
     type: String,
@@ -57,10 +59,11 @@ const UserSchema = new mongoose.Schema({
     ],
     default: 'teacher'
   },
-  permissions: [{
-    type: String,
-    trim: true
-  }],
+  // Deprecated: Permissions are now governed 100% role-wise via RolePermission model
+  permissions: {
+    type: [String],
+    default: [],
+  },
   name: {
     type: String,
     required: true
@@ -206,5 +209,25 @@ UserSchema.methods.comparePassword = async function (enteredPassword) {
   }
   return enteredPassword === this.password;
 };
+
+// Multi-tenant scoped compound indexes
+UserSchema.index({ schoolId: 1, email: 1 }, { unique: true });
+UserSchema.index({ schoolId: 1, username: 1 }, { unique: true });
+UserSchema.index(
+  { schoolId: 1, employeeId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { employeeId: { $type: 'string' } },
+  }
+);
+UserSchema.index(
+  { schoolId: 1, admissionNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { admissionNumber: { $type: 'string' } },
+  }
+);
+
+UserSchema.plugin(tenantPlugin);
 
 export default mongoose.model('User', UserSchema);

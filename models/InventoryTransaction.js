@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const InventoryTransactionSchema = new mongoose.Schema(
   {
@@ -88,5 +89,6 @@ const InventoryTransactionSchema = new mongoose.Schema(
   }
 );
 
-export default mongoose.model('InventoryTransaction', InventoryTransactionSchema);
+const InventoryTransaction = mongoose.models.InventoryTransaction || mongoose.model('InventoryTransaction', InventoryTransactionSchema);
+export default createDynamicModelProxy('InventoryTransaction', InventoryTransaction);
 

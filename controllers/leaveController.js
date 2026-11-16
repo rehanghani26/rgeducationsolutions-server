@@ -166,7 +166,7 @@ export const getApplicantLeaveProfile = async (req, res) => {
     };
     resultPayload.data = { ...resultPayload };
 
-    return sendSuccess(res, undefined, resultPayload);
+    return sendSuccess(res, undefined, resultPayload, 200, resultPayload);
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
   }
@@ -198,7 +198,8 @@ export const getMyLeaves = async (req, res) => {
       records = await LeaveRequest.find({ $or: orConditions }).sort({ startDate: -1, createdAt: -1 });
     }
 
-    return sendSuccess(res, undefined, { leaves: records });
+    const payload = { leaves: records };
+    return sendSuccess(res, undefined, payload, 200, payload);
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
   }
@@ -258,10 +259,12 @@ export const getAllLeaves = async (req, res) => {
       const total = list.length;
       const data = list.slice(skip, skip + limit);
 
-      return sendSuccess(res, undefined, {
+      const paginationData = paginateResult(data, total, { page, limit });
+      const payload = {
         leaves: data,
-        ...paginateResult(data, total, { page, limit }),
-      });
+        ...paginationData,
+      };
+      return sendSuccess(res, undefined, payload, 200, payload);
     }
 
     const filter = {};
@@ -295,10 +298,12 @@ export const getAllLeaves = async (req, res) => {
       LeaveRequest.countDocuments(filter),
     ]);
 
-    return sendSuccess(res, undefined, {
+    const paginationData = paginateResult(leaves, total, { page, limit });
+    const payload = {
       leaves,
-      ...paginateResult(leaves, total, { page, limit }),
-    });
+      ...paginationData,
+    };
+    return sendSuccess(res, undefined, payload, 200, payload);
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
   }
@@ -423,6 +428,9 @@ export const reviewLeave = async (req, res) => {
       return sendBadRequest(res, 'Invalid status. Must be approved or rejected.');
     }
 
+    const reviewerRole = String(req.user?.role || '').toLowerCase();
+    const isAdminReviewer = ['super-admin', 'superadmin', 'school-admin', 'admin', 'principal', 'director'].includes(reviewerRole);
+
     let leave = null;
 
     if (checkFallback()) {
@@ -432,6 +440,16 @@ export const reviewLeave = async (req, res) => {
       }
       if (leave.status !== 'pending') {
         return sendBadRequest(res, `Cannot review. Leave is already marked as ${leave.status}.`);
+      }
+
+      // Role Boundary: Non-admins (e.g. Teachers) can only approve student leaves
+      if (!isAdminReviewer && (leave.applicantRole || '').toLowerCase() !== 'student') {
+        return sendForbidden(res, 'Only the Principal or Administrator is authorized to review faculty and staff leave requests.');
+      }
+
+      // Role Boundary: Non-admins (e.g. Teachers) can only approve student leaves
+      if (!isAdminReviewer && (leave.applicantRole || '').toLowerCase() !== 'student') {
+        return sendForbidden(res, 'Only the Principal or Administrator is authorized to review faculty and staff leave requests.');
       }
 
       leave.status = status;
@@ -461,6 +479,11 @@ export const reviewLeave = async (req, res) => {
       }
       if (leave.status !== 'pending') {
         return sendBadRequest(res, `Cannot review. Leave is already marked as ${leave.status}.`);
+      }
+
+      // Role Boundary: Non-admins (e.g. Teachers) can only approve student leaves
+      if (!isAdminReviewer && (leave.applicantRole || '').toLowerCase() !== 'student') {
+        return sendForbidden(res, 'Only the Principal or Administrator is authorized to review faculty and staff leave requests.');
       }
 
       leave.status = status;
@@ -628,7 +651,7 @@ export const getActiveLeavesOnDate = async (req, res) => {
       activeLeaves = await LeaveRequest.find(filter);
     }
 
-    return sendSuccess(res, undefined, {
+    const payload = {
       date,
       count: activeLeaves.length,
       leaves: activeLeaves.map((l) => ({
@@ -644,7 +667,8 @@ export const getActiveLeavesOnDate = async (req, res) => {
         halfDaySession: l.halfDaySession,
         reason: l.reason,
       })),
-    });
+    };
+    return sendSuccess(res, undefined, payload, 200, payload);
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
   }

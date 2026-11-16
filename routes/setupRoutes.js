@@ -12,14 +12,21 @@ import {
   getSetupStatus,
   resetWizard,
 } from "../controllers/setupController.js";
+import {
+  getMyRolePermissions,
+  getRolePermissions,
+  resetRolePermissions,
+  updateRolePermissions,
+} from "../controllers/roleAccessController.js";
 
 /**
  * @file setupRoutes.js
- * @description API routes for the School ERP Setup Wizard.
+ * @description API routes for the School ERP Setup Wizard & Role Access Control.
  */
 
 const router = express.Router();
 
+// ─── Setup Wizard Endpoints ───
 // GET /api/v1/setup/status — View setup progress
 router.get("/status", protect, getSetupStatus);
 
@@ -41,5 +48,26 @@ router.post(
 
 // POST /api/v1/setup/reset — Super admin only: reset wizard flags
 router.post("/reset", protect, authorize("super-admin"), resetWizard);
+
+// ─── Role & Access Governance Endpoints ───
+router.get("/roles-access/my", protect, getMyRolePermissions);
+router.get(
+  "/roles-access",
+  protect,
+  authorize("super-admin", "school-admin", "admin", "principal"),
+  getRolePermissions
+);
+router.put(
+  "/roles-access/:role",
+  protect,
+  authorize("super-admin", "school-admin", "admin"),
+  updateRolePermissions
+);
+router.post(
+  ["/roles-access/reset", "/roles-access/reset/:role"],
+  protect,
+  authorize("super-admin", "school-admin", "admin"),
+  resetRolePermissions
+);
 
 export default router;

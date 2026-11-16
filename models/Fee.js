@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const FeeSchema = new mongoose.Schema({
   studentId: {
@@ -42,4 +43,5 @@ const FeeSchema = new mongoose.Schema({
   timestamps: true
 });
 
-export default mongoose.model('Fee', FeeSchema);
+const Fee = mongoose.models.Fee || mongoose.model('Fee', FeeSchema);
+export default createDynamicModelProxy('Fee', Fee);
