@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { checkFallback } from "../config/db.js";
+import Student from "../models/Student.js";
 import User from "../models/User.js";
 import { FallbackDb } from "../services/dbFallback.js";
 import tenantContext from "../utils/tenantContext.js";
@@ -81,23 +82,53 @@ export const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, getJwtSecret());
     const userId = decoded.userId || decoded.id;
 
+    if (decoded.role === 'parent') {
+      return sendForbidden(res, "Parent accounts do not have access.");
+    }
+
     let user = null;
     if (checkFallback()) {
-      user = FallbackDb.findById("users", userId);
-    } else {
-      if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-        user = await User.findById(userId)
-          .setOptions({ skipTenantFilter: true })
-          .select("-password");
+      if (decoded.role === 'student') {
+        user = FallbackDb.findById("students", userId);
+        if (user) {
+          user.role = 'student';
+          user.profileId = user.id || user._id;
+        }
+      } else {
+        user = FallbackDb.findById("users", userId);
       }
-      if (!user && decoded.username) {
-        user = await User.findOne({ username: decoded.username })
-          .setOptions({ skipTenantFilter: true })
-          .select("-password");
+    } else {
+      if (decoded.role === 'student') {
+        if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+          user = await Student.findById(userId)
+            .setOptions({ skipTenantFilter: true })
+            .select("-password");
+        }
+        if (!user && (decoded.admissionNumber || decoded.username)) {
+          const adm = String(decoded.admissionNumber || decoded.username).toUpperCase();
+          user = await Student.findOne({ admissionNumber: adm })
+            .setOptions({ skipTenantFilter: true })
+            .select("-password");
+        }
+        if (user) {
+          user.role = 'student';
+          user.profileId = user._id;
+        }
+      } else {
+        if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+          user = await User.findById(userId)
+            .setOptions({ skipTenantFilter: true })
+            .select("-password");
+        }
+        if (!user && decoded.username) {
+          user = await User.findOne({ username: decoded.username })
+            .setOptions({ skipTenantFilter: true })
+            .select("-password");
+        }
       }
     }
 
-    if (user && user.isActive === false) {
+    if (user && (user.isActive === false || user.status === "inactive")) {
       return sendForbidden(
         res,
         "Your account has been deactivated by the administrator. Access denied."

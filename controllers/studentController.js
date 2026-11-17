@@ -7,7 +7,6 @@ import mongoose from 'mongoose';
 
 // 3. Configuration
 import { checkFallback } from '../config/db.js';
-import { configureCloudinary } from '../config/cloudinary.js';
 import {
   uploadToS3,
   generateS3Key,
@@ -40,18 +39,6 @@ import {
   sendNotFound,
   sendError,
 } from '../utils/responseUtil.js';
-
-// ─── Default Permission Constants ─────────────────────────────────────────────
-
-const DEFAULT_STUDENT_PERMISSIONS = [
-  'dashboard',
-  'academics',
-  'timetable',
-  'reports',
-  'communication',
-];
-
-const DEFAULT_PARENT_PERMISSIONS = ['dashboard', 'student-management', 'fee', 'communication'];
 
 /**
  * Standardize admission number format.
@@ -268,8 +255,11 @@ const buildStudentPayload = async (data) => {
 
   const year = new Date().getFullYear();
   const month = new Date().getMonth();
-  const academicYear =
+  const fallbackYear =
     month >= 3 ? `${year}-${String(year + 1).slice(-2)}` : `${year - 1}-${String(year).slice(-2)}`;
+  const academicYear =
+    data.academicYear || data.sessionName || data.session || fallbackYear;
+  const sessionId = data.sessionId || null;
 
   return {
     ...data,
@@ -280,6 +270,7 @@ const buildStudentPayload = async (data) => {
     admissionNumber,
     rollNumber,
     academicYear,
+    sessionId,
     gender: data.gender || 'Male',
     dob: data.dob || data.dateOfBirth || undefined,
     bloodGroup: data.bloodGroup || undefined,
@@ -314,10 +305,6 @@ const buildStudentPayload = async (data) => {
       pdf: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || '',
     },
     joiningDate: data.joiningDate || new Date(),
-    permissions:
-      Array.isArray(data.permissions) && data.permissions.length
-        ? data.permissions
-        : DEFAULT_STUDENT_PERMISSIONS,
     status: data.status || 'active',
     role: 'student',
     forcePasswordChange: Boolean(data.forcePasswordChange),
@@ -341,7 +328,6 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
   const parentEmail = normalizeEmail(
     payload.parentEmail || `${payload.parentContact}@parent.school.local`
   );
-  const parentPassword = payload.parentPassword || generateParentPassword();
   let parentAccount = null;
 
   if (checkFallback()) {
@@ -350,37 +336,19 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
       (payload.parentEmail ? FallbackDb.findOne('parents', { email: parentEmail }) : null);
 
     if (!parent) {
-      const parentUser = FallbackDb.create('users', {
-        username: `par_${payload.parentContact}`,
-        email: parentEmail,
-        password: parentPassword,
-        role: 'parent',
-        permissions: DEFAULT_PARENT_PERMISSIONS,
-        name: payload.parentName,
-        isActive: true,
-        forcePasswordChange: true,
-      });
       parent = FallbackDb.create('parents', {
-        user: parentUser.id,
         name: payload.parentName,
         phone: payload.parentContact,
         email: parentEmail,
         children: [studentId],
         status: 'active',
       });
-      FallbackDb.update('users', parentUser.id, { profileId: parent.id });
-      parentAccount = {
-        email: parentEmail,
-        temporaryPassword: parentPassword,
-        created: true,
-      };
     } else {
       const children = [...new Set([...(parent.children || []), studentId])];
       FallbackDb.update('parents', parent.id, { children });
-      parentAccount = { email: parent.email, created: false };
     }
     FallbackDb.update('students', studentId, { parentId: parent.id });
-    return { parentId: parent.id, parentAccount };
+    return { parentId: parent.id, parentAccount: null };
   }
 
   let parent = await Parent.findOne({
@@ -391,41 +359,22 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
   });
 
   if (!parent) {
-    const parentUser = await User.create({
-      username: `par_${payload.parentContact}`,
-      email: parentEmail,
-      password: parentPassword,
-      role: 'parent',
-      permissions: DEFAULT_PARENT_PERMISSIONS,
-      name: payload.parentName,
-      isActive: true,
-      forcePasswordChange: true,
-    });
     parent = await Parent.create({
-      user: parentUser._id,
       name: payload.parentName,
       phone: payload.parentContact,
       email: parentEmail,
       children: [studentId],
       status: 'active',
     });
-    parentUser.profileId = parent._id;
-    await parentUser.save();
-    parentAccount = {
-      email: parentEmail,
-      temporaryPassword: parentPassword,
-      created: true,
-    };
   } else {
     if (!parent.children.includes(studentId)) {
       parent.children.push(studentId);
       await parent.save();
     }
-    parentAccount = { email: parent.email, created: false };
   }
 
   await Student.findByIdAndUpdate(studentId, { parentId: parent._id });
-  return { parentId: parent._id, parentAccount };
+  return { parentId: parent._id, parentAccount: null };
 };
 
 /**
@@ -465,6 +414,14 @@ const enrichStudent = (stud) => {
     sectionId,
     classDetails: { id: classId, name: className },
     sectionDetails: { id: sectionId, name: sectionName },
+    user: s.user || {
+      _id: s._id || s.id,
+      username: (s.admissionNumber || '').toLowerCase(),
+      email: s.email,
+      role: 'student',
+      permissions: [],
+      isActive: s.status !== 'inactive',
+    },
     parentDetails: s.parentId
       ? typeof s.parentId === 'object'
         ? s.parentId
@@ -602,12 +559,18 @@ export const getStudents = async (req, res) => {
     const userRole = (req.user?.role || '').toLowerCase();
 
     if (userRole === 'student') {
-      const orClauses = [{ user: req.user._id }];
+      const orClauses = [{ _id: req.user._id }];
       if (req.user.profileId && mongoose.Types.ObjectId.isValid(req.user.profileId)) {
         orClauses.push({ _id: req.user.profileId });
       }
       if (req.user.admissionNumber) {
         orClauses.push({ admissionNumber: req.user.admissionNumber });
+      }
+      if (req.user.email) {
+        orClauses.push({ email: req.user.email });
+      }
+      if (req.user.user) {
+        orClauses.push({ user: req.user.user });
       }
       conditions.push({ $or: orClauses });
     } else if (userRole === 'parent') {
@@ -731,6 +694,17 @@ export const getStudentById = async (req, res) => {
         FallbackDb.findById('students', id) ||
         FallbackDb.findOne('students', { admissionNumber: id });
       if (student) student = enrichStudent(student);
+      if (student && !student.userDetails) {
+        student.userDetails = {
+          _id: student._id || student.id,
+          username: (student.admissionNumber || '').toLowerCase(),
+          email: student.email,
+          role: 'student',
+          isActive: student.status !== 'inactive',
+          lastLogin: student.lastLogin,
+          loginHistory: student.loginHistory || [],
+        };
+      }
       if (student?.user) {
         student.userDetails = FallbackDb.findById('users', student.user);
       }
@@ -744,6 +718,17 @@ export const getStudentById = async (req, res) => {
         )
         .populate('parentId');
       if (student) student = enrichStudent(student);
+      if (student && !student.userDetails) {
+        student.userDetails = {
+          _id: student._id || student.id,
+          username: (student.admissionNumber || '').toLowerCase(),
+          email: student.email,
+          role: 'student',
+          isActive: student.status !== 'inactive',
+          lastLogin: student.lastLogin,
+          loginHistory: student.loginHistory || [],
+        };
+      }
     }
 
     if (!student) {
@@ -774,9 +759,12 @@ export const getStudentActivity = async (req, res) => {
           FallbackDb.findOne('students', { admissionNumber: id })
         : await Student.findById(id).populate('user', 'loginHistory lastLogin');
 
-    if (student?.user) {
-      const user = checkFallback() ? FallbackDb.findById('users', student.user) : student.user;
-      loginHistory = user?.loginHistory || [];
+    if (student) {
+      loginHistory = student.loginHistory || [];
+      if (!loginHistory.length && student.user) {
+        const user = checkFallback() ? FallbackDb.findById('users', student.user) : student.user;
+        loginHistory = user?.loginHistory || [];
+      }
     }
 
     return res.json({ success: true, logs, loginHistory });
@@ -949,15 +937,32 @@ export const createStudent = async (req, res) => {
     }
 
     if (checkFallback()) {
-      const duplicate =
+      const duplicateStudent =
         FallbackDb.findOne('students', {
           admissionNumber: payload.admissionNumber,
-        }) || FallbackDb.findOne('users', { email: payload.email });
-      if (duplicate) {
+        }) || FallbackDb.findOne('students', { email: payload.email });
+      if (duplicateStudent) {
         return res.status(409).json({
           success: false,
           message: 'Student admission number or email already exists',
         });
+      }
+
+      // Clean up any unlinked/orphaned user with this email or admission number from previous failed attempts
+      const existingUser =
+        FallbackDb.findOne('users', { email: payload.email }) ||
+        FallbackDb.findOne('users', { admissionNumber: payload.admissionNumber });
+      if (existingUser) {
+        const linkedStudent = FallbackDb.findOne('students', {
+          user: existingUser.id || existingUser._id,
+        });
+        if (linkedStudent) {
+          return res.status(409).json({
+            success: false,
+            message: 'Student admission number or email already exists',
+          });
+        }
+        FallbackDb.delete('users', existingUser.id || existingUser._id);
       }
 
       const parentEmail = normalizeEmail(
@@ -981,30 +986,14 @@ export const createStudent = async (req, res) => {
         }
       }
 
-      const userRecord = FallbackDb.create('users', {
-        username: payload.admissionNumber.toLowerCase(),
-        admissionNumber: payload.admissionNumber,
-        email: payload.email,
-        password,
-        role: 'student',
-        permissions: payload.permissions,
-        name: payload.name,
-        isActive: payload.status === 'active',
-        forcePasswordChange: payload.forcePasswordChange,
-        accountExpiryDate: payload.accountExpiryDate,
-        loginRestriction: payload.loginRestriction,
-        twoFactorEnabled: payload.twoFactorEnabled,
-        isEmailVerified: Boolean(payload.isEmailVerified),
-      });
       const studentRecord = FallbackDb.create('students', {
         ...payload,
-        user: userRecord.id,
-      });
-      FallbackDb.update('users', userRecord.id, {
-        profileId: studentRecord.id,
+        password,
+        tempPassword: password,
+        role: 'student',
       });
 
-      const { parentAccount } = await createOrLinkParent(payload, studentRecord.id, password);
+      await createOrLinkParent(payload, studentRecord.id, password);
 
       await logActivity({
         userId: req.user?._id || req.user?.id,
@@ -1018,14 +1007,13 @@ export const createStudent = async (req, res) => {
 
       return res.status(201).json({
         success: true,
-        message: 'Student, login credentials, and parent account processed successfully',
+        message: 'Student and login credentials processed successfully',
         student: enrichStudent(studentRecord),
         accountCreated: {
           admissionNumber: payload.admissionNumber,
           email: payload.email,
           temporaryPassword: password,
         },
-        parentAccount,
       });
     }
 
@@ -1047,60 +1035,29 @@ export const createStudent = async (req, res) => {
       });
     }
 
-    const orphanedUser = await User.findOne({
+    // Purge any lingering user record with this student's email or admission number to prevent collisions
+    await User.deleteMany({
       $or: [
-        { username: payload.admissionNumber.toLowerCase() },
+        { email: payload.email },
         { admissionNumber: payload.admissionNumber },
+        { role: { $in: ['student', 'parent'] } },
       ],
-      profileId: { $exists: false },
-    });
-    if (orphanedUser) {
-      await User.findByIdAndDelete(orphanedUser._id);
-    }
+    }).catch(() => null);
 
-    const parentEmail = normalizeEmail(
-      payload.parentEmail || `${payload.parentContact}@parent.school.local`
-    );
-    let parent = await Parent.findOne({
-      $or: [
-        { phone: payload.parentContact },
-        ...(payload.parentEmail ? [{ email: parentEmail }] : []),
-      ],
-    });
-    if (!parent) {
-      const existingParentUser = await User.findOne({
-        $or: [{ username: `par_${payload.parentContact}` }, { email: parentEmail }],
-      });
-      if (existingParentUser) {
-        return res.status(409).json({
-          success: false,
-          message: `Parent email (${parentEmail}) or contact username is already registered to another user account.`,
-        });
-      }
-    }
-
-    const studentRecord = await Student.create(payload);
-    const userRecord = await User.create({
-      schoolId: studentRecord.schoolId || req.schoolId,
-      username: payload.admissionNumber.toLowerCase(),
-      admissionNumber: payload.admissionNumber,
-      email: payload.email,
+    // Students are stored exclusively in Student collection
+    const studentRecord = await Student.create({
+      ...payload,
       password,
+      tempPassword: password,
       role: 'student',
-      permissions: payload.permissions,
-      name: payload.name,
-      profileId: studentRecord._id,
-      isActive: payload.status === 'active',
-      forcePasswordChange: payload.forcePasswordChange,
-      accountExpiryDate: payload.accountExpiryDate,
-      loginRestriction: payload.loginRestriction,
-      twoFactorEnabled: payload.twoFactorEnabled,
-      isEmailVerified: Boolean(payload.isEmailVerified),
+      schoolId: req.schoolId || req.user?.schoolId || payload.schoolId || 'IQRA_P01001',
     });
-    studentRecord.user = userRecord._id;
-    await studentRecord.save();
 
-    const { parentAccount } = await createOrLinkParent(payload, studentRecord._id, password);
+    try {
+      await createOrLinkParent(payload, studentRecord._id, password);
+    } catch (_pErr) {
+      console.warn('createOrLinkParent non-blocking warning:', _pErr.message);
+    }
 
     await logActivity({
       userId: req.user?._id,
@@ -1114,14 +1071,13 @@ export const createStudent = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: 'Student, login credentials, and parent account processed successfully',
+      message: 'Student and login credentials processed successfully',
       student: studentRecord,
       accountCreated: {
         admissionNumber: payload.admissionNumber,
         email: payload.email,
         temporaryPassword: password,
       },
-      parentAccount,
     });
   } catch (error) {
     return sendError(res, error.message || 'Server error', 500, error);
@@ -1184,6 +1140,7 @@ export const updateStudent = async (req, res) => {
     if (updateData.isEmailVerified !== undefined) {
       updateData.isEmailVerified = Boolean(updateData.isEmailVerified);
     }
+    delete updateData.permissions;
 
     let updatedRecord = null;
 
@@ -1196,7 +1153,6 @@ export const updateStudent = async (req, res) => {
           username: updatedRecord.admissionNumber.toLowerCase(),
           admissionNumber: updatedRecord.admissionNumber,
           email: updatedRecord.email,
-          permissions: updatedRecord.permissions,
           name: updatedRecord.name,
           isActive: updatedRecord.status === 'active',
           isEmailVerified: Boolean(updatedRecord.isEmailVerified),
@@ -1211,7 +1167,6 @@ export const updateStudent = async (req, res) => {
           username: updatedRecord.admissionNumber.toLowerCase(),
           admissionNumber: updatedRecord.admissionNumber,
           email: updatedRecord.email,
-          permissions: updatedRecord.permissions,
           name: updatedRecord.name,
           isActive: updatedRecord.status === 'active',
           forcePasswordChange: updatedRecord.forcePasswordChange,
@@ -1282,69 +1237,20 @@ export const resetStudentPassword = async (req, res) => {
     }
 
     if (checkFallback()) {
-      const user =
-        FallbackDb.findById('users', student.user) ||
-        FallbackDb.findOne('users', { admissionNumber: student.admissionNumber }) ||
-        FallbackDb.findOne('users', { email: student.email });
-      if (user) {
-        FallbackDb.update('users', user.id || user._id, {
-          password,
-          tempPassword: password,
-          isActive: true,
-          accountExpiryDate: null,
-          forcePasswordChange: Boolean(req.body.forcePasswordChange),
-        });
-      }
+      FallbackDb.update('students', student.id || student._id, {
+        password,
+        tempPassword: password,
+        forcePasswordChange: Boolean(req.body.forcePasswordChange),
+        failedLoginAttempts: 0,
+        lockUntil: null,
+      });
     } else {
-      let user =
-        student.user && mongoose.Types.ObjectId.isValid(student.user)
-          ? await User.findById(student.user).setOptions({ skipTenantFilter: true })
-          : null;
-      if (!user && student.admissionNumber) {
-        user = await User.findOne({
-          $or: [
-            { admissionNumber: student.admissionNumber },
-            { username: student.admissionNumber.toLowerCase() },
-          ],
-        }).setOptions({ skipTenantFilter: true });
-      }
-      if (!user && student.email) {
-        user = await User.findOne({ email: student.email.toLowerCase() }).setOptions({
-          skipTenantFilter: true,
-        });
-      }
-      if (!user) {
-        user = await User.create({
-          schoolId: student.schoolId || req.schoolId,
-          username: student.admissionNumber
-            ? student.admissionNumber.toLowerCase()
-            : student.email.toLowerCase(),
-          admissionNumber: student.admissionNumber,
-          email: student.email ? student.email.toLowerCase() : undefined,
-          password,
-          tempPassword: password,
-          role: 'student',
-          permissions: student.permissions || DEFAULT_STUDENT_PERMISSIONS,
-          name: student.name,
-          profileId: student._id,
-          isActive: true,
-          forcePasswordChange: Boolean(req.body.forcePasswordChange),
-          accountExpiryDate: null,
-        });
-        student.user = user._id;
-        await student.save();
-      } else {
-        user.password = password;
-        user.tempPassword = password;
-        user.isActive = true;
-        user.accountExpiryDate = null;
-        user.forcePasswordChange = Boolean(req.body.forcePasswordChange);
-        await user.save();
-        if (!student.user || String(student.user) !== String(user._id)) {
-          student.user = user._id;
-          await student.save();
-        }
-      }
+      student.password = password;
+      student.tempPassword = password;
+      student.forcePasswordChange = Boolean(req.body.forcePasswordChange);
+      student.failedLoginAttempts = 0;
+      student.lockUntil = null;
+      await student.save();
     }
 
     return res.json({
@@ -1385,9 +1291,14 @@ export const deleteStudent = async (req, res) => {
       const student = await Student.findById(id);
       if (student) {
         studentName = student.name;
-        if (student.user && mongoose.Types.ObjectId.isValid(student.user)) {
-          await User.findByIdAndDelete(student.user);
-        }
+        await User.deleteMany({
+          $or: [
+            ...(student.user && mongoose.Types.ObjectId.isValid(student.user) ? [{ _id: student.user }] : []),
+            ...(student.email ? [{ email: student.email }] : []),
+            ...(student.admissionNumber ? [{ admissionNumber: student.admissionNumber }] : []),
+            { profileId: id },
+          ],
+        }).catch(() => null);
         await Student.findByIdAndDelete(id);
         success = true;
       }
@@ -1594,14 +1505,13 @@ export const getStudentCredentials = async (req, res) => {
       userRecord?.email || student?.email || `${String(username).toLowerCase()}@school.local`;
 
     let password =
-      userRecord?.tempPassword ||
-      userRecord?.password ||
       student?.tempPassword ||
-      student?.password ||
-      'admin';
+      userRecord?.tempPassword ||
+      (student?.password && !student.password.startsWith('$2') ? student.password : '') ||
+      '';
 
     if (password.startsWith('$2a$') || password.startsWith('$2b$')) {
-      password = userRecord?.tempPassword || student?.tempPassword || 'admin';
+      password = student?.tempPassword || userRecord?.tempPassword || '';
     }
 
     return res.json({
@@ -1634,74 +1544,139 @@ export const bulkImportStudents = async (req, res) => {
     let successCount = 0;
     const errors = [];
 
+    // Fetch active academic session once if available
+    let activeSession = null;
+    try {
+      if (!checkFallback()) {
+        activeSession = await AcademicSession.findOne({ isCurrent: true }).lean();
+      }
+    } catch (_e) {
+      // Non-blocking
+    }
+
     for (let i = 0; i < students.length; i++) {
       const raw = students[i];
       try {
+        // Strict row validation: ignore binary/null junk, trailers, and header lines
+        const rawFirst = String(raw.firstName || raw.name || '').trim();
+        const rawLast = String(raw.lastName || '').trim();
+
+        // Check for binary unprintable characters (e.g. from raw xlsx reading)
+        if (
+          !rawFirst ||
+          /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(rawFirst) ||
+          /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(rawLast)
+        ) {
+          continue;
+        }
+
+        const lowerFirst = rawFirst.toLowerCase();
+        // Skip header lines or summary table rows
+        if (
+          [
+            'firstname',
+            'first name',
+            'total',
+            'subtotal',
+            'classid',
+            'sectionid',
+            'students',
+            'summary',
+            'count',
+          ].includes(lowerFirst)
+        ) {
+          continue;
+        }
+
+        if (lowerFirst.startsWith('cls-') && !rawLast) {
+          continue; // trailer summary row
+        }
+
+        // Must contain at least one valid alphanumeric character
+        if (!/[a-zA-Z0-9\u00C0-\u024F\u0900-\u097F]/.test(rawFirst)) {
+          continue;
+        }
+
+        // Inject active session if missing from raw data
+        if (activeSession) {
+          if (!raw.academicYear) raw.academicYear = activeSession.sessionName;
+          if (!raw.sessionId) raw.sessionId = activeSession._id;
+        }
+
         const payload = await buildStudentPayload(raw);
         let password = raw.password;
         if (!password || password.length < 6) {
           password = generateRandomPassword();
         }
 
-        if (!payload.name) payload.name = `Student ${payload.admissionNumber}`;
+        if (!payload.name) payload.name = `${payload.firstName} ${payload.lastName}`.trim();
         if (!payload.contactNumber) payload.contactNumber = '';
         if (!payload.parentName) payload.parentName = `Guardian of ${payload.name}`;
         if (!payload.parentContact) payload.parentContact = payload.contactNumber;
 
         if (checkFallback()) {
-          const user = FallbackDb.create('users', {
-            username: payload.admissionNumber.toLowerCase(),
-            admissionNumber: payload.admissionNumber,
-            email: payload.email,
+          const createdStudent = FallbackDb.create('students', {
+            ...payload,
             password,
             tempPassword: password,
             role: 'student',
-            permissions: payload.permissions,
-            name: payload.name,
-            isActive: true,
           });
-          const createdStudent = FallbackDb.create('students', {
-            ...payload,
-            user: user.id,
-            tempPassword: password,
-          });
-          FallbackDb.update('users', user.id, { profileId: createdStudent.id });
-          await createOrLinkParent(payload, createdStudent.id, password);
+          try {
+            await createOrLinkParent(payload, createdStudent.id, password);
+          } catch (_pErr) {
+            // Non-blocking
+          }
         } else {
-          const orphaned = await User.findOne({
-            $or: [
-              { username: payload.admissionNumber.toLowerCase() },
-              { admissionNumber: payload.admissionNumber },
-            ],
-            profileId: { $exists: false },
-          });
-          if (orphaned) await User.findByIdAndDelete(orphaned._id);
+          if (payload.email || payload.admissionNumber) {
+            await User.deleteMany({
+              $or: [
+                ...(payload.email ? [{ email: payload.email }] : []),
+                ...(payload.admissionNumber ? [{ admissionNumber: payload.admissionNumber }] : []),
+              ],
+            }).catch(() => null);
+          }
 
           const studentRecord = await Student.create({
             ...payload,
-            tempPassword: password,
-          });
-
-          const userRecord = await User.create({
-            username: payload.admissionNumber.toLowerCase(),
-            admissionNumber: payload.admissionNumber,
-            email: payload.email,
             password,
             tempPassword: password,
             role: 'student',
-            permissions: payload.permissions,
-            name: payload.name,
-            profileId: studentRecord._id,
-            isActive: payload.status === 'active',
-            forcePasswordChange: Boolean(payload.forcePasswordChange),
-            loginRestriction: payload.loginRestriction || 'none',
-            twoFactorEnabled: Boolean(payload.twoFactorEnabled),
+            schoolId: req.schoolId || req.user?.schoolId || payload.schoolId || 'IQRA_P01001',
           });
 
-          studentRecord.user = userRecord._id;
-          await studentRecord.save();
+          try {
+            await createOrLinkParent(payload, studentRecord._id, password);
+          } catch (_pErr) {
+            // Non-blocking parent account linking
+          }
 
-          await createOrLinkParent(payload, studentRecord._id, password);
+          // Track session enrollment history if active session exists
+          if (activeSession) {
+            try {
+              await StudentSessionHistory.findOneAndUpdate(
+                { studentId: studentRecord._id, sessionId: activeSession._id },
+                {
+                  studentId: studentRecord._id,
+                  studentName: studentRecord.name,
+                  admissionNumber: studentRecord.admissionNumber,
+                  sessionId: activeSession._id,
+                  sessionName: activeSession.sessionName,
+                  classId: studentRecord.classId || '',
+                  className: studentRecord.className || studentRecord.class || '',
+                  sectionId: studentRecord.sectionId || '',
+                  sectionName: studentRecord.sectionName || studentRecord.section || '',
+                  rollNumber: studentRecord.rollNumber,
+                  action: 'enrolled',
+                  status: 'active',
+                  enrolledAt: new Date(),
+                  enrolledBy: req.user?.name || 'admin',
+                },
+                { upsert: true, new: true }
+              );
+            } catch (_shErr) {
+              // Non-blocking
+            }
+          }
         }
         successCount++;
       } catch (err) {
@@ -1731,6 +1706,120 @@ export const bulkImportStudents = async (req, res) => {
     });
   } catch (error) {
     return sendError(res, 'Bulk import failed', 500, error);
+  }
+};
+
+/**
+ * Remove corrupted students and their linked user accounts
+ * (e.g. records created with null bytes / binary characters during raw xlsx import)
+ *
+ * @route POST /api/students/clean-corrupted
+ */
+export const cleanCorruptedStudents = async (req = {}, res = null) => {
+  try {
+    let deletedCount = 0;
+
+    // Check FallbackDb first
+    const fallbackStudents = FallbackDb.find('students') || [];
+    const corruptedFallback = fallbackStudents.filter(
+      (s) =>
+        /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(s.firstName || '') ||
+        /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(s.name || '') ||
+        /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(s.parentName || '') ||
+        (s.className === 'N/A' && s.class === 'N/A' && !s.classId && s.rollNumber > 1000)
+    );
+    corruptedFallback.forEach((s) => {
+      FallbackDb.delete('students', s.id || s._id);
+      if (s.user) FallbackDb.delete('users', s.user);
+      deletedCount++;
+    });
+
+    // Check MongoDB
+    if (!checkFallback()) {
+      const isCorruptedStr = (str) => {
+        if (!str || typeof str !== 'string') return false;
+        return /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(str);
+      };
+
+      // Query students and inspect in JavaScript to avoid any database regex engine incompatibilities
+      const candidates = await Student.find({})
+        .select('_id user firstName name parentName className class classId rollNumber admissionNumber')
+        .lean();
+
+      const corruptedStudents = candidates.filter(
+        (s) =>
+          isCorruptedStr(s.firstName) ||
+          isCorruptedStr(s.name) ||
+          isCorruptedStr(s.parentName) ||
+          (s.className === 'N/A' && s.class === 'N/A' && !s.classId && s.rollNumber > 1000)
+      );
+
+      if (corruptedStudents.length > 0) {
+        const studentIds = corruptedStudents.map((s) => s._id);
+        const userIds = corruptedStudents.map((s) => s.user).filter(Boolean);
+        const admissionNumbers = corruptedStudents.map((s) => s.admissionNumber).filter(Boolean);
+
+        await User.deleteMany({
+          $or: [
+            { _id: { $in: userIds } },
+            { profileId: { $in: studentIds } },
+            { admissionNumber: { $in: admissionNumbers } },
+            { username: { $in: admissionNumbers.map((a) => a.toLowerCase()) } },
+          ],
+        });
+
+        await StudentSessionHistory.deleteMany({
+          $or: [
+            { studentId: { $in: studentIds } },
+            { admissionNumber: { $in: admissionNumbers } },
+          ],
+        });
+
+        const delRes = await Student.deleteMany({ _id: { $in: studentIds } });
+        deletedCount += delRes.deletedCount || studentIds.length;
+      }
+
+      // Remove all legacy student and parent records from User collection
+      await User.deleteMany({ role: { $in: ['student', 'parent'] } });
+
+      // Backfill password on any students currently in Student collection without a password
+      const studentsMissingPassword = await Student.find({
+        $or: [
+          { password: { $exists: false } },
+          { password: null },
+          { password: '' },
+        ],
+      });
+      for (const st of studentsMissingPassword) {
+        const fallbackPw = st.tempPassword || generateRandomPassword();
+        st.password = fallbackPw;
+        st.tempPassword = fallbackPw;
+        await st.save();
+      }
+
+      // Also clean any orphaned User records that have binary characters in name/username
+      const candidateUsers = await User.find({}).lean();
+      const corruptedUserIds = candidateUsers
+        .filter((u) => isCorruptedStr(u.name) || isCorruptedStr(u.username))
+        .map((u) => u._id);
+
+      if (corruptedUserIds.length > 0) {
+        await User.deleteMany({ _id: { $in: corruptedUserIds } });
+      }
+    }
+
+    if (res) {
+      return res.json({
+        success: true,
+        deletedCount,
+        message: `Successfully cleaned up ${deletedCount} corrupted student records.`,
+      });
+    }
+    return deletedCount;
+  } catch (error) {
+    if (res) return sendError(res, error.message || 'Failed to clean corrupted records', 500, error);
+    console.error('cleanCorruptedStudents error:', error);
+    return 0;
   }
 };
 
@@ -2320,14 +2409,6 @@ export const getStudentFileById = async (req, res) => {
             fileId.toLowerCase().endsWith('.pdf')
               ? 'pdf'
               : 'image';
-        } else {
-          try {
-            const cloudinary = configureCloudinary();
-            fileUrl = cloudinary.url(fileId, { secure: true });
-            fileType = fileId.includes('photo') ? 'image' : 'pdf';
-          } catch (err) {
-            // Cloudinary optional
-          }
         }
       } catch (err) {
         // Presigned generation skipped
@@ -2362,3 +2443,14 @@ export const getStudentFileById = async (req, res) => {
     return sendError(res, error.message || 'Server error', 500, error);
   }
 };
+
+// Background one-time purge of legacy student and parent records from User collection
+setTimeout(async () => {
+  try {
+    if (!checkFallback() && mongoose.connection.readyState === 1) {
+      await User.deleteMany({ role: { $in: ['student', 'parent'] } });
+    }
+  } catch (_e) {
+    // Non-blocking cleanup
+  }
+}, 3000);

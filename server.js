@@ -99,6 +99,19 @@ app.use(
 // Connect database
 connectDB();
 
+// Automatic cleanup of corrupted student records from failed raw binary xlsx imports
+setTimeout(async () => {
+  try {
+    const { cleanCorruptedStudents } = await import("./controllers/studentController.js");
+    const count = await cleanCorruptedStudents();
+    if (count > 0) {
+      console.log(`🧹 [Auto-Cleanup] Successfully purged ${count} corrupted student records.`);
+    }
+  } catch (err) {
+    console.error("Auto-cleanup error:", err.message);
+  }
+}, 3000);
+
 // Global response middleware: ensures schoolId is automatically attached to all API JSON responses
 app.use((req, res, next) => {
   const originalJson = res.json.bind(res);

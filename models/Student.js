@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import tenantPlugin from "../utils/tenantPlugin.js";
 
@@ -169,6 +170,7 @@ const StudentSchema = new mongoose.Schema(
       enum: ["student"],
       default: "student",
     },
+    // Deprecated: Permissions are now governed 100% role-wise via RolePermission & roleAccessController
     permissions: [
       {
         type: String,
@@ -210,11 +212,65 @@ const StudentSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    password: {
+      type: String,
+      default: null,
+    },
+    tempPassword: {
+      type: String,
+      default: null,
+    },
+    refreshToken: {
+      type: String,
+      default: null,
+    },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
+    loginHistory: [
+      {
+        ip: String,
+        userAgent: String,
+        timestamp: { type: Date, default: Date.now },
+      },
+    ],
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+    },
+    lockUntil: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
 );
+
+StudentSchema.methods.comparePassword = async function (enteredPassword) {
+  if (!enteredPassword || typeof enteredPassword !== 'string') return false;
+
+  // 1. Check bcrypt hash
+  if (this.password && (this.password.startsWith("$2a$") || this.password.startsWith("$2b$"))) {
+    try {
+      return await bcrypt.compare(enteredPassword, this.password);
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  // 2. Strict exact match against stored password or assigned temporary password
+  if (this.password && enteredPassword === this.password) {
+    return true;
+  }
+  if (this.tempPassword && enteredPassword === this.tempPassword) {
+    return true;
+  }
+
+  return false;
+};
 
 // Compound index: roll number is unique within class+section+academicYear
 StudentSchema.index(

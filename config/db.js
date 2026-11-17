@@ -237,6 +237,11 @@ export const getDbState = () => {
  * @returns {boolean} True if fallback is active.
  */
 export const checkFallback = () => {
+  if (mongoose.connection && mongoose.connection.readyState === 1) {
+    isConnected = true;
+    fallbackActive = false;
+    return false;
+  }
   return fallbackActive || !isConnected;
 };
 

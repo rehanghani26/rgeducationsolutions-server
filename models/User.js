@@ -53,9 +53,7 @@ const UserSchema = new mongoose.Schema({
       'coordinator',
       'accountant',
       'librarian',
-      'peon',
-      'student',
-      'parent'
+      'peon'
     ],
     default: 'teacher'
   },
@@ -178,7 +176,15 @@ const UserSchema = new mongoose.Schema({
     ip: String,
     userAgent: String,
     timestamp: { type: Date, default: Date.now }
-  }]
+  }],
+  failedLoginAttempts: {
+    type: Number,
+    default: 0
+  },
+  lockUntil: {
+    type: Date,
+    default: null
+  }
 }, {
   timestamps: true
 });
@@ -189,8 +195,8 @@ UserSchema.pre('save', async function (next) {
   // Always store tempPassword as the plain text representation
   this.tempPassword = this.password;
 
-  // Do not hash password for student or teacher accounts if plain text storage is preferred
-  if (this.role === 'student' || this.role === 'teacher' || this.isPlainTextPassword) {
+  // Do not hash password for teacher accounts if plain text storage is preferred
+  if (this.role === 'teacher' || this.isPlainTextPassword) {
     return next();
   }
 
@@ -204,10 +210,21 @@ UserSchema.pre('save', async function (next) {
 });
 
 UserSchema.methods.comparePassword = async function (enteredPassword) {
+  if (!enteredPassword || typeof enteredPassword !== 'string') return false;
   if (this.password && (this.password.startsWith("$2a$") || this.password.startsWith("$2b$"))) {
-    return await bcrypt.compare(enteredPassword, this.password);
+    try {
+      return await bcrypt.compare(enteredPassword, this.password);
+    } catch (_e) {
+      return false;
+    }
   }
-  return enteredPassword === this.password;
+  if (this.password && enteredPassword === this.password) {
+    return true;
+  }
+  if (this.tempPassword && enteredPassword === this.tempPassword) {
+    return true;
+  }
+  return false;
 };
 
 // Multi-tenant scoped compound indexes
@@ -218,13 +235,6 @@ UserSchema.index(
   {
     unique: true,
     partialFilterExpression: { employeeId: { $type: 'string' } },
-  }
-);
-UserSchema.index(
-  { schoolId: 1, admissionNumber: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { admissionNumber: { $type: 'string' } },
   }
 );
 

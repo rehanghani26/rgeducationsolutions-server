@@ -33,6 +33,10 @@ import {
  * @description Authentication controller for login, signup, token rotation, and super admin OTP onboarding.
  */
 
+// Configurable brute force / account lockout security settings (adjustable)
+export const MAX_LOGIN_ATTEMPTS = 3;
+export const LOCKOUT_DURATION_MS = 60 * 60 * 1000; // 1 hour
+
 /**
  * Authenticates user credentials and generates access/refresh JWT tokens.
  *
@@ -53,47 +57,228 @@ export const login = async (req, res) => {
     const cleanInput = username.toLowerCase().trim();
     const cleanUpper = username.trim().toUpperCase();
 
+    // 1. Explicitly block parent logins (parents cannot log in to the system)
+    if (cleanInput.startsWith('par_') || cleanInput.includes('@parent.') || req.body.role === 'parent') {
+      return sendForbidden(res, 'Parent login is not enabled in this system.');
+    }
+
     if (checkFallback()) {
-      user =
-        FallbackDb.findOne('users', { username: cleanInput }) ||
-        FallbackDb.findOne('users', { email: cleanInput }) ||
-        FallbackDb.findOne('users', { admissionNumber: cleanUpper });
+      // Authenticate directly against Student collection for student logins
+      let student =
+        FallbackDb.findOne('students', { email: cleanInput }) ||
+        FallbackDb.findOne('students', { admissionNumber: cleanUpper }) ||
+        FallbackDb.findOne('students', { admissionNumber: cleanInput });
+
+      if (student) {
+        user = student;
+        user.role = 'student';
+        user.username = (user.admissionNumber || cleanInput).toLowerCase();
+      } else {
+        // Staff/Admin/Teacher user lookup
+        user =
+          FallbackDb.findOne('users', { username: cleanInput }) ||
+          FallbackDb.findOne('users', { email: cleanInput }) ||
+          FallbackDb.findOne('users', { employeeId: cleanUpper });
+
+        if (user && (user.role === 'student' || user.role === 'parent')) {
+          if (user.role === 'parent') {
+            return sendForbidden(res, 'Parent login is not enabled in this system.');
+          }
+          FallbackDb.delete('users', user.id || user._id);
+          user = null;
+        }
+      }
 
       if (!user) {
         return sendUnauthorized(res, 'Invalid credentials');
       }
 
+      // Check if account is temporarily locked (1 hour window)
+      if (user.lockUntil && new Date(user.lockUntil) > new Date()) {
+        const remainingMinutes = Math.max(
+          1,
+          Math.ceil((new Date(user.lockUntil).getTime() - Date.now()) / (60 * 1000))
+        );
+        return res.status(429).json({
+          success: false,
+          isLocked: true,
+          remainingMinutes,
+          message: `Account is temporarily locked due to ${MAX_LOGIN_ATTEMPTS} failed login attempts. Please try again in ${remainingMinutes} minute(s).`,
+        });
+      }
+
+      // Reset expired lockout
+      if (user.lockUntil && new Date(user.lockUntil) <= new Date()) {
+        user.failedLoginAttempts = 0;
+        user.lockUntil = null;
+      }
+
+      // Strict credential comparison (no hardcoded credentials)
       const isMatch =
         password === user.password ||
-        password === username ||
-        password === 'admin' ||
-        password === 'password';
+        (user.tempPassword && password === user.tempPassword);
+
+      const targetCollection = user.role === 'student' ? 'students' : 'users';
 
       if (!isMatch) {
-        return sendUnauthorized(res, 'Invalid credentials');
+        const attempts = (Number(user.failedLoginAttempts) || 0) + 1;
+        user.failedLoginAttempts = attempts;
+
+        if (attempts >= MAX_LOGIN_ATTEMPTS) {
+          user.lockUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
+          FallbackDb.update(targetCollection, user.id || user._id, {
+            failedLoginAttempts: attempts,
+            lockUntil: user.lockUntil,
+          });
+
+          return res.status(429).json({
+            success: false,
+            isLocked: true,
+            remainingMinutes: 60,
+            message: `Account has been locked for 1 hour due to ${MAX_LOGIN_ATTEMPTS} consecutive failed login attempts.`,
+          });
+        }
+
+        FallbackDb.update(targetCollection, user.id || user._id, {
+          failedLoginAttempts: attempts,
+        });
+        const remainingAttempts = MAX_LOGIN_ATTEMPTS - attempts;
+
+        return res.status(401).json({
+          success: false,
+          remainingAttempts,
+          message: `Invalid credentials. You have ${remainingAttempts} attempt(s) remaining before account lockout.`,
+        });
+      }
+
+      // Successful password match: reset failed attempts
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
+      FallbackDb.update(targetCollection, user.id || user._id, {
+        failedLoginAttempts: 0,
+        lockUntil: null,
+      });
+
+      if (user.role === 'student') {
+        const legacyUser = FallbackDb.findOne('users', { email: cleanInput });
+        if (legacyUser && (legacyUser.role === 'student' || legacyUser.role === 'parent')) {
+          FallbackDb.delete('users', legacyUser.id || legacyUser._id);
+        }
       }
     } else {
-      // Find user in central User collection (skip tenant filter during initial login lookup)
-      user = await User.findOne({
+      // MongoDB Mode
+
+      // Check if legacy User record exists with role 'parent' and reject/purge
+      const parentUser = await User.findOne({
+        role: 'parent',
         $or: [
           { username: cleanInput },
           { email: cleanInput },
-          { admissionNumber: cleanUpper },
-          { employeeId: cleanUpper },
         ],
       }).setOptions({ skipTenantFilter: true });
+
+      if (parentUser) {
+        await User.deleteOne({ _id: parentUser._id }).catch(() => null);
+        return sendForbidden(res, 'Parent login is not enabled in this system.');
+      }
+
+      // 1. Authenticate directly from Student collection for students
+      let student = await Student.findOne({
+        $or: [
+          { admissionNumber: cleanUpper },
+          { admissionNumber: cleanInput },
+          { email: cleanInput },
+          { contactNumber: cleanInput },
+        ],
+      }).setOptions({ skipTenantFilter: true });
+
+      if (student) {
+        user = student;
+        user.role = 'student';
+        user.username = (user.admissionNumber || cleanInput).toLowerCase();
+      } else {
+        // 2. Staff/Admin/Teacher user lookup (strictly excluding student & parent roles)
+        user = await User.findOne({
+          role: { $nin: ['student', 'parent'] },
+          $or: [
+            { username: cleanInput },
+            { email: cleanInput },
+            { employeeId: cleanUpper },
+          ],
+        }).setOptions({ skipTenantFilter: true });
+      }
 
       if (!user) {
         return sendUnauthorized(res, 'Invalid credentials');
       }
 
+      // Check if account is temporarily locked (1 hour window)
+      if (user.lockUntil && new Date(user.lockUntil) > new Date()) {
+        const remainingMinutes = Math.max(
+          1,
+          Math.ceil((new Date(user.lockUntil).getTime() - Date.now()) / (60 * 1000))
+        );
+        return res.status(429).json({
+          success: false,
+          isLocked: true,
+          remainingMinutes,
+          message: `Account is temporarily locked due to ${MAX_LOGIN_ATTEMPTS} failed login attempts. Please try again in ${remainingMinutes} minute(s).`,
+        });
+      }
+
+      // Reset expired lockout
+      if (user.lockUntil && new Date(user.lockUntil) <= new Date()) {
+        user.failedLoginAttempts = 0;
+        user.lockUntil = null;
+      }
+
+      // Strict credential comparison (no backdoor or hardcoded credentials)
       const isMatch = await user.comparePassword(password);
+
       if (!isMatch) {
-        return sendUnauthorized(res, 'Invalid credentials');
+        const attempts = (Number(user.failedLoginAttempts) || 0) + 1;
+        user.failedLoginAttempts = attempts;
+
+        if (attempts >= MAX_LOGIN_ATTEMPTS) {
+          user.lockUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
+          await user.save().catch(() => null);
+
+          return res.status(429).json({
+            success: false,
+            isLocked: true,
+            remainingMinutes: 60,
+            message: `Account has been locked for 1 hour due to ${MAX_LOGIN_ATTEMPTS} consecutive failed login attempts.`,
+          });
+        }
+
+        await user.save().catch(() => null);
+        const remainingAttempts = MAX_LOGIN_ATTEMPTS - attempts;
+
+        return res.status(401).json({
+          success: false,
+          remainingAttempts,
+          message: `Invalid credentials. You have ${remainingAttempts} attempt(s) remaining before account lockout.`,
+        });
+      }
+
+      // Successful password match: reset failed attempts
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
+
+      // Clean up any legacy student or parent user records from User collection to prevent conflicts
+      if (user.role === 'student') {
+        await User.deleteMany({
+          $or: [
+            { email: cleanInput },
+            { admissionNumber: cleanUpper },
+            { role: { $in: ['student', 'parent'] } },
+            { profileId: user._id },
+          ],
+        }).catch(() => null);
       }
     }
 
-    if (user.isActive === false) {
+    if (user.isActive === false || user.status === 'inactive') {
       return sendForbidden(
         res,
         'Your account has been deactivated by the administrator. You cannot log in or access the system.'
@@ -154,11 +339,19 @@ export const login = async (req, res) => {
     // Save refresh token and login history
     if (checkFallback()) {
       const history = [...(user.loginHistory || []), loginEntry].slice(-20);
-      FallbackDb.update('users', user.id, {
-        refreshToken,
-        lastLogin: loginEntry.timestamp,
-        loginHistory: history,
-      });
+      if (user.role === 'student') {
+        FallbackDb.update('students', user.id || user._id, {
+          refreshToken,
+          lastLogin: loginEntry.timestamp,
+          loginHistory: history,
+        });
+      } else {
+        FallbackDb.update('users', user.id || user._id, {
+          refreshToken,
+          lastLogin: loginEntry.timestamp,
+          loginHistory: history,
+        });
+      }
     } else {
       user.refreshToken = refreshToken;
       user.lastLogin = loginEntry.timestamp;
@@ -233,16 +426,16 @@ export const login = async (req, res) => {
       school: schoolInfo,
       user: {
         id: user.id || user._id,
-        username: user.username,
+        username: user.username || (user.admissionNumber ? String(user.admissionNumber).toLowerCase() : undefined),
         employeeId: user.employeeId,
         admissionNumber: user.admissionNumber,
         email: user.email,
-        role: user.role,
+        role: user.role || 'student',
         name: user.name,
         avatar: resolvedAvatar,
         photo: resolvedAvatar,
         imagesRef: resolvedImagesRef,
-        profileId: user.profileId,
+        profileId: user.profileId || (user.role === 'student' ? (user._id || user.id) : undefined),
         forcePasswordChange: user.forcePasswordChange || false,
         twoFactorEnabled: user.twoFactorEnabled || false,
       },
@@ -264,13 +457,22 @@ export const logout = async (req, res) => {
 
   if (refreshToken) {
     if (checkFallback()) {
-      const user = FallbackDb.findOne('users', { refreshToken });
+      const user =
+        FallbackDb.findOne('users', { refreshToken }) ||
+        FallbackDb.findOne('students', { refreshToken });
       if (user) {
-        FallbackDb.update('users', user.id, { refreshToken: null });
+        if (user.role === 'student') {
+          FallbackDb.update('students', user.id, { refreshToken: null });
+        } else {
+          FallbackDb.update('users', user.id, { refreshToken: null });
+        }
       }
     } else {
       try {
-        const user = await User.findOne({ refreshToken });
+        let user = await User.findOne({ refreshToken });
+        if (!user) {
+          user = await Student.findOne({ refreshToken });
+        }
         if (user) {
           user.refreshToken = null;
           await user.save();
@@ -302,12 +504,21 @@ export const refresh = async (req, res) => {
     let user = null;
 
     if (checkFallback()) {
-      user = FallbackDb.findOne('users', { refreshToken });
+      user =
+        FallbackDb.findOne('users', { refreshToken }) ||
+        FallbackDb.findOne('students', { refreshToken });
       if (!user) {
         return sendUnauthorized(res, 'Invalid refresh token');
       }
     } else {
       user = await User.findOne({ refreshToken });
+      if (!user) {
+        user = await Student.findOne({ refreshToken });
+        if (user) {
+          user.role = 'student';
+          user.username = user.admissionNumber?.toLowerCase();
+        }
+      }
       if (!user) {
         return sendUnauthorized(res, 'Invalid refresh token');
       }
@@ -316,7 +527,11 @@ export const refresh = async (req, res) => {
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(user);
 
     if (checkFallback()) {
-      FallbackDb.update('users', user.id, { refreshToken: newRefreshToken });
+      if (user.role === 'student') {
+        FallbackDb.update('students', user.id, { refreshToken: newRefreshToken });
+      } else {
+        FallbackDb.update('users', user.id, { refreshToken: newRefreshToken });
+      }
     } else {
       user.refreshToken = newRefreshToken;
       await user.save();
@@ -385,7 +600,7 @@ export const getMe = async (req, res) => {
       employeeId: req.user.employeeId,
       admissionNumber: req.user.admissionNumber,
       email: req.user.email,
-      role: req.user.role,
+      role: req.user.role || 'student',
       name: req.user.name,
       avatar: req.user.avatar || req.user.photo || req.user.imagesRef?.img || '',
       photo: req.user.photo || req.user.avatar || req.user.imagesRef?.img || '',
@@ -393,7 +608,7 @@ export const getMe = async (req, res) => {
         id: '',
         img: req.user.avatar || req.user.photo || '',
       },
-      profileId: req.user.profileId,
+      profileId: req.user.profileId || (req.user.role === 'student' ? (req.user.id || req.user._id) : undefined),
       forcePasswordChange: req.user.forcePasswordChange || false,
       twoFactorEnabled: req.user.twoFactorEnabled || false,
     },
@@ -494,22 +709,44 @@ export const checkSchoolStatus = async (req, res) => {
       ],
     }).lean();
 
-    // 2. If not found by direct school code, look up user
+    // 2. If not found by direct school code, look up student or staff user
     if (!school) {
-      const user = await User.findOne({
+      let schoolId = null;
+
+      // Check Student collection first
+      const student = await Student.findOne({
         $or: [
           { email: cleanInput },
-          { username: cleanInput },
           { admissionNumber: cleanUpper },
-          { employeeId: cleanUpper },
+          { admissionNumber: cleanInput },
+          { contactNumber: cleanInput },
         ],
       })
         .setOptions({ skipTenantFilter: true })
         .lean();
 
-      if (user && user.schoolId) {
+      if (student && student.schoolId) {
+        schoolId = student.schoolId;
+      } else {
+        const user = await User.findOne({
+          role: { $nin: ['student', 'parent'] },
+          $or: [
+            { email: cleanInput },
+            { username: cleanInput },
+            { employeeId: cleanUpper },
+          ],
+        })
+          .setOptions({ skipTenantFilter: true })
+          .lean();
+
+        if (user && user.schoolId) {
+          schoolId = user.schoolId;
+        }
+      }
+
+      if (schoolId) {
         school = await School.findOne({
-          $or: [{ _id: user.schoolId }, { schoolId: user.schoolId }],
+          $or: [{ _id: schoolId }, { schoolId }],
         }).lean();
       }
     }
@@ -563,7 +800,8 @@ export const checkSchoolStatus = async (req, res) => {
 };
 
 /**
- * Public endpoint to handle forgotten password reset requests for students, staff, and parents.
+ * Public endpoint to handle forgotten password reset requests for students and staff.
+ * (Parents cannot log in; parent accounts are disabled).
  *
  * @route POST /api/v1/auth/forgot-password
  * @access Public
@@ -578,63 +816,69 @@ export const forgotPassword = async (req, res) => {
       );
     }
 
+    if (!newPassword || newPassword.length < 6) {
+      return sendBadRequest(
+        res,
+        'New password must be at least 6 characters long'
+      );
+    }
+
     const cleanInput = String(identifier).trim().toLowerCase();
     const cleanUpper = String(identifier).trim().toUpperCase();
 
-    // Find user across User collection
-    let user = await User.findOne({
+    // Check student collection first
+    const student = await Student.findOne({
       $or: [
         { email: cleanInput },
-        { username: cleanInput },
         { admissionNumber: cleanUpper },
-        { employeeId: cleanUpper },
+        { admissionNumber: cleanInput },
       ],
     }).setOptions({ skipTenantFilter: true });
 
-    // If user record not found yet, check student collection
-    if (!user) {
-      const student = await Student.findOne({
-        $or: [{ email: cleanInput }, { admissionNumber: cleanUpper }],
-      });
+    if (student) {
+      student.password = newPassword;
+      student.tempPassword = newPassword;
+      student.forcePasswordChange = false;
+      student.failedLoginAttempts = 0;
+      student.lockUntil = null;
+      await student.save();
 
-      if (student) {
-        // Automatically provision or link the user account
-        user = await User.create({
-          schoolId: student.schoolId || 'IQRA_P01001',
-          username: student.admissionNumber
-            ? student.admissionNumber.toLowerCase()
-            : student.email.toLowerCase(),
-          admissionNumber: student.admissionNumber,
-          email: student.email ? student.email.toLowerCase() : undefined,
-          password: newPassword || 'Pass@123',
-          role: 'student',
-          permissions: student.permissions || [],
-          name: student.name,
-          profileId: student._id,
-          isActive: true,
-          forcePasswordChange: false,
-          accountExpiryDate: null,
-        });
-        student.user = user._id;
-        await student.save();
+      // Purge any legacy User record with this student email/admission number so users collection remains clean
+      await User.deleteMany({
+        $or: [
+          { email: cleanInput },
+          { admissionNumber: cleanUpper },
+          { role: { $in: ['student', 'parent'] } },
+          { profileId: student._id },
+        ],
+      }).catch(() => null);
 
-        return sendSuccess(
-          res,
-          'Password reset successfully. You can now sign in with your new password.',
-          null,
-          200,
-          {
-            schoolId: user.schoolId,
-            user: {
-              username: user.username,
-              email: user.email,
-              admissionNumber: user.admissionNumber,
-              name: user.name,
-            },
-          }
-        );
-      }
+      return sendSuccess(
+        res,
+        'Password reset successfully. You can now sign in with your new password.',
+        null,
+        200,
+        {
+          schoolId: student.schoolId,
+          user: {
+            username: (student.admissionNumber || cleanInput).toLowerCase(),
+            email: student.email,
+            admissionNumber: student.admissionNumber,
+            name: student.name,
+          },
+        }
+      );
     }
+
+    // Check staff user collection (strictly excluding student & parent)
+    const user = await User.findOne({
+      role: { $nin: ['student', 'parent'] },
+      $or: [
+        { email: cleanInput },
+        { username: cleanInput },
+        { employeeId: cleanUpper },
+      ],
+    }).setOptions({ skipTenantFilter: true });
 
     if (!user) {
       return sendNotFound(
@@ -643,18 +887,13 @@ export const forgotPassword = async (req, res) => {
       );
     }
 
-    if (!newPassword || newPassword.length < 6) {
-      return sendBadRequest(
-        res,
-        'New password must be at least 6 characters long'
-      );
-    }
-
     user.password = newPassword;
     user.tempPassword = newPassword;
     user.isActive = true;
     user.accountExpiryDate = null;
     user.forcePasswordChange = false;
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
     await user.save();
 
     return sendSuccess(
@@ -667,7 +906,6 @@ export const forgotPassword = async (req, res) => {
         user: {
           username: user.username,
           email: user.email,
-          admissionNumber: user.admissionNumber,
           employeeId: user.employeeId,
           name: user.name,
         },

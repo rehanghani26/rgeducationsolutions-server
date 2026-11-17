@@ -14,6 +14,7 @@ import {
   bulkDeleteStudents,
   bulkImportStudents,
   bulkPromoteStudents,
+  cleanCorruptedStudents,
   createStudent,
   deactivateStudent,
   deleteStudent,
@@ -85,7 +86,7 @@ router.get("/file/:fileId(*)", getStudentFileById);
 router.get(
   "/:id/credentials",
   protect,
-  authorize("super-admin"),
+  authorize("super-admin", "school-admin", "principal", "admin", "director"),
   getStudentCredentials
 );
 router.get("/:id/activity", protect, getStudentActivity);
@@ -119,6 +120,12 @@ router.post(
   protect,
   authorize("super-admin", "school-admin", "admin", "director"),
   bulkDeleteStudents
+);
+router.post(
+  "/clean-corrupted",
+  protect,
+  authorize("super-admin", "school-admin", "admin", "director"),
+  cleanCorruptedStudents
 );
 router.post(
   "/bulk-promote",

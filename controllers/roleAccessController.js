@@ -42,7 +42,6 @@ const ALL_ROLES_LIST = [
   'librarian',
   'peon',
   'student',
-  'parent',
 ];
 
 /**
