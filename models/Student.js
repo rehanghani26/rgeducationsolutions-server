@@ -132,6 +132,130 @@ const StudentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Parent",
     },
+
+    // ── 1. Admission & Previous School Fields ──
+    admissionDate: {
+      type: Date,
+      default: Date.now,
+    },
+    joiningDate: {
+      type: Date,
+      default: Date.now,
+    },
+    admissionType: {
+      type: String,
+      trim: true,
+      default: "New Admission",
+    },
+    previousSchoolName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    previousClass: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    previousBoard: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    transferCertificateNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+    },
+    transferCertificateDate: {
+      type: Date,
+      default: null,
+    },
+    enrollmentStatus: {
+      type: String,
+      trim: true,
+      default: "Enrolled",
+    },
+
+    // ── 2. Academic & Student Profile Fields ──
+    houseName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    studentCategory: {
+      type: String,
+      trim: true,
+      default: "General",
+    },
+    nationality: {
+      type: String,
+      trim: true,
+      default: "Indian",
+    },
+    motherTongue: {
+      type: String,
+      trim: true,
+      default: "Hindi",
+    },
+    mediumOfInstruction: {
+      type: String,
+      trim: true,
+      default: "English",
+    },
+    studentType: {
+      type: String,
+      trim: true,
+      default: "Day Scholar",
+    },
+    specialEducationNeeds: {
+      type: String,
+      trim: true,
+      default: "None",
+    },
+    careerInterest: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    // ── 3. Family & Guardian Fields ──
+    fatherOccupation: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    fatherOrganization: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    motherName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    motherContact: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    motherOccupation: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    guardianRelation: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    guardianAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     aadhaarNumber: {
       type: String,
     },

@@ -304,7 +304,33 @@ const buildStudentPayload = async (data) => {
         (data.aadhaarDocument || data.AdharRef?.pdf ? `doc_${Date.now()}` : ''),
       pdf: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || '',
     },
-    joiningDate: data.joiningDate || new Date(),
+    joiningDate: data.admissionDate || data.joiningDate || new Date(),
+    admissionDate: data.admissionDate || data.joiningDate || new Date(),
+    admissionType: data.admissionType || 'New Admission',
+    previousSchoolName: data.previousSchoolName?.trim() || '',
+    previousClass: data.previousClass?.trim() || '',
+    previousBoard: data.previousBoard?.trim() || '',
+    transferCertificateNumber: data.transferCertificateNumber?.trim()?.toUpperCase() || '',
+    transferCertificateDate: data.transferCertificateDate || null,
+    enrollmentStatus: data.enrollmentStatus || 'Enrolled',
+
+    houseName: data.houseName?.trim() || '',
+    studentCategory: data.studentCategory?.trim() || 'General',
+    nationality: data.nationality?.trim() || 'Indian',
+    motherTongue: data.motherTongue?.trim() || 'Hindi',
+    mediumOfInstruction: data.mediumOfInstruction?.trim() || 'English',
+    studentType: data.studentType?.trim() || 'Day Scholar',
+    specialEducationNeeds: data.specialEducationNeeds?.trim() || 'None',
+    careerInterest: data.careerInterest?.trim() || '',
+
+    fatherOccupation: data.fatherOccupation?.trim() || '',
+    fatherOrganization: data.fatherOrganization?.trim() || '',
+    motherName: data.motherName?.trim() || '',
+    motherContact: data.motherContact?.trim() || '',
+    motherOccupation: data.motherOccupation?.trim() || '',
+    guardianRelation: data.guardianRelation?.trim() || '',
+    guardianAddress: data.guardianAddress?.trim() || '',
+
     status: data.status || 'active',
     role: 'student',
     forcePasswordChange: Boolean(data.forcePasswordChange),
@@ -1140,6 +1166,14 @@ export const updateStudent = async (req, res) => {
     if (updateData.isEmailVerified !== undefined) {
       updateData.isEmailVerified = Boolean(updateData.isEmailVerified);
     }
+    if (updateData.admissionDate && !updateData.joiningDate) {
+      updateData.joiningDate = updateData.admissionDate;
+    } else if (updateData.joiningDate && !updateData.admissionDate) {
+      updateData.admissionDate = updateData.joiningDate;
+    }
+    if (updateData.transferCertificateNumber) {
+      updateData.transferCertificateNumber = String(updateData.transferCertificateNumber).trim().toUpperCase();
+    }
     delete updateData.permissions;
 
     let updatedRecord = null;
@@ -1435,7 +1469,7 @@ export const exportStudents = async (req, res) => {
       students = FallbackDb.find('students');
     } else {
       students = await Student.find().select(
-        'name admissionNumber rollNumber classId sectionId parentName contactNumber status createdAt'
+        'name admissionNumber rollNumber classId sectionId parentName contactNumber status admissionDate admissionType enrollmentStatus houseName studentCategory studentType motherName motherContact createdAt'
       );
     }
 
@@ -1448,6 +1482,14 @@ export const exportStudents = async (req, res) => {
       'Parent',
       'Phone',
       'Status',
+      'Admission Date',
+      'Admission Type',
+      'Enrollment Status',
+      'House',
+      'Category',
+      'Student Type',
+      'Mother Name',
+      'Mother Phone',
       'Created',
     ];
     const rows = students.map((s) =>
@@ -1460,6 +1502,14 @@ export const exportStudents = async (req, res) => {
         s.parentName,
         s.contactNumber,
         s.status,
+        s.admissionDate ? new Date(s.admissionDate).toISOString().slice(0, 10) : '',
+        s.admissionType || '',
+        s.enrollmentStatus || '',
+        s.houseName || '',
+        s.studentCategory || '',
+        s.studentType || '',
+        s.motherName || '',
+        s.motherContact || '',
         s.createdAt,
       ]
         .map((v) => `"${String(v || '').replace(/"/g, '""')}"`)
