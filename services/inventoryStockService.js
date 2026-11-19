@@ -1,11 +1,12 @@
 import Inventory from '../models/Inventory.js';
 import { getSchool, writeProcurement } from './procurementStore.js';
-import { recordMovement } from './purchaseService.js';
 import {
+  actor,
   cleanText,
   dateValue,
   generatedCode,
   inventoryUnitCost,
+  legacyBundle,
   numeric,
   optionalCode,
   procurementError,
@@ -34,12 +35,17 @@ function attachment(file) {
   };
 }
 
-function catalogFields(input, existing) {
+export function catalogFields(input, existing) {
   const result = {};
   for (const field of ['name', 'description', 'subcategory', 'imageUrl', 'brand', 'barcode', 'storageBin', 'location', 'unit']) {
     if (Object.hasOwn(input, field)) result[field] = cleanText(input[field]);
   }
   if (!(result.name ?? existing?.name)) throw procurementError('Enter an item name.');
+  if (!existing && input.catalogId != null) {
+    const catalogId = cleanText(input.catalogId).toLowerCase();
+    if (!/^[a-z][a-z0-9-]{0,79}$/.test(catalogId)) throw procurementError('Select a valid catalog product.');
+    result.catalogId = catalogId;
+  }
   if (!existing || Object.hasOwn(input, 'sku')) result.sku = optionalCode(input.sku) || existing?.sku || generatedCode('SKU');
   if (!existing || Object.hasOwn(input, 'category')) {
     const category = cleanText(input.category) || 'General';
@@ -91,6 +97,37 @@ function catalogFields(input, existing) {
   return result;
 }
 
+export async function findCatalogItem(store, fields) {
+  if (!fields.catalogId) return null;
+  const linked = await store.one('inventory', { catalogId: fields.catalogId });
+  if (linked) return linked;
+  const matches = (await store.find('inventory', { name: fields.name, category: fields.category, unit: fields.unit }))
+    .filter((item) => !item.catalogId && !legacyBundle(item));
+  if (matches.length > 1) {
+    throw procurementError('More than one stock item matches ' + fields.name + '. Select its existing SKU.', 409);
+  }
+  return matches[0] || null;
+}
+
+export async function recordMovement(store, item, req, details) {
+  const performedBy = actor(req);
+  const unitPrice = details.unitPrice ?? inventoryUnitCost(item);
+  return store.create('inventoryTransactions', {
+    transactionNumber: generatedCode('TXN'),
+    timestamp: new Date().toISOString(),
+    itemId: recordId(item),
+    itemName: item.name,
+    sku: item.sku,
+    unit: item.unit,
+    balanceAfter: item.quantity,
+    performedBy: performedBy.id,
+    performedByName: performedBy.name,
+    ...details,
+    unitPrice,
+    totalValue: roundMoney(Math.abs(details.quantity) * unitPrice),
+  });
+}
+
 async function verifyProfile(store, fields, item) {
   if (fields.sku && fields.sku !== item?.sku && await store.one('inventory', { sku: fields.sku })) {
     throw procurementError('SKU ' + fields.sku + ' already exists.', 409);
@@ -115,12 +152,16 @@ export async function createStockItems(req, inputs) {
   return writeProcurement(req, stockCollections, async (store) => {
     const items = [];
     for (const fields of records) {
+      if (await findCatalogItem(store, fields)) {
+        throw procurementError(fields.name + ' is already in Stocks. Use Adjust stock to correct its quantity.', 409);
+      }
       await verifyProfile(store, fields);
       const item = await store.create('inventory', fields);
       if (item.quantity > 0) {
         await recordMovement(store, item, req, {
           type: 'STOCK_OPENING',
           quantity: item.quantity,
+          partyName: fields.vendorId ? (await store.get('vendors', fields.vendorId))?.name : undefined,
           reason: 'Opening stock',
         });
       }

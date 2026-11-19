@@ -78,6 +78,7 @@ function operations(req, fallback, session = null) {
       return models[collection].findOne(scoped(match)).session(session).lean();
     },
     async get(collection, id) {
+      if (id == null || id === '') return null;
       if (fallback) {
         return matchingRecords(fallback, school, collection, {}).find(
           (record) => String(recordId(record)) === String(id) || record.id === id

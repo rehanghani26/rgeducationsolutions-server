@@ -80,6 +80,12 @@ const InventoryPurchaseSchema = new mongoose.Schema(
     },
     dueDate: Date,
     expectedDeliveryDate: Date,
+    paymentDate: Date,
+    initialAmountPaid: { type: Number, min: 0 },
+    deliveryCarrier: { type: String, trim: true },
+    deliveryReference: { type: String, trim: true },
+    deliveryLocation: { type: String, trim: true },
+    deliveryNotes: { type: String, trim: true },
     vendorName: { type: String, trim: true, default: '' },
     items: [PurchaseItemSchema],
     subtotal: {
@@ -140,6 +146,7 @@ const InventoryPurchaseSchema = new mongoose.Schema(
       },
       previousSpent: Number,
       newSpent: Number,
+      allocatedAmount: Number,
     },
     receivedBy: {
       type: mongoose.Schema.Types.ObjectId,

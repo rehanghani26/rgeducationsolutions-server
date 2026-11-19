@@ -1,7 +1,8 @@
-import mongoose from 'mongoose';
+import { catalogFields, findCatalogItem, recordMovement } from './inventoryStockService.js';
 import { writeProcurement } from './procurementStore.js';
 import {
   activeSession,
+  actor,
   billDueDate,
   budgetAmounts,
   cleanText,
@@ -28,33 +29,6 @@ import {
 
 const formatAmount = (amount) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
-
-export function actor(req) {
-  const userId = req.user?._id || req.user?.id;
-  return {
-    id: mongoose.isObjectIdOrHexString(userId) ? userId : undefined,
-    name: req.user?.name || 'Administrator',
-  };
-}
-
-export async function recordMovement(store, item, req, details) {
-  const performedBy = actor(req);
-  const unitPrice = details.unitPrice ?? inventoryUnitCost(item);
-  return store.create('inventoryTransactions', {
-    transactionNumber: generatedCode('TXN'),
-    timestamp: new Date().toISOString(),
-    itemId: recordId(item),
-    itemName: item.name,
-    sku: item.sku,
-    unit: item.unit,
-    balanceAfter: item.quantity,
-    performedBy: performedBy.id,
-    performedByName: performedBy.name,
-    ...details,
-    unitPrice,
-    totalValue: roundMoney(Math.abs(details.quantity) * unitPrice),
-  });
-}
 
 function purchaseLine(input, item) {
   const quantity = numeric(input.quantity, 'Quantity for ' + item.name, {
@@ -115,6 +89,9 @@ export async function postPurchase(req) {
     throw procurementError('Add between 1 and 100 items to the bill.');
   }
   const supplierBillNumber = optionalCode(input.supplierBillNumber || input.billNumber);
+  if (!supplierBillNumber || supplierBillNumber.length > 100) {
+    throw procurementError('Enter a supplier invoice number of up to 100 characters.');
+  }
   const billNumber = generatedCode('BILL');
   const today = new Date().toISOString();
   const billDate = dateValue(input.billDate, 'Bill date', today);
@@ -128,64 +105,97 @@ export async function postPurchase(req) {
     if (vendor.status && vendor.status !== 'active') throw procurementError('Select an active vendor.', 409);
 
     const vendorId = recordId(vendor);
-    if (supplierBillNumber && (
+    if (
       await store.one('inventoryPurchases', { vendorId, supplierBillNumber }) ||
       await store.one('inventoryPurchases', { vendorId, billNumber: supplierBillNumber })
-    )) {
+    ) {
       throw procurementError('This vendor invoice has already been recorded.', 409);
     }
 
     const session = input.sessionId ? await sessionById(store, input.sessionId) : await activeSession(store);
-    if (session) await store.lockBudget(recordId(session));
+    if (!session) throw procurementError('Select an academic session with an approved inventory budget.', 409);
+    await store.lockBudget(recordId(session));
     const budget = await sessionBudget(store, session);
+    if (!budget || ['draft', 'closed'].includes(budget.status)) {
+      throw procurementError('The selected session needs an approved, open inventory budget.', 409);
+    }
+    const { schoolRequirementsBudget, schoolRequirementsSpent, remainingBudget } = budgetAmounts(budget);
+    if (!(schoolRequirementsBudget > 0) || !Number.isFinite(remainingBudget)) {
+      throw procurementError('Allocate an inventory budget for this session in Settings.', 409);
+    }
+
     const targets = new Map();
+    const catalogUpdates = new Map();
     const items = [];
     for (const line of input.items) {
-      const item = await store.get('inventory', line?.itemId);
-      if (!item) throw procurementError('An inventory item on this invoice could not be found.', 404);
+      let item;
+      let catalogId;
+      if (line?.itemId) {
+        item = await store.get('inventory', line.itemId);
+        if (!item) throw procurementError('A stock item on this invoice could not be found. Search for the current SKU.', 404);
+      } else if (line?.product) {
+        const { catalogId: preset, name, description, category, subcategory, imageUrl, unit } = line.product;
+        if (!preset) throw procurementError('Select a catalog product or a stock item.');
+        const fields = catalogFields({
+          catalogId: preset, name, description, category, subcategory, imageUrl, unit,
+          unitCost: line.unitCost, gstRate: line.gstRate, vendorId, quantity: 0,
+        });
+        catalogId = fields.catalogId;
+        item = await findCatalogItem(store, fields);
+        if (item && item.unit !== fields.unit) {
+          throw procurementError('The stock unit for ' + item.name + ' has changed. Select its existing SKU.', 409);
+        }
+        if (!item) item = await store.create('inventory', fields);
+      } else {
+        throw procurementError('Select a catalog product or a stock item.');
+      }
       const key = String(recordId(item));
       if (targets.has(key)) throw procurementError('Combine repeated entries for ' + item.name + ' into one line.');
       if (item.status === 'discontinued' || legacyBundle(item)) {
         throw procurementError('Select an active individual SKU in place of ' + item.name + '.', 409);
       }
       targets.set(key, item);
+      if (catalogId && !item.catalogId) catalogUpdates.set(key, catalogId);
       items.push(purchaseLine(line, item));
     }
     const amounts = purchaseAmounts(input, items);
+    if (amounts.grandTotal >= remainingBudget) {
+      throw procurementError(
+        'The invoice total of ' + formatAmount(amounts.grandTotal) +
+        ' must be lower than the available inventory budget of ' + formatAmount(remainingBudget) + '.', 409
+      );
+    }
+    const paymentDate = amounts.amountPaid > 0 ? dateValue(input.paymentDate, 'Payment date', billDate) : undefined;
     const dueDate = dateValue(input.dueDate, 'Payment due date', billDueDate(billDate, vendor.paymentTerms));
     if (dueDate.slice(0, 10) < billDate.slice(0, 10)) {
       throw procurementError('The payment due date must be on or after the invoice date.');
     }
 
-    let budgetDeducted;
-    if (budget) {
-      if (budget.status === 'closed') throw procurementError('The budget for this session is closed.', 409);
-      const { schoolRequirementsSpent, remainingBudget } = budgetAmounts(budget);
-      if (amounts.grandTotal > Math.max(0, remainingBudget)) {
-        throw procurementError(
-          'The invoice total of ' + formatAmount(amounts.grandTotal) +
-          ' exceeds the available inventory budget of ' + formatAmount(Math.max(0, remainingBudget)) + '.', 409
-        );
-      }
-      budgetDeducted = {
-        budgetAllocationId: recordId(budget),
-        category: 'schoolRequirements',
-        amount: amounts.grandTotal,
-        previousSpent: schoolRequirementsSpent,
-        newSpent: roundMoney(schoolRequirementsSpent + amounts.grandTotal),
-      };
-    }
+    const budgetDeducted = {
+      budgetAllocationId: recordId(budget),
+      category: 'schoolRequirements',
+      amount: amounts.grandTotal,
+      allocatedAmount: schoolRequirementsBudget,
+      previousSpent: schoolRequirementsSpent,
+      newSpent: roundMoney(schoolRequirementsSpent + amounts.grandTotal),
+    };
 
     const purchase = await store.create('inventoryPurchases', {
       billNumber,
-      ...(supplierBillNumber ? { supplierBillNumber } : {}),
+      supplierBillNumber,
       vendorId,
       vendorName: vendor.name,
       sessionId: recordId(session),
-      sessionName: session?.sessionName || '',
+      sessionName: session.sessionName,
       billDate,
       receivedDate,
       expectedDeliveryDate,
+      paymentDate,
+      initialAmountPaid: amounts.amountPaid,
+      deliveryCarrier: cleanText(input.deliveryCarrier),
+      deliveryReference: cleanText(input.deliveryReference),
+      deliveryLocation: cleanText(input.deliveryLocation),
+      deliveryNotes: cleanText(input.deliveryNotes),
       dueDate,
       poNumber: cleanText(input.poNumber),
       notes: cleanText(input.notes),
@@ -199,7 +209,8 @@ export async function postPurchase(req) {
     });
 
     for (const line of items) {
-      const item = targets.get(String(line.itemId));
+      const key = String(line.itemId);
+      const item = targets.get(key);
       const previous = Number(item.quantity || 0);
       const quantity = roundQuantity(previous + line.quantity);
       const unitCost = roundMoney((previous * inventoryUnitCost(item) + line.totalCost) / quantity);
@@ -209,6 +220,7 @@ export async function postPurchase(req) {
         unitCost,
         price: unitCost,
         unitCostVerified: true,
+        ...(catalogUpdates.has(key) ? { catalogId: catalogUpdates.get(key) } : {}),
         status: stockStatus({ ...item, quantity }),
       });
       await recordMovement(store, updated, req, {
@@ -229,11 +241,9 @@ export async function postPurchase(req) {
       totalPaid,
       outstandingBalance: roundMoney(totalBilled - totalPaid),
     });
-    if (budgetDeducted) {
-      await store.update('budgetAllocations', budgetDeducted.budgetAllocationId, {
-        schoolRequirementsSpent: budgetDeducted.newSpent,
-      });
-    }
+    await store.update('budgetAllocations', budgetDeducted.budgetAllocationId, {
+      schoolRequirementsSpent: budgetDeducted.newSpent,
+    });
     return purchase;
   });
 }

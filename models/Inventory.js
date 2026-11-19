@@ -27,6 +27,7 @@ const InventoryItemLineSchema = new mongoose.Schema(
 
 const InventorySchema = new mongoose.Schema(
   {
+    catalogId: { type: String, trim: true, lowercase: true },
     name: {
       type: String,
       required: true,
@@ -204,6 +205,11 @@ const InventorySchema = new mongoose.Schema(
   {
     timestamps: true,
   }
+);
+
+InventorySchema.index(
+  { schoolId: 1, catalogId: 1 },
+  { unique: true, partialFilterExpression: { catalogId: { $type: 'string' } } }
 );
 
 // Dynamically maintain status based on quantity and minStockLevel

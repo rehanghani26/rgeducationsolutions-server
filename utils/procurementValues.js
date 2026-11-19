@@ -1,8 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
+import mongoose from 'mongoose';
 import { sendError } from './responseUtil.js';
 
 export const recordId = (record) => record?._id || record?.id;
 export const recordIds = (record) => [record?._id, record?.id].filter(Boolean).map(String);
+
+export function actor(req) {
+  const userId = req.user?._id || req.user?.id;
+  return {
+    id: mongoose.isObjectIdOrHexString(userId) ? userId : undefined,
+    name: req.user?.name || 'Administrator',
+  };
+}
 
 export function procurementError(message, statusCode = 400) {
   return Object.assign(new Error(message), { statusCode });
