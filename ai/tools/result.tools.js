@@ -1,3 +1,4 @@
+import { getAcademicScope } from '../../utils/academicScope.js';
 /**
  * @file result.tools.js
  * @description AI Tool definitions and executors for Results, Marksheets, and Grade Analytics.
@@ -801,7 +802,9 @@ export const resultToolExecutors = {
     });
 
     if (bulkOps.length > 0) {
-      await Result.bulkWrite(bulkOps);
+      if (getAcademicScope()) {
+        for (const { updateOne } of bulkOps) await Result.updateOne(updateOne.filter, updateOne.update, { upsert: updateOne.upsert });
+      } else await Result.bulkWrite(bulkOps);
     }
 
     try {
@@ -813,7 +816,9 @@ export const resultToolExecutors = {
         },
       }));
       if (rankOps.length > 0) {
-        await Result.bulkWrite(rankOps);
+        if (getAcademicScope()) {
+          for (const { updateOne } of rankOps) await Result.updateOne(updateOne.filter, updateOne.update);
+        } else await Result.bulkWrite(rankOps);
       }
     } catch (_) {}
 

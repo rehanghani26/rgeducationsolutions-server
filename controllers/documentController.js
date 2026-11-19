@@ -1,3 +1,5 @@
+import { findScopedEnrollment } from '../services/studentEnrollmentService.js';
+import { academicError, getAcademicScope } from '../utils/academicScope.js';
 // 1. Node.js built-in modules
 import crypto from 'crypto';
 
@@ -211,6 +213,19 @@ const resolveRecipient = async (recipientType, recipientId) => {
  *
  * @route POST /api/v1/documents/certificates/issue
  */
+
+async function certificatePlacement(req, recipientType, recipientId) {
+  const scope = getAcademicScope();
+  if (!scope) return {};
+  const fields = { sessionId: scope.sessionId, academicSession: scope.session.sessionName };
+  if (String(recipientType).toLowerCase() === 'student') {
+    const enrollment = await findScopedEnrollment(req, recipientId);
+    if (!enrollment) throw academicError('The recipient has no enrollment in the selected academic session.', 409);
+    fields.classId = enrollment.classId;
+  }
+  return fields;
+}
+
 export const issueCertificate = async (req, res) => {
   try {
     const {
@@ -249,6 +264,7 @@ export const issueCertificate = async (req, res) => {
       recipientIdSnapshot: recipient.idSnapshot,
       additionalSnapshot: recipient.additionalSnapshot,
       academicSession: academicSession || '2025-2026',
+      ...await certificatePlacement(req, recipientType, recipientId),
       issuedBy: issuedByData,
       issuedAt: new Date().toISOString(),
       status: 'VALID',
@@ -335,6 +351,7 @@ export const bulkIssueCertificates = async (req, res) => {
           recipientIdSnapshot: recipient.idSnapshot,
           additionalSnapshot: recipient.additionalSnapshot,
           academicSession: academicSession || '2025-2026',
+          ...await certificatePlacement(req, recipientType, recipientId),
           issuedBy: issuedByData,
           issuedAt: new Date().toISOString(),
           status: 'VALID',

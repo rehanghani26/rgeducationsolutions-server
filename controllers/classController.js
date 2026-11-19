@@ -1,3 +1,5 @@
+import { academicGrade, getAcademicScope } from '../utils/academicScope.js';
+import { readProcurement, writeProcurement } from '../services/procurementStore.js';
 // 2. External packages
 import mongoose from 'mongoose';
 
@@ -77,13 +79,22 @@ export const getClassRooms = async (req, res) => {
   try {
     const { sessionId, classId, sectionId, status, page = 1, limit = 50 } = req.query;
     const filter = {};
-    if (sessionId) filter.sessionId = toObjectId(sessionId) || sessionId;
+    if (sessionId === 'legacy') return sendSuccess(res, undefined, { classRooms: [], total: 0, page: 1, pages: 0 });
+    if (sessionId || req.academicSessionId) filter.sessionId = toObjectId(sessionId || req.academicSessionId) || (sessionId || req.academicSessionId);
     if (classId) filter.classId = classId;
     if (sectionId) filter.sectionId = sectionId;
     if (status) filter.status = status;
 
     const skip = (Number(page) - 1) * Number(limit);
 
+
+    if (checkFallback()) {
+      const all = await readProcurement(req).find('classRooms', filter);
+      return sendSuccess(res, undefined, {
+        classRooms: all.slice(skip, skip + Number(limit)),
+        total: all.length, page: Number(page), pages: Math.ceil(all.length / Number(limit)),
+      });
+    }
     const [classRooms, total] = await Promise.all([
       ClassRoom.find(filter)
         .populate('classTeacherId', 'name employeeId email phone designation')
@@ -102,7 +113,7 @@ export const getClassRooms = async (req, res) => {
       pages: Math.ceil(total / Number(limit)),
     });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -115,6 +126,11 @@ export const getClassRooms = async (req, res) => {
  */
 export const getClassRoomsBySession = async (req, res) => {
   try {
+
+    if (checkFallback()) {
+      const classRooms = await readProcurement(req).find('classRooms', { sessionId: req.params.sessionId });
+      return sendSuccess(res, undefined, { classRooms });
+    }
     const sessionObjId = toObjectId(req.params.sessionId);
     if (!sessionObjId) {
       return sendBadRequest(res, 'Invalid session ID');
@@ -128,7 +144,7 @@ export const getClassRoomsBySession = async (req, res) => {
     const session = await AcademicSession.findById(sessionObjId).lean();
     return sendSuccess(res, undefined, { session, classRooms, total: classRooms.length });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -158,7 +174,7 @@ export const getClassRoomById = async (req, res) => {
 
     return sendSuccess(res, undefined, { classRoom });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -171,29 +187,34 @@ export const getClassRoomById = async (req, res) => {
  */
 export const createClassRoom = async (req, res) => {
   try {
-    const { sessionId, classId, sectionId, room, capacity } = req.body;
+    let { classId } = req.body;
+    const { sessionId, sectionId, room, capacity } = req.body;
 
     if (!sessionId || !classId || !sectionId) {
       return sendBadRequest(res, 'sessionId, classId and sectionId are required');
     }
 
-    const sessionObjId = toObjectId(sessionId);
-    if (!sessionObjId) {
-      return sendBadRequest(res, 'Invalid session ID');
-    }
 
-    const session = await AcademicSession.findById(sessionObjId).lean();
+    const store = readProcurement(req);
+    const session = await store.get('academicSessions', sessionId);
     if (!session) {
       return sendNotFound(res, 'Academic session not found');
     }
 
-    const className = toClassName(classId);
+
+    if (session.status === 'completed' || (!session.isCurrent && getAcademicScope())) {
+      return sendBadRequest(res, 'Choose the active academic session.');
+    }
+    const scope = getAcademicScope();
+    const grade = scope?.grades.length ? academicGrade(scope, classId) : null;
+    if (grade) classId = grade.id;
+    const className = grade?.name || toClassName(classId);
     const sectionName = toSectionName(sectionId);
     const sec = sectionName.replace(/^Section\s*/i, '');
     const displayName = `${className} – ${sec} (${session.sessionName})`;
 
-    const classRoom = await ClassRoom.create({
-      sessionId: sessionObjId,
+    const fields = {
+      sessionId,
       sessionName: session.sessionName,
       classId,
       className,
@@ -203,6 +224,15 @@ export const createClassRoom = async (req, res) => {
       room: room || '',
       capacity: capacity || 40,
       createdBy: req.user?.name || 'admin',
+    };
+    const classRoom = await writeProcurement(req, ['academicSessions', 'classRooms'], async (db) => {
+      await db.lockAcademicSettings();
+      const current = await db.get('academicSessions', sessionId);
+      if (!current || current.status === 'completed') throw Object.assign(new Error('Session is read-only.'), { statusCode: 409 });
+      if (await db.one('classRooms', { sessionId, classId, sectionId })) {
+        throw Object.assign(new Error('This class and section already exist in the session.'), { statusCode: 409 });
+      }
+      return db.create('classRooms', fields);
     });
 
     return sendCreated(res, undefined, { classRoom });
@@ -213,7 +243,7 @@ export const createClassRoom = async (req, res) => {
         message: 'A classroom for this class and section already exists in this session',
       });
     }
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -242,7 +272,7 @@ export const updateClassRoom = async (req, res) => {
 
     return sendSuccess(res, undefined, { classRoom });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -266,7 +296,7 @@ export const deleteClassRoom = async (req, res) => {
     }
     return sendSuccess(res, 'Classroom archived successfully', { classRoom });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -347,7 +377,7 @@ export const assignClassTeacher = async (req, res) => {
       { classRoom }
     );
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -389,7 +419,7 @@ export const removeClassTeacher = async (req, res) => {
 
     return sendSuccess(res, 'Class teacher removed from classroom', { classRoom });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -410,7 +440,7 @@ export const getClassTeacherHistory = async (req, res) => {
 
     return sendSuccess(res, undefined, { history, total: history.length });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -446,7 +476,7 @@ export const getTeacherClassHistory = async (req, res) => {
       total: history.length,
     });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -539,7 +569,7 @@ export const enrollStudents = async (req, res) => {
       classRoom: { _id: classRoom._id, displayName: classRoom.displayName, studentCount: classRoom.studentCount },
     });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -581,7 +611,7 @@ export const removeStudent = async (req, res) => {
       studentCount: classRoom.studentCount,
     });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -611,7 +641,7 @@ export const getClassStudents = async (req, res) => {
       total: classRoom.studentCount,
     });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -684,7 +714,7 @@ export const assignTimetable = async (req, res) => {
       classRoom: { _id: classRoom._id, displayName: classRoom.displayName, timetableId: classRoom.timetableId },
     });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -709,7 +739,7 @@ export const getClassTimetable = async (req, res) => {
     const timetable = await ClassTimetable.findById(classRoom.timetableId).lean();
     return sendSuccess(res, undefined, { timetable });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -783,7 +813,7 @@ export const getStudentFullHistory = async (req, res) => {
       totalSessions: history.length,
     });
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -797,6 +827,10 @@ export const getStudentFullHistory = async (req, res) => {
 export const promoteClassRoom = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (getAcademicScope()?.grades.length) {
+      return sendError(res, 'Use Session Management to promote students for the next academic session.', 409);
+    }
     const { targetSessionId, targetClassId, targetSectionId, action = 'promote' } = req.body;
 
     if (!targetSessionId || !targetClassId || !targetSectionId) {
@@ -926,6 +960,6 @@ export const promoteClassRoom = async (req, res) => {
       }
     );
   } catch (err) {
-    return sendError(res, err.message || 'Server error', 500, err);
+    return sendError(res, err.message || 'Server error', err.statusCode || 500, err);
   }
 };

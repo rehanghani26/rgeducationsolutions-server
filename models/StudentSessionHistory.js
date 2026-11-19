@@ -100,6 +100,7 @@ const StudentSessionHistorySchema = new mongoose.Schema(
       index: true,
     },
 
+    promotionStatus: { type: String, enum: ['promoted', 'passout'] },
     enrolledAt: {
       type: Date,
       default: Date.now,
@@ -130,9 +131,10 @@ const StudentSessionHistorySchema = new mongoose.Schema(
 
 // ── Unique: one active enrollment per student per session ─────────────────────
 StudentSessionHistorySchema.index(
-  { studentId: 1, sessionId: 1 },
+  { schoolId: 1, studentId: 1, sessionId: 1 },
   { unique: true }
 );
 
+StudentSessionHistorySchema.index({ schoolId: 1, sessionId: 1, classId: 1, sectionId: 1 });
 const StudentSessionHistory = mongoose.models.StudentSessionHistory || mongoose.model('StudentSessionHistory', StudentSessionHistorySchema);
 export default createDynamicModelProxy('StudentSessionHistory', StudentSessionHistory);

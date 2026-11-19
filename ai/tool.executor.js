@@ -14,6 +14,7 @@
  */
 
 import { isToolRegistered, getToolExecutor } from './tool.registry.js';
+import { getAcademicScope } from '../utils/academicScope.js';
 
 /**
  * Execute an AI tool call safely.
@@ -41,6 +42,10 @@ export async function executeTool(toolName, args = {}, context = {}) {
   }
 
   const executor = getToolExecutor(toolName);
+  const scope = getAcademicScope();
+  if (scope?.readOnly && !/^(get|list|find|search|export)/i.test(toolName)) {
+    return { success: false, toolName, error: 'Select the active academic session before making changes.' };
+  }
 
   // ── Execute ───────────────────────────────────────────────────────────────
   try {

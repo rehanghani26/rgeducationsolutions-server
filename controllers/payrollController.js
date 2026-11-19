@@ -310,6 +310,8 @@ export const getPayrollStaff = async (req, res) => {
         userId: { $in: userIds },
         month: currentMonth,
         year: currentYear,
+        ...(req.query.sessionId === 'legacy' ? { sessionId: null }
+          : req.academicSessionId ? { sessionId: req.academicSessionId } : {}),
       }),
     ]);
 
@@ -879,7 +881,9 @@ export const getDisbursements = async (req, res) => {
     if (targetUserId && isValidObjectId(targetUserId)) filter.userId = targetUserId;
     if (month) filter.month = month;
     if (year) filter.year = Number(year);
-    if (sessionId && isValidObjectId(sessionId)) filter.sessionId = sessionId;
+    if (sessionId === 'legacy') filter.sessionId = null;
+    else if (sessionId && isValidObjectId(sessionId)) filter.sessionId = sessionId;
+    else if (req.academicSessionId) filter.sessionId = req.academicSessionId;
 
     const disbursements = await PayrollDisbursement.find(filter)
       .populate('disbursedBy', 'name role')
@@ -949,7 +953,11 @@ export const getStaffPayrollDetails = async (req, res) => {
     }
 
     // 2. Fetch all disbursements for this person
-    const allDisbursements = await PayrollDisbursement.find({ userId: user._id })
+    const allDisbursements = await PayrollDisbursement.find({
+      userId: user._id,
+      ...(req.query.sessionId === 'legacy' ? { sessionId: null }
+        : req.query.sessionId && req.academicSessionId ? { sessionId: req.academicSessionId } : {}),
+    })
       .populate('disbursedBy', 'name role')
       .sort({ year: 1, monthNumber: 1, disbursedAt: 1 });
 

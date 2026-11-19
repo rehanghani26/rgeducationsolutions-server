@@ -8,6 +8,7 @@ import Setting from "../models/Setting.js";
 
 // 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
+import { academicSetupStatus } from "./sessionController.js";
 
 // 7. Utilities
 import {
@@ -239,8 +240,19 @@ export const getSetupStatus = async (req, res) => {
       }
     }
 
-    const status = await buildSetupStatus(settings);
-    return sendSuccess(res, undefined, null, 200, { ...status });
+    const [status, academicSetup] = await Promise.all([
+      buildSetupStatus(settings),
+      academicSetupStatus(req),
+    ]);
+    const profile = status.steps.find((step) => step.key === "schoolProfile");
+    const academic = status.steps.find((step) => step.key === "academicSession");
+    if (academicSetup.onboarded && profile) profile.complete = true;
+    if (academic) academic.complete = !academicSetup.pending;
+    status.completedCount = status.steps.filter((step) => step.complete).length;
+    status.percentComplete = Math.round(100 * status.completedCount / status.totalSteps);
+    status.nextStep = status.steps.find((step) => !step.complete) || null;
+    status.isFullyComplete = !status.nextStep;
+    return sendSuccess(res, undefined, null, 200, { ...status, status, academicSetupPending: academicSetup.pending });
   } catch (err) {
     console.error("[Setup] getSetupStatus error:", err);
     return sendError(res, "Failed to compute setup status.", 500);
@@ -255,7 +267,7 @@ export const getSetupStatus = async (req, res) => {
  */
 export const completeStep = async (req, res) => {
   try {
-    const { step } = req.body;
+    const step = req.body.step || req.body.stepKey;
     const flagSteps = ["academicRules", "financePolicies"];
 
     if (!step) {
@@ -263,14 +275,7 @@ export const completeStep = async (req, res) => {
     }
 
     if (!flagSteps.includes(step)) {
-      let settings;
-      if (checkFallback()) {
-        settings = FallbackDb.getSettings() || {};
-      } else {
-        settings = await Setting.findOne().lean();
-      }
-      const status = await buildSetupStatus(settings);
-      return sendSuccess(res, "Status refreshed.", null, 200, { ...status });
+      return getSetupStatus(req, res);
     }
 
     const updateKey = `setupWizard.${step}`;

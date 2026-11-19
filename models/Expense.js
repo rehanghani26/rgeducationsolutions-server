@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -26,6 +27,8 @@ const ExpenseSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+ExpenseSchema.plugin(academicRecordPlugin, { collection: 'expenses' });
 
 const Expense = mongoose.models.Expense || mongoose.model('Expense', ExpenseSchema);
 export default createDynamicModelProxy('Expense', Expense);

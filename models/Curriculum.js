@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -97,6 +98,8 @@ const CurriculumSchema = new mongoose.Schema(
 );
 
 CurriculumSchema.index({ className: 1, sectionName: 1, code: 1 });
+
+CurriculumSchema.plugin(academicRecordPlugin, { collection: 'curriculums' });
 
 const Curriculum = mongoose.models.Curriculum || mongoose.model('Curriculum', CurriculumSchema);
 export default createDynamicModelProxy('Curriculum', Curriculum);

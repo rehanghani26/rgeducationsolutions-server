@@ -322,6 +322,11 @@ const StudentSchema = new mongoose.Schema(
       enum: ["active", "inactive", "Passout", "Pass Out", "graduated"],
       default: "active",
     },
+    passout: {
+      classId: String,
+      sessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicSession' },
+      date: Date,
+    },
     forcePasswordChange: {
       type: Boolean,
       default: false,
@@ -400,11 +405,10 @@ StudentSchema.methods.comparePassword = async function (enteredPassword) {
 
 // Compound index: roll number is unique within class+section+academicYear
 StudentSchema.index(
-  { classId: 1, sectionId: 1, rollNumber: 1, academicYear: 1 },
+  { schoolId: 1, sessionId: 1, classId: 1, sectionId: 1, rollNumber: 1 },
   {
     unique: true,
-    sparse: true,
-    partialFilterExpression: { rollNumber: { $ne: null } },
+    partialFilterExpression: { sessionId: { $type: 'objectId' }, rollNumber: { $type: 'number' } },
   }
 );
 

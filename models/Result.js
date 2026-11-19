@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -82,6 +83,8 @@ ResultSchema.statics.calcGrade = function(pct) {
   if (pct >= 33) return { grade: 'D',  gpa: 4.0  };
   return { grade: 'F', gpa: 0.0 };
 };
+
+ResultSchema.plugin(academicRecordPlugin, { collection: 'results' });
 
 const Result = mongoose.models.Result || mongoose.model('Result', ResultSchema);
 export default createDynamicModelProxy('Result', Result);

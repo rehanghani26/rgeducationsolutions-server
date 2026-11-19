@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -190,6 +191,8 @@ const IssuedCertificateSchema = new mongoose.Schema(
 IssuedCertificateSchema.index({ recipientId: 1, recipientType: 1, status: 1 });
 // Year-wise ordering for certificate number sequence generation
 IssuedCertificateSchema.index({ issuedAt: -1 });
+
+IssuedCertificateSchema.plugin(academicRecordPlugin, { collection: 'issuedCertificates' });
 
 const IssuedCertificate = mongoose.models.IssuedCertificate || mongoose.model('IssuedCertificate', IssuedCertificateSchema);
 export default createDynamicModelProxy('IssuedCertificate', IssuedCertificate);

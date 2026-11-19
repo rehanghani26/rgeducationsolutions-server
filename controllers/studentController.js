@@ -26,6 +26,9 @@ import User from '../models/User.js';
 
 // 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
+import { createEnrolledStudent, findScopedEnrollment, scopedStudentRoster, updateEnrolledStudent } from '../services/studentEnrollmentService.js';
+import { gradeByValue } from '../utils/academicClass.js';
+import { academicError, getAcademicScope } from '../utils/academicScope.js';
 import { sendStudentOtpEmail } from '../services/emailService.js';
 
 // 7. Utilities
@@ -172,6 +175,8 @@ const BACKEND_SECTION_OPTIONS = [
  * @returns {Object|null} Matching class definition.
  */
 const resolveClass = (val) => {
+  const scopedGrade = gradeByValue(getAcademicScope()?.grades || [], val);
+  if (scopedGrade) return scopedGrade;
   if (!val) return null;
   let target = typeof val === 'object' ? val.name || val.id || '' : val;
   if (!target || target === 'N/A' || target === 'null' || target === 'undefined') return null;
@@ -238,7 +243,7 @@ const resolveSection = (val) => {
 const buildStudentPayload = async (data) => {
   const admissionNumber = await getNextAdmissionNumber();
 
-  const matchedClass = resolveClass(data.class || data.classId || data.className);
+  const matchedClass = resolveClass(data.classId || data.class || data.className);
   const matchedSection = resolveSection(data.section || data.sectionId || data.sectionName);
 
   const resolvedClassId = matchedClass ? matchedClass.id : data.classId || null;
@@ -252,7 +257,8 @@ const buildStudentPayload = async (data) => {
     data.email || `${admissionNumber.toLowerCase().replace(/-/g, '.')}@school.local`
   );
 
-  const sessionId = data.sessionId || null;
+  const scope = getAcademicScope();
+  const sessionId = scope?.sessionId || data.sessionId || null;
 
   return {
     ...data,
@@ -503,6 +509,21 @@ export const getStudents = async (req, res) => {
       'parentName',
       'contactNumber',
     ];
+
+    const roster = await scopedStudentRoster(req);
+    if (roster) {
+      const classValue = req.query.classId || req.query.className || req.query.class;
+      const sectionValue = req.query.sectionId || req.query.sectionName || req.query.section;
+      const grade = resolveClass(classValue);
+      const section = resolveSection(sectionValue);
+      const matching = roster.map(enrichStudent).filter((student) =>
+        (!classValue || (grade ? String(student.classId) === String(grade.id) || student.className === grade.name : student.className === classValue)) &&
+        (!section || String(student.sectionId) === String(section.id) || student.sectionName === section.name)
+      );
+      const result = paginateArray(matching, { page, limit, search, status, searchFields });
+      const data = await Promise.all(result.data.map(resolveStudentFileUrls));
+      return res.json({ success: true, ...result, students: data, data });
+    }
 
     const queryClassRaw = req.query.className || req.query.class || req.query.classId;
     const querySectionRaw = req.query.sectionName || req.query.section || req.query.sectionId;
@@ -761,6 +782,17 @@ export const getStudentById = async (req, res) => {
       return sendNotFound(res, 'Student not found');
     }
 
+    const scope = getAcademicScope();
+    if (scope && !scope.legacy) {
+      const enrollment = await findScopedEnrollment(req, student._id || student.id);
+      if (!enrollment) return sendNotFound(res, 'Student has no enrollment in the selected academic session.');
+      student = enrichStudent({ ...student, class: enrollment.className, className: enrollment.className,
+        classId: enrollment.classId, section: enrollment.sectionName, sectionName: enrollment.sectionName,
+        sectionId: enrollment.sectionId, sessionId: enrollment.sessionId, academicYear: enrollment.sessionName,
+        rollNumber: enrollment.rollNumber, currentClassRoomId: enrollment.classRoomId,
+        status: enrollment.promotionStatus === 'passout' ? 'Passout' : scope.readOnly ? 'active' : student.status,
+      });
+    }
     student = await resolveStudentFileUrls(student);
     return res.json({ success: true, student });
   } catch (error) {
@@ -1014,7 +1046,7 @@ export const createStudent = async (req, res) => {
         }
       }
 
-      const studentRecord = FallbackDb.create('students', {
+      const studentRecord = await createEnrolledStudent(req, {
         ...payload,
         password,
         tempPassword: password,
@@ -1064,7 +1096,7 @@ export const createStudent = async (req, res) => {
     }
 
     // Students are stored exclusively in Student collection
-    const studentRecord = await Student.create({
+    const studentRecord = await createEnrolledStudent(req, {
       ...payload,
       password,
       tempPassword: password,
@@ -1099,7 +1131,7 @@ export const createStudent = async (req, res) => {
       },
     });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendError(res, error.message || 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -1179,7 +1211,7 @@ export const updateStudent = async (req, res) => {
 
     if (checkFallback() || !mongoose.Types.ObjectId.isValid(id)) {
       updatedRecord =
-        FallbackDb.update('students', id, updateData) ||
+        (await updateEnrolledStudent(req, id, updateData)) || FallbackDb.update('students', id, updateData) ||
         FallbackDb.findOne('students', { admissionNumber: id });
       if (updatedRecord?.user) {
         FallbackDb.update('users', updatedRecord.user, {
@@ -1192,9 +1224,7 @@ export const updateStudent = async (req, res) => {
         });
       }
     } else {
-      updatedRecord = await Student.findByIdAndUpdate(id, updateData, {
-        new: true,
-      });
+      updatedRecord = (await updateEnrolledStudent(req, id, updateData)) || await Student.findByIdAndUpdate(id, updateData, { new: true });
       if (updatedRecord?.user) {
         await User.findByIdAndUpdate(updatedRecord.user, {
           username: updatedRecord.admissionNumber.toLowerCase(),
@@ -1231,7 +1261,7 @@ export const updateStudent = async (req, res) => {
       student: enrichStudent(updatedRecord),
     });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendError(res, error.message || 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -1296,7 +1326,7 @@ export const resetStudentPassword = async (req, res) => {
       },
     });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendError(res, error.message || 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -1421,6 +1451,10 @@ export const bulkDeleteStudents = async (req, res) => {
 export const bulkPromoteStudents = async (req, res) => {
   try {
     const { ids = [], classId, sectionId } = req.body;
+    if (getAcademicScope()?.grades.length && ids.length && classId) {
+      for (const id of ids) await updateEnrolledStudent(req, id, { classId, ...(sectionId && { sectionId }) });
+      return res.json({ success: true, promoted: ids.length, message: 'Student placements updated.' });
+    }
     if (!ids.length || !classId) {
       return sendBadRequest(res, 'Student IDs and target class are required');
     }
@@ -1463,9 +1497,9 @@ export const bulkPromoteStudents = async (req, res) => {
  */
 export const exportStudents = async (req, res) => {
   try {
-    const students = checkFallback()
+    const students = (await scopedStudentRoster(req)) || (checkFallback()
       ? FallbackDb.find('students')
-      : await Student.find().select(studentRosterFields).lean();
+      : await Student.find().select(studentRosterFields).lean());
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=students.csv');
     return res.send(studentRosterCsv(students));
@@ -1594,60 +1628,10 @@ export const bulkImportStudents = async (req, res) => {
         const password = typeof raw.password === 'string' && raw.password.length >= 6
           ? raw.password
           : generateSecurePassword('Std@');
-        if (useFallback) {
-          const createdStudent = FallbackDb.create('students', {
-            ...payload,
-            password,
-            tempPassword: password,
-            role: 'student',
-          });
-          try {
-            if (payload.parentContact) await createOrLinkParent(payload, createdStudent.id, password);
-          } catch (_pErr) {
-            // Non-blocking
-          }
-        } else {
-          const studentRecord = await Student.create({
-            ...payload,
-            password,
-            tempPassword: password,
-            role: 'student',
-            schoolId: req.schoolId || req.user?.schoolId || payload.schoolId || 'IQRA_P01001',
-          });
-
-          try {
-            if (payload.parentContact) await createOrLinkParent(payload, studentRecord._id, password);
-          } catch (_pErr) {
-            // Non-blocking parent account linking
-          }
-
-          // Track session enrollment history if active session exists
-          if (activeSessionId && String(payload.sessionId) === String(activeSessionId)) {
-            try {
-              await StudentSessionHistory.findOneAndUpdate(
-                { studentId: studentRecord._id, sessionId: activeSession._id },
-                {
-                  studentId: studentRecord._id,
-                  studentName: studentRecord.name,
-                  admissionNumber: studentRecord.admissionNumber,
-                  sessionId: activeSession._id,
-                  sessionName: activeSession.sessionName,
-                  classId: studentRecord.classId || '',
-                  className: studentRecord.className || studentRecord.class || '',
-                  sectionId: studentRecord.sectionId || '',
-                  sectionName: studentRecord.sectionName || studentRecord.section || '',
-                  rollNumber: studentRecord.rollNumber,
-                  action: 'enrolled',
-                  status: 'active',
-                  enrolledAt: new Date(),
-                  enrolledBy: req.user?.name || 'admin',
-                },
-                { upsert: true, new: true }
-              );
-            } catch (_shErr) {
-              // Non-blocking
-            }
-          }
+        const studentRecord = await createEnrolledStudent(req, { ...payload, password, tempPassword: password, role: 'student' });
+        if (payload.parentContact) {
+          try { await createOrLinkParent(payload, studentRecord._id || studentRecord.id, password); }
+          catch (error) { console.warn('Could not link parent account:', error.message); }
         }
         successCount++;
       } catch (err) {
@@ -1861,6 +1845,24 @@ export const promoteStudents = async (req, res) => {
     } = req.body;
 
     const isPromote = action === 'promote';
+    const scope = getAcademicScope();
+    if (scope?.grades.length) {
+      if (mode === 'whole_school') throw academicError('Use the session upgrade preview to promote the whole school.', 409);
+      if (targetSession && targetSession !== scope.session.sessionName) throw academicError('Use whole-school rollover to move students between sessions.', 409);
+      const roster = await scopedStudentRoster(req);
+      const grade = resolveClass(sourceClass);
+      const eligible = roster.filter((student) => student.status === 'active' && (mode === 'class_wise'
+        ? grade && String(student.classId) === grade.id : mode === 'individual' && studentIds.map(String).includes(String(student._id || student.id))));
+      const moved = [];
+      for (const student of eligible) {
+        const position = scope.grades.findIndex((item) => item.id === String(student.classId));
+        const next = position >= 0 && scope.grades[position + (isPromote ? 1 : -1)];
+        if (!next) continue;
+        await updateEnrolledStudent(req, student._id || student.id, { classId: next.id });
+        moved.push({ studentId: student._id || student.id, name: student.name, from: student.className, to: next.name });
+      }
+      return res.json({ success: true, updatedCount: moved.length, logs: moved });
+    }
     let updatedCount = 0;
     const updateLogs = [];
 
@@ -2034,7 +2036,7 @@ export const promoteStudents = async (req, res) => {
       logs: updateLogs,
     });
   } catch (error) {
-    return sendError(res, error.message || 'Promotion operation failed', 500, error);
+    return sendError(res, error.message || 'Promotion operation failed', error.statusCode || 500, error);
   }
 };
 
@@ -2045,6 +2047,7 @@ export const promoteStudents = async (req, res) => {
  */
 export const rollbackPromotion = async (req, res) => {
   try {
+    if (getAcademicScope()?.grades.length) throw academicError('Completed session upgrades are protected.', 409);
     const { maxHours = 24 } = req.body;
     const cutoffTime = new Date(Date.now() - maxHours * 60 * 60 * 1000);
     let revertedCount = 0;
@@ -2411,7 +2414,7 @@ export const getStudentFileById = async (req, res) => {
       AdharRef: fileType === 'pdf' ? { id: fileId, pdf: fileUrl } : undefined,
     });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendError(res, error.message || 'Server error', error.statusCode || 500, error);
   }
 };
 

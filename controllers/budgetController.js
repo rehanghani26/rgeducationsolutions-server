@@ -62,7 +62,11 @@ async function findBudget(store, id) {
 export async function getBudgets(req, res) {
   try {
     const store = readProcurement(req);
-    const budgets = (await store.find('budgetAllocations'))
+    const admin = ['super-admin', 'school-admin', 'admin', 'principal'].includes(req.user?.role);
+    const match = admin && req.query.allSessions === 'true' ? {}
+      : req.query.sessionId === 'legacy' ? { sessionId: null }
+      : req.academicSessionId ? { sessionId: req.academicSessionId } : {};
+    const budgets = (await store.find('budgetAllocations', match))
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .map(budgetView);
     return sendSuccess(res, undefined, { budgets }, 200, { budgets });

@@ -1,3 +1,6 @@
+import { scopedStudentRoster } from './studentEnrollmentService.js';
+import { getAcademicScope } from '../utils/academicScope.js';
+import { sessionDay } from '../utils/academicDates.js';
 import mongoose from 'mongoose';
 import { checkFallback } from '../config/db.js';
 import AcademicSession from '../models/AcademicSession.js';
@@ -86,10 +89,12 @@ async function findStudent(user, schoolId, records) {
 export async function loadStudentOverview(user, schoolId, now = new Date()) {
   const fallback = checkFallback();
   const records = fallback ? schoolRecords(schoolId) : null;
-  const student = await findStudent(user, schoolId, records);
+  const roster = await scopedStudentRoster({ user, schoolId });
+  const student = roster ? roster[0] : await findStudent(user, schoolId, records);
   if (!student) return null;
 
-  const today = dashboardDay(now);
+  const scope = getAcademicScope();
+  const today = [dashboardDay(now), sessionDay(scope?.session?.endDate)].filter(Boolean).sort()[0];
   const homeworkStart = shiftDay(today, -29);
   const homeworkEnd = shiftDay(today, 6);
   const learnerId = recordId(student);
@@ -149,7 +154,8 @@ export async function loadStudentOverview(user, schoolId, now = new Date()) {
 }
 
 export async function loadCampusOverview(schoolId, role, { now = new Date(), studentDetails = false } = {}) {
-  const today = dashboardDay(now);
+  const scope = getAcademicScope();
+  const today = [dashboardDay(now), sessionDay(scope?.session?.endDate)].filter(Boolean).sort()[0];
   const rows = checkFallback() ? schoolRecords(schoolId) : null;
   const roles = [role, ...(role === 'admin' ? ['school-admin'] : [])];
   let students, teachers, classes, attendance, fees, exams, notices;
@@ -180,6 +186,10 @@ export async function loadCampusOverview(schoolId, role, { now = new Date(), stu
       noticesQuery(schoolId, roles),
     ]);
     if (classes === 0 && !active) classes = await Class.countDocuments({ schoolId });
+  }
+  if (scope) {
+    students = await scopedStudentRoster({ schoolId });
+    classes = scope.grades.length;
   }
   const overview = campusOverview({ students, teachers, classes, attendance, fees, exams, notices }, today);
   return studentDetails

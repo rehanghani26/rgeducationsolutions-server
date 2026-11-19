@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -59,6 +60,8 @@ const ClassTimetableSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+ClassTimetableSchema.plugin(academicRecordPlugin, { collection: 'classTimetables' });
 
 const ClassTimetable = mongoose.models.ClassTimetable || mongoose.model('ClassTimetable', ClassTimetableSchema);
 export default createDynamicModelProxy('ClassTimetable', ClassTimetable);

@@ -1,3 +1,5 @@
+import { scopedStudentRoster } from '../../services/studentEnrollmentService.js';
+import { getAcademicScope } from '../../utils/academicScope.js';
 /**
  * @file dashboard.tools.js
  * @description AI Tool for dashboard/summary statistics.
@@ -23,10 +25,11 @@ export const dashboardToolDefinitions = [
 
 export const dashboardToolExecutors = {
   async getDashboardStats(args, context) {
+    const roster = await scopedStudentRoster(context);
     if (checkFallback()) {
-      const students = FallbackDb.find('students') || [];
+      const students = roster || FallbackDb.find('students');
       const teachers = FallbackDb.find('teachers') || [];
-      const classes = FallbackDb.find('classes') || [];
+      const classes = getAcademicScope()?.grades || FallbackDb.find('classes');
       const fees = FallbackDb.find('fees') || [];
       const exams = FallbackDb.find('exams') || [];
 
@@ -60,11 +63,11 @@ export const dashboardToolExecutors = {
       upcomingExams,
       todayAttendance,
     ] = await Promise.all([
-      Student.countDocuments({}),
-      Student.countDocuments({ status: 'active' }),
+      roster ? roster.length : Student.countDocuments({}),
+      roster ? roster.filter((row) => row.status === 'active').length : Student.countDocuments({ status: 'active' }),
       Teacher.countDocuments({}),
       Teacher.countDocuments({ status: 'active' }),
-      ClassRoom.countDocuments({ status: 'active' }),
+      getAcademicScope()?.grades.length ?? ClassRoom.countDocuments({ status: 'active' }),
       Fee.aggregate([
         {
           $group: {

@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from "mongoose";
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -51,6 +52,13 @@ const ExamSchema = new mongoose.Schema(
     // classes assigned to this exam
     classIds: [{ type: mongoose.Schema.Types.Mixed }],
     classNames: [{ type: String }],
+    classTargets: [{
+      _id: false,
+      classId: String,
+      className: String,
+      sectionId: String,
+      sectionName: String,
+    }],
     // subject schedule with marks config
     subjectSchedule: [SubjectScheduleSchema],
     // legacy simple arrays
@@ -71,6 +79,8 @@ const ExamSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+ExamSchema.plugin(academicRecordPlugin, { collection: 'exams' });
 
 const Exam = mongoose.models.Exam || mongoose.model('Exam', ExamSchema);
 export default createDynamicModelProxy('Exam', Exam);

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 /**
@@ -116,7 +117,7 @@ const ClassRoomSchema = new mongoose.Schema(
 
 // ── Unique: one class-section per session ─────────────────────────────────────
 ClassRoomSchema.index(
-  { sessionId: 1, classId: 1, sectionId: 1 },
+  { schoolId: 1, sessionId: 1, classId: 1, sectionId: 1 },
   { unique: true }
 );
 
@@ -131,5 +132,6 @@ ClassRoomSchema.pre('save', function (next) {
   next();
 });
 
+ClassRoomSchema.plugin(academicRecordPlugin, { collection: 'classRooms' });
 const ClassRoom = mongoose.models.ClassRoom || mongoose.model('ClassRoom', ClassRoomSchema);
 export default createDynamicModelProxy('ClassRoom', ClassRoom);

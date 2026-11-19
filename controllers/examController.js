@@ -103,7 +103,7 @@ export const createExam = async (req, res) => {
   try {
     const {
       name, term, date, endDate, status, session,
-      classIds, classNames, subjectSchedule, subjects, classes,
+      classIds, classNames, classTargets, subjectSchedule, subjects, classes,
       totalMarks, passMarks, duration, venue, supervisor, description,
     } = req.body;
 
@@ -113,7 +113,7 @@ export const createExam = async (req, res) => {
 
     const examData = {
       name, term, date, status: status || 'upcoming',
-      endDate, session, classIds, classNames,
+      endDate, session, classIds, classNames, classTargets,
       subjectSchedule, subjects, classes,
       totalMarks, passMarks, duration, venue, supervisor, description,
       createdBy: req.user?._id || req.user?.id,

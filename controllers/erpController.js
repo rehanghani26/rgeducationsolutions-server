@@ -1,10 +1,13 @@
+import { academicError, getAcademicScope } from '../utils/academicScope.js';
+import { getSchool, writeProcurement } from '../services/procurementStore.js';
+import { orderedGrades } from '../services/academicSessionService.js';
+import { standardGrade } from '../utils/academicClass.js';
 // 3. Configuration
 import { checkFallback } from '../config/db.js';
 import { uploadToS3, generateS3Key, getPresignedUrl, resolveFileUrl } from '../config/s3.js';
 
 // 4. Models
 import Book from '../models/Book.js';
-import Class from '../models/Class.js';
 import ClassRoom from '../models/ClassRoom.js';
 import Curriculum from '../models/Curriculum.js';
 import Leave from '../models/Leave.js';
@@ -119,44 +122,30 @@ export const getSubjects = async (req, res) => {
  *
  * @route POST /api/erp/classes
  */
+
 export const createClass = async (req, res) => {
   try {
-    const { name, code, room, capacity, totalStudents, classTeacher } = req.body;
-    if (!name || !code) {
-      return sendBadRequest(res, 'Class Name and Registry Code are required');
-    }
-
-    if (checkFallback()) {
-      const existing = FallbackDb.findOne('classes', { code });
-      if (existing) {
-        return sendBadRequest(res, 'Class code already exists');
+    const { room, capacity, sortOrder } = req.body;
+    const name = String(req.body.name || '').trim();
+    const code = String(req.body.code || '').trim();
+    if (!name || !code) return sendBadRequest(res, 'Class name and registry code are required.');
+    const standard = standardGrade(code) || standardGrade(name);
+    const order = sortOrder === undefined || sortOrder === '' ? standard?.sortOrder : Number(sortOrder);
+    if (!Number.isInteger(order) || order < 0) return sendBadRequest(res, 'Enter a class order value.');
+    const grade = await writeProcurement(req, ['classes'], async (store) => {
+      await store.lockAcademicSettings();
+      const grades = await orderedGrades(store);
+      if (grades.some((entry) => !entry.virtual && (
+        entry.code.toLowerCase() === code.toLowerCase() || entry.name.toLowerCase() === name.toLowerCase()
+      ))) throw academicError('A class with this name or code already exists.', 409);
+      if (grades.some((entry) => entry.sortOrder === order && !(entry.virtual && entry.code === standard?.code))) {
+        throw academicError('This position is already used by another class.', 409);
       }
-      const record = FallbackDb.create('classes', {
-        name,
-        code,
-        room: room || 'Room N/A',
-        capacity: Number(capacity) || 40,
-        totalStudents: Number(totalStudents) || 0,
-        classTeacher: classTeacher || 'Unassigned'
-      });
-      return res.status(201).json({ success: true, message: 'Class created successfully', class: record });
-    }
-
-    const existingClass = await Class.findOne({ $or: [{ code }, { name }] });
-    if (existingClass) {
-      return sendBadRequest(res, 'Class name or code already exists');
-    }
-
-    const newClass = await Class.create({
-      name,
-      code,
-      room,
-      capacity: Number(capacity) || 40
+      return store.create('classes', { name, code, room, capacity: Number(capacity) || 40, sortOrder: order });
     });
-
-    return res.status(201).json({ success: true, message: 'Class created successfully', class: newClass });
-  } catch (err) {
-    return sendError(res, err.message || 'Server error creating class', 500, err);
+    return res.status(201).json({ success: true, message: 'Class created successfully.', class: grade });
+  } catch (error) {
+    return sendError(res, error.message, error.statusCode || 500);
   }
 };
 
@@ -254,7 +243,7 @@ export const getBooks = async (req, res) => {
   try {
     let list = [];
     if (checkFallback()) {
-      list = FallbackDb.find('books');
+      list = FallbackDb.find('books').filter((book) => String(book.schoolId || 'IQRA_P01001') === getSchool(req));
     } else {
       list = await Book.find();
     }
@@ -275,6 +264,7 @@ export const createBook = async (req, res) => {
     let record = null;
     if (checkFallback()) {
       record = FallbackDb.create('books', {
+        schoolId: getSchool(req),
         title: data.title,
         isbn: data.isbn,
         author: data.author,
@@ -302,17 +292,21 @@ export const getLibraryIssues = async (req, res) => {
     let list = [];
     if (checkFallback()) {
       list = FallbackDb.find('library');
+      if (req.user?.role === 'student') {
+        list = list.filter((item) => String(item.studentId) === String(req.user.profileId || req.user._id || req.user.id));
+      }
       list = list.map((item) => {
         const bookObj = FallbackDb.findById('books', item.bookId);
         const studObj = FallbackDb.findById('students', item.studentId);
         return {
           ...item,
           book: bookObj,
-          student: studObj
+          student: studObj ? { name: studObj.name, admissionNumber: studObj.admissionNumber } : null
         };
       });
     } else {
-      list = await Library.find().populate('bookId').populate('studentId');
+      const own = req.user?.role === 'student' ? { studentId: req.user.profileId || req.user._id } : {};
+      list = await Library.find(own).populate('bookId', 'title author isbn').populate('studentId', 'name admissionNumber');
     }
     return res.json({ success: true, issues: list });
   } catch (err) {
@@ -325,47 +319,40 @@ export const getLibraryIssues = async (req, res) => {
  *
  * @route POST /api/erp/library/issue
  */
+
 export const issueBook = async (req, res) => {
   try {
     const { bookId, studentId, dueDate } = req.body;
-    let issueRecord = null;
-
-    if (checkFallback()) {
-      const book = FallbackDb.findById('books', bookId);
-      if (!book || book.totalQty <= book.issuedQty) {
-        return sendBadRequest(res, 'Book is currently unavailable');
+    if (!bookId || !studentId) return sendBadRequest(res, 'Choose a book and student.');
+    const scope = getAcademicScope();
+    const due = dueDate ? new Date(dueDate) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    if (!Number.isFinite(due.getTime())) return sendBadRequest(res, 'Enter a valid due date.');
+    const issue = await writeProcurement(req, ['books', 'library', 'academicSessions', 'students', 'studentSessionHistories'], async (store) => {
+      await store.lockAcademicSettings();
+      const book = await store.get('books', bookId);
+      const student = await store.get('students', studentId);
+      if (!student) throw academicError('Student not found.', 404);
+      if (!book || (book.issuedQty || 0) >= book.totalQty) throw academicError('Book is unavailable.', 409);
+      const enrollment = scope ? await store.one('studentSessionHistories', {
+        sessionId: scope.sessionId, studentId, status: 'active',
+      }) : null;
+      if (scope) {
+        const active = await store.get('academicSessions', scope.sessionId);
+        if (!active?.isCurrent || !enrollment) {
+          throw academicError('Select a student enrolled in the active academic session.', 409);
+        }
       }
-
-      FallbackDb.update('books', bookId, { issuedQty: book.issuedQty + 1 });
-      
-      issueRecord = FallbackDb.create('library', {
-        bookId,
-        studentId,
-        issueDate: new Date().toISOString(),
-        dueDate: dueDate || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-        returnDate: null,
-        fine: 0
+      const record = await store.create('library', {
+        bookId: book._id || book.id, studentId: student._id || student.id,
+        ...(enrollment && { classId: enrollment.classId, className: enrollment.className, sessionId: scope.sessionId }),
+        issueDate: new Date(), dueDate: due, returnDate: null, fine: 0,
       });
-    } else {
-      const book = await Book.findById(bookId);
-      if (!book || book.totalQty <= book.issuedQty) {
-        return sendBadRequest(res, 'Book is unavailable');
-      }
-
-      book.issuedQty += 1;
-      await book.save();
-
-      const libRecord = new Library({
-        bookId,
-        studentId,
-        dueDate: dueDate || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
-      });
-      issueRecord = await libRecord.save();
-    }
-
-    return res.status(201).json({ success: true, message: 'Book issued successfully', record: issueRecord });
-  } catch (err) {
-    return sendError(res, err.message, 500, err);
+      await store.update('books', book._id || book.id, { issuedQty: (book.issuedQty || 0) + 1 });
+      return record;
+    });
+    return res.status(201).json({ success: true, message: 'Book issued successfully.', record: issue });
+  } catch (error) {
+    return sendError(res, error.message, error.statusCode || 500);
   }
 };
 
@@ -378,9 +365,9 @@ export const getTransport = async (req, res) => {
   try {
     let list = [];
     if (checkFallback()) {
-      list = FallbackDb.find('transport');
+      list = FallbackDb.find('transport').filter((route) => String(route.schoolId || 'IQRA_P01001') === getSchool(req));
     } else {
-      list = await Transport.find();
+      list = await Transport.find({ schoolId: getSchool(req) }).select('-assignedStudents');
     }
     return res.json({ success: true, transport: list });
   } catch (err) {
@@ -401,6 +388,12 @@ export const getNotifications = async (req, res) => {
     } else {
       list = await Notification.find().sort({ date: -1 });
     }
+    const role = req.user?.role;
+    const admin = ['super-admin', 'school-admin', 'admin', 'principal'].includes(role);
+    list = list.filter((item) =>
+      admin || ((!item.roleVisibility?.length || item.roleVisibility.includes(role)) &&
+        (!item.classId || String(req.user?.classId || '') === String(item.classId)))
+    );
     return res.json({ success: true, notifications: list });
   } catch (err) {
     return sendError(res, 'Server error', 500, err);

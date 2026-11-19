@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -5,9 +6,9 @@ const FeeSchema = new mongoose.Schema({
   studentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Student',
-    required: true,
-    unique: true
+    required: true
   },
+  className: String,
   amountPaid: {
     type: Number,
     required: true,
@@ -41,6 +42,12 @@ const FeeSchema = new mongoose.Schema({
   }]
 }, {
   timestamps: true
+});
+
+FeeSchema.plugin(academicRecordPlugin, { collection: 'fees' });
+
+FeeSchema.index({ schoolId: 1, studentId: 1, sessionId: 1 }, {
+  unique: true, partialFilterExpression: { sessionId: { $type: 'objectId' } },
 });
 
 const Fee = mongoose.models.Fee || mongoose.model('Fee', FeeSchema);

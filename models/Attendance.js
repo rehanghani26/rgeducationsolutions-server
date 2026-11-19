@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -61,6 +62,8 @@ const AttendanceSchema = new mongoose.Schema({
 AttendanceSchema.index({ date: 1, classId: 1, sectionId: 1 }, { sparse: true });
 AttendanceSchema.index({ attendanceDate: 1, classId: 1 }, { sparse: true });
 AttendanceSchema.index({ attendanceTakenDate: 1 });
+
+AttendanceSchema.plugin(academicRecordPlugin, { collection: 'attendance' });
 
 const Attendance = mongoose.models.Attendance || mongoose.model('Attendance', AttendanceSchema);
 export default createDynamicModelProxy('Attendance', Attendance);

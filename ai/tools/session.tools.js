@@ -1,3 +1,5 @@
+import * as sessions from '../../controllers/sessionController.js';
+import { readProcurement } from '../../services/procurementStore.js';
 import AcademicSession from "../../models/AcademicSession.js";
 import MasterPeriod from "../../models/MasterPeriod.js";
 import ClassTimetable from "../../models/ClassTimetable.js";
@@ -162,6 +164,26 @@ const formatDate = (val) => {
   }
 };
 
+
+async function sessionTool(handler, args, context) {
+  const role = String(context.user?.role || '').toLowerCase().replaceAll('_', '-');
+  if (!['super-admin', 'superadmin', 'school-admin', 'principal', 'admin'].includes(role)) {
+    return { success: false, error: 'School administrator permission is required.' };
+  }
+  let id = args.sessionId;
+  if (!id && args.sessionName && handler !== sessions.createAcademicSession) {
+    const match = (await readProcurement(context).find('academicSessions')).find((session) =>
+      String(session.sessionName).toLowerCase() === String(args.sessionName).toLowerCase());
+    id = match?._id || match?.id;
+  }
+  const req = { ...context, body: args, params: { id: id ? String(id) : '' } };
+  const res = {
+    status() { return this; },
+    json(result) { return result.success ? result : { ...result, error: result.message }; },
+  };
+  return handler(req, res);
+}
+
 export const sessionToolExecutors = {
   async getActiveAcademicSession(args, context) {
     let session = null;
@@ -256,402 +278,21 @@ export const sessionToolExecutors = {
   },
 
   async createAcademicSession(args, context) {
-    const {
-      sessionName,
-      startDate,
-      endDate,
-      isCurrent = false,
-      notes = "",
-    } = args;
-
-    if (!sessionName || !startDate || !endDate) {
-      return {
-        success: false,
-        error:
-          "sessionName, startDate (YYYY-MM-DD), and endDate (YYYY-MM-DD) are required.",
-      };
-    }
-
-    const cleanName = sessionName.trim();
-
-    if (checkFallback()) {
-      const all = FallbackDb.find("academicSessions") || [];
-      const exists = all.some(
-        (s) => s.sessionName.toLowerCase() === cleanName.toLowerCase()
-      );
-      if (exists) {
-        return {
-          success: false,
-          error: `Academic session "${cleanName}" already exists.`,
-        };
-      }
-
-      if (isCurrent) {
-        all.forEach((s) => {
-          s.isCurrent = false;
-          if (s.status === "active") s.status = "upcoming";
-        });
-      }
-
-      const newSession = {
-        _id: `sess-${Date.now()}`,
-        sessionName: cleanName,
-        startDate,
-        endDate,
-        isCurrent: Boolean(isCurrent),
-        status: isCurrent ? "active" : "upcoming",
-        notes: notes || "",
-        hasMasterSchedule: false,
-        timetableCount: 0,
-        createdAt: new Date().toISOString(),
-      };
-
-      all.unshift(newSession);
-      FallbackDb.updateAll("academicSessions", all);
-
-      await logActivity({
-        userId: context.user?._id || context.user?.id,
-        action: "CREATE",
-        module: "settings",
-        details: `AI created academic session "${cleanName}" (${startDate} to ${endDate})`,
-        ipAddress: context.ip || "AI",
-      });
-
-      return {
-        success: true,
-        message: `Academic session "${cleanName}" created successfully.${isCurrent ? " Set as active foundation anchor." : ""}`,
-        session: newSession,
-        nextStep: isCurrent
-          ? "Next Step 2: Configure Master Period bell schedule at /settings/master-period."
-          : "To activate this session, ask AI to activate session or use activateAcademicSession.",
-      };
-    }
-
-    const existing = await AcademicSession.findOne({ sessionName: cleanName });
-    if (existing) {
-      return {
-        success: false,
-        error: `Academic session "${cleanName}" already exists.`,
-      };
-    }
-
-    if (isCurrent) {
-      await AcademicSession.updateMany({}, { isCurrent: false });
-    }
-
-    const session = await AcademicSession.create({
-      sessionName: cleanName,
-      startDate,
-      endDate,
-      isCurrent: Boolean(isCurrent),
-      status: isCurrent ? "active" : "upcoming",
-      notes: notes || "",
-      createdBy: context.user?.name || "AI Assistant",
-    });
-
-    await logActivity({
-      userId: context.user?._id || context.user?.id,
-      action: "CREATE",
-      module: "settings",
-      details: `AI created academic session "${cleanName}" (${startDate} to ${endDate})`,
-      ipAddress: context.ip || "AI",
-    });
-
-    return {
-      success: true,
-      message: `Academic session "${cleanName}" created successfully.${isCurrent ? " Set as active foundation anchor." : ""}`,
-      session: {
-        id: session._id,
-        sessionName: session.sessionName,
-        startDate: formatDate(session.startDate),
-        endDate: formatDate(session.endDate),
-        isCurrent: session.isCurrent,
-        status: session.status,
-      },
-      nextStep: isCurrent
-        ? "Next Step 2: Configure Master Period bell schedule at /settings/master-period."
-        : "To activate this session, ask AI to activate session or use activateAcademicSession.",
-    };
+    return sessionTool(sessions.createAcademicSession, args, context);
   },
 
   async activateAcademicSession(args, context) {
-    const { sessionId, sessionName } = args;
-
-    if (!sessionId && !sessionName) {
-      return {
-        success: false,
-        error:
-          "Either sessionId or sessionName is required to activate a session.",
-      };
-    }
-
-    const matchFn = (s) => {
-      if (
-        sessionId &&
-        (String(s._id) === String(sessionId) ||
-          String(s.id) === String(sessionId))
-      )
-        return true;
-      if (
-        sessionName &&
-        s.sessionName &&
-        s.sessionName.toLowerCase() === sessionName.toLowerCase().trim()
-      )
-        return true;
-      return false;
-    };
-
-    if (checkFallback()) {
-      const all = FallbackDb.find("academicSessions") || [];
-      const found = all.find(matchFn);
-      if (!found) {
-        return {
-          success: false,
-          error: `Session not found matching "${sessionId || sessionName}".`,
-        };
-      }
-
-      all.forEach((s) => {
-        if (s === found || String(s._id) === String(found._id)) {
-          s.isCurrent = true;
-          s.status = "active";
-        } else {
-          s.isCurrent = false;
-        }
-      });
-
-      FallbackDb.updateAll("academicSessions", all);
-
-      await logActivity({
-        userId: context.user?._id || context.user?.id,
-        action: "UPDATE",
-        module: "settings",
-        details: `AI activated academic session "${found.sessionName}"`,
-        ipAddress: context.ip || "AI",
-      });
-
-      return {
-        success: true,
-        message: `Academic session "${found.sessionName}" is now the active foundation anchor for the school.`,
-        activeSession: found,
-      };
-    }
-
-    let filter = {};
-    if (sessionId) {
-      filter = { _id: sessionId };
-    } else {
-      filter = { sessionName: new RegExp(`^${sessionName.trim()}$`, "i") };
-    }
-
-    const target = await AcademicSession.findOne(filter);
-    if (!target) {
-      return {
-        success: false,
-        error: `Session not found matching "${sessionId || sessionName}".`,
-      };
-    }
-
-    await AcademicSession.updateMany({}, { isCurrent: false });
-    target.isCurrent = true;
-    target.status = "active";
-    await target.save();
-
-    await logActivity({
-      userId: context.user?._id || context.user?.id,
-      action: "UPDATE",
-      module: "settings",
-      details: `AI activated academic session "${target.sessionName}"`,
-      ipAddress: context.ip || "AI",
-    });
-
-    return {
-      success: true,
-      message: `Academic session "${target.sessionName}" is now the active foundation anchor for the school.`,
-      activeSession: {
-        id: target._id,
-        sessionName: target.sessionName,
-        startDate: formatDate(target.startDate),
-        endDate: formatDate(target.endDate),
-        status: target.status,
-      },
-    };
+    return sessionTool(sessions.activateAcademicSession, args, context);
   },
 
   async updateAcademicSession(args, context) {
-    const { sessionId, sessionName, startDate, endDate, status, notes } = args;
-
-    if (!sessionId) {
-      return {
-        success: false,
-        error: "sessionId is required to update a session.",
-      };
-    }
-
-    const updateFields = {};
-    if (sessionName) updateFields.sessionName = sessionName.trim();
-    if (startDate) updateFields.startDate = startDate;
-    if (endDate) updateFields.endDate = endDate;
-    if (status) updateFields.status = status;
-    if (notes !== undefined) updateFields.notes = notes;
-
-    if (Object.keys(updateFields).length === 0) {
-      return { success: false, error: "No update parameters provided." };
-    }
-
-    if (checkFallback()) {
-      const all = FallbackDb.find("academicSessions") || [];
-      const idx = all.findIndex(
-        (s) =>
-          String(s._id) === String(sessionId) ||
-          String(s.id) === String(sessionId) ||
-          (s.sessionName &&
-            s.sessionName.toLowerCase() === sessionId.toLowerCase().trim())
-      );
-
-      if (idx === -1) {
-        return {
-          success: false,
-          error: `Session not found for identifier "${sessionId}".`,
-        };
-      }
-
-      Object.assign(all[idx], updateFields);
-      FallbackDb.updateAll("academicSessions", all);
-
-      await logActivity({
-        userId: context.user?._id || context.user?.id,
-        action: "UPDATE",
-        module: "settings",
-        details: `AI updated academic session "${all[idx].sessionName}"`,
-        ipAddress: context.ip || "AI",
-      });
-
-      return {
-        success: true,
-        message: `Academic session "${all[idx].sessionName}" updated successfully.`,
-        session: all[idx],
-      };
-    }
-
-    let session = null;
-    if (sessionId.match(/^[0-9a-fA-F]{24}$/)) {
-      session = await AcademicSession.findByIdAndUpdate(
-        sessionId,
-        updateFields,
-        { new: true }
-      );
-    } else {
-      session = await AcademicSession.findOneAndUpdate(
-        { sessionName: new RegExp(`^${sessionId.trim()}$`, "i") },
-        updateFields,
-        { new: true }
-      );
-    }
-
-    if (!session) {
-      return {
-        success: false,
-        error: `Session not found for identifier "${sessionId}".`,
-      };
-    }
-
-    await logActivity({
-      userId: context.user?._id || context.user?.id,
-      action: "UPDATE",
-      module: "settings",
-      details: `AI updated academic session "${session.sessionName}"`,
-      ipAddress: context.ip || "AI",
-    });
-
-    return {
-      success: true,
-      message: `Academic session "${session.sessionName}" updated successfully.`,
-      session: {
-        id: session._id,
-        sessionName: session.sessionName,
-        startDate: formatDate(session.startDate),
-        endDate: formatDate(session.endDate),
-        status: session.status,
-      },
-    };
+    if (!args.sessionId) return { success: false, error: 'Choose a session to update.' };
+    return sessionTool(sessions.updateAcademicSession, args, context);
   },
 
   async deleteAcademicSession(args, context) {
-    const { sessionId, confirm } = args;
-
-    if (!sessionId) {
-      return {
-        success: false,
-        error: "sessionId is required to delete a session.",
-      };
-    }
-
-    if (!confirm) {
-      return {
-        success: false,
-        requiresConfirmation: true,
-        message: `Are you sure you want to delete session "${sessionId}"? This will affect session records. Set confirm: true to proceed.`,
-      };
-    }
-
-    if (checkFallback()) {
-      const all = FallbackDb.find("academicSessions") || [];
-      const target = all.find(
-        (s) =>
-          String(s._id) === String(sessionId) ||
-          String(s.id) === String(sessionId) ||
-          (s.sessionName &&
-            s.sessionName.toLowerCase() === sessionId.toLowerCase().trim())
-      );
-
-      if (!target) {
-        return { success: false, error: `Session "${sessionId}" not found.` };
-      }
-
-      if (target.isCurrent) {
-        return {
-          success: false,
-          error: `Cannot delete active session "${target.sessionName}". Activate another session first.`,
-        };
-      }
-
-      const filtered = all.filter(
-        (s) => s !== target && String(s._id) !== String(target._id)
-      );
-      FallbackDb.updateAll("academicSessions", filtered);
-
-      return {
-        success: true,
-        message: `Academic session "${target.sessionName}" deleted successfully.`,
-      };
-    }
-
-    let filter = {};
-    if (sessionId.match(/^[0-9a-fA-F]{24}$/)) {
-      filter = { _id: sessionId };
-    } else {
-      filter = { sessionName: new RegExp(`^${sessionId.trim()}$`, "i") };
-    }
-
-    const session = await AcademicSession.findOne(filter);
-    if (!session) {
-      return { success: false, error: `Session "${sessionId}" not found.` };
-    }
-
-    if (session.isCurrent) {
-      return {
-        success: false,
-        error: `Cannot delete active session "${session.sessionName}". Please activate another session before deleting.`,
-      };
-    }
-
-    await AcademicSession.findByIdAndDelete(session._id);
-
-    return {
-      success: true,
-      message: `Academic session "${session.sessionName}" deleted successfully.`,
-    };
+    if (!args.confirm) return { success: false, error: 'Confirm the session deletion first.' };
+    return sessionTool(sessions.deleteAcademicSession, args, context);
   },
 
   async getAcademicSetupProgress(args, context) {

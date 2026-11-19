@@ -18,6 +18,7 @@ import { auditMiddleware } from "./middleware/auditLog.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { tenantMiddleware } from "./middleware/tenant.js";
 import tenantContext from "./utils/tenantContext.js";
+import { startAcademicRolloverJob } from "./services/sessionRolloverService.js";
 
 // 8. Other internal modules (Routes)
 import adminRoutes from "./routes/adminRoutes.js";
@@ -98,6 +99,7 @@ app.use(
 
 // Connect database
 connectDB();
+startAcademicRolloverJob();
 
 // Automatic cleanup of corrupted student records from failed raw binary xlsx imports
 setTimeout(async () => {

@@ -4,6 +4,7 @@ import express from "express";
 // 5. Middleware
 import { protect } from "../middleware/auth.js";
 import { authorize } from "../middleware/rbac.js";
+import { confirmAcademicSetup, getAcademicSetup } from "../controllers/sessionController.js";
 
 // 8. Controllers
 import {
@@ -29,6 +30,9 @@ const router = express.Router();
 // ─── Setup Wizard Endpoints ───
 // GET /api/v1/setup/status — View setup progress
 router.get("/status", protect, getSetupStatus);
+const academicAdmins = authorize("super-admin", "school-admin", "principal", "admin");
+router.get("/academic-session", protect, academicAdmins, getAcademicSetup);
+router.put("/academic-session", protect, academicAdmins, confirmAcademicSetup);
 
 // POST /api/v1/setup/complete-step — Mark step complete
 router.post(

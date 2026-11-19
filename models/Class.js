@@ -5,13 +5,14 @@ const ClassSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
-    unique: true
+    trim: true
   },
   code: {
     type: String,
     required: true,
-    unique: true
+    trim: true
   },
+  sortOrder: { type: Number, min: 0 },
   room: {
     type: String
   },
@@ -22,6 +23,9 @@ const ClassSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+ClassSchema.index({ schoolId: 1, code: 1 }, { unique: true });
+ClassSchema.index({ schoolId: 1, name: 1 }, { unique: true });
 
 const Class = mongoose.models.Class || mongoose.model('Class', ClassSchema);
 export default createDynamicModelProxy('Class', Class);

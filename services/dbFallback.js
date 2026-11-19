@@ -2,6 +2,8 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { academicCollections, academicFields, getAcademicScope } from "../utils/academicScope.js";
+import tenantContext from "../utils/tenantContext.js";
 
 /**
  * @file dbFallback.js
@@ -119,6 +121,23 @@ loadData();
 /**
  * Generic synchronous CRUD operations for fallback collections.
  */
+function matchesAcademicScope(collection, record) {
+  if (!academicCollections[collection]) return true;
+  const scope = getAcademicScope();
+  const school = scope?.schoolId || tenantContext.getSchoolId();
+  if (school && String(record.schoolId || 'IQRA_P01001').toUpperCase() !== String(school).toUpperCase()) return false;
+  if (!scope) return true;
+  return scope.legacy ? !record.sessionId : String(record.sessionId || '') === scope.sessionId;
+}
+
+function scopedAcademicData(collection, input, creating = false) {
+  if (!academicCollections[collection]) return input;
+  const scope = getAcademicScope();
+  const schoolId = scope?.schoolId || tenantContext.getSchoolId();
+  if (!scope) return schoolId ? { ...input, schoolId } : input;
+  return { ...input, ...academicFields(scope, collection, input, { creating }), schoolId };
+}
+
 export const FallbackDb = {
   // Stage related writes and publish them together only after the disk write succeeds.
   transaction: async (collections, work) => {
@@ -149,26 +168,28 @@ export const FallbackDb = {
   },
 
   find: (collection) => {
-    return db[collection] || [];
+    const rows = db[collection] || [];
+    return academicCollections[collection] ? rows.filter((row) => matchesAcademicScope(collection, row)) : rows;
   },
 
   findAll: (collection) => {
-    return db[collection] || [];
+    return FallbackDb.find(collection);
   },
 
   findById: (collection, id) => {
-    const coll = db[collection] || [];
+    const coll = FallbackDb.find(collection);
     return coll.find((item) => item.id === id || item._id === id);
   },
 
   findOne: (collection, queryObj) => {
-    const coll = db[collection] || [];
+    const coll = FallbackDb.find(collection);
     return coll.find((item) => {
       return Object.entries(queryObj).every(([key, val]) => item[key] === val);
     });
   },
 
   create: (collection, data) => {
+    data = scopedAcademicData(collection, data, true);
     if (!db[collection]) db[collection] = [];
     const newRecord = {
       id: data.id || Math.random().toString(36).substring(2, 9),
@@ -193,13 +214,13 @@ export const FallbackDb = {
   update: (collection, id, data) => {
     if (!db[collection]) return null;
     const index = db[collection].findIndex(
-      (item) => item.id === id || item._id === id
+      (item) => (item.id === id || item._id === id) && matchesAcademicScope(collection, item)
     );
     if (index === -1) return null;
 
     db[collection][index] = {
       ...db[collection][index],
-      ...data,
+      ...scopedAcademicData(collection, data),
       updatedAt: new Date().toISOString(),
     };
     saveData();
@@ -209,8 +230,11 @@ export const FallbackDb = {
   delete: (collection, id) => {
     if (!db[collection]) return false;
     const initialLen = db[collection].length;
-    db[collection] = db[collection].filter(
-      (item) => item.id !== id && item._id !== id
+    if (academicCollections[collection] && getAcademicScope()?.readOnly) {
+      scopedAcademicData(collection, {});
+    }
+    db[collection] = db[collection].filter((item) =>
+      (item.id !== id && item._id !== id) || !matchesAcademicScope(collection, item)
     );
     const success = db[collection].length < initialLen;
     if (success) {
@@ -230,7 +254,18 @@ export const FallbackDb = {
   },
 
   updateAll: (collection, newArray) => {
-    db[collection] = Array.isArray(newArray) ? newArray : [];
+    const rows = Array.isArray(newArray) ? newArray : [];
+    if (academicCollections[collection] && (getAcademicScope() || tenantContext.getSchoolId())) {
+      const existing = db[collection] || [];
+      const outside = existing.filter((record) => !matchesAcademicScope(collection, record));
+      const insideIds = new Set(existing.filter((record) => matchesAcademicScope(collection, record))
+        .map((record) => record._id || record.id));
+      db[collection] = [...outside, ...rows.map((record) =>
+        scopedAcademicData(collection, record, !insideIds.has(record._id || record.id))
+      )];
+    } else {
+      db[collection] = rows;
+    }
     saveData();
   },
 };

@@ -1,3 +1,6 @@
+import { createEnrolledStudent, scopedStudentRoster, updateEnrolledStudent } from '../../services/studentEnrollmentService.js';
+import { getAcademicScope } from '../../utils/academicScope.js';
+import tenantContext from '../../utils/tenantContext.js';
 /**
  * @file student.tools.js
  * @description Comprehensive AI Tool definitions and executors for the Students module.
@@ -283,8 +286,9 @@ export const studentToolExecutors = {
     const limit = Math.min(args.limit || 25, 100);
     const searchFields = ['name', 'admissionNumber', 'rollNumber', 'contactNumber', 'email', 'parentName'];
 
-    if (checkFallback()) {
-      let list = FallbackDb.find('students') || [];
+    const roster = await scopedStudentRoster(context);
+    if (roster || checkFallback()) {
+      let list = roster || FallbackDb.find('students');
 
       if (args.search) {
         const term = args.search.toLowerCase().trim();
@@ -531,12 +535,8 @@ export const studentToolExecutors = {
       role: 'student',
     };
 
-    let student;
-    if (checkFallback()) {
-      student = FallbackDb.create('students', payload);
-    } else {
-      student = await Student.create(payload);
-    }
+    const sectionCode = String(args.section || 'A').replace(/^(?:section\s*|sec-)/i, '').trim();
+    const student = await createEnrolledStudent(context, { ...payload, sectionId: 'sec-' + sectionCode.toLowerCase(), sectionName: 'Section ' + sectionCode.toUpperCase() });
 
     await logActivity({
       userId: context.user?._id || context.user?.id,
@@ -580,6 +580,7 @@ export const studentToolExecutors = {
         } else if (field === 'section') {
           updates.section = args.section;
           updates.sectionName = args.section;
+          updates.sectionId = 'sec-' + String(args.section).replace(/^(?:section\s*|sec-)/i, '').trim().toLowerCase();
         } else if (field === 'bloodGroup') {
           updates.bloodGroup = String(args.bloodGroup).toUpperCase();
         } else if (field === 'rollNumber') {
@@ -594,10 +595,10 @@ export const studentToolExecutors = {
       return { success: false, error: 'No valid update fields provided.' };
     }
 
-    let updated;
-    if (checkFallback()) {
+    let updated = await updateEnrolledStudent(context, targetId, updates);
+    if (!updated && checkFallback()) {
       updated = FallbackDb.update('students', targetId, updates);
-    } else {
+    } else if (!updated) {
       updated = await Student.findByIdAndUpdate(targetId, updates, { new: true });
     }
 
@@ -1035,6 +1036,15 @@ export const studentToolExecutors = {
 async function findStudentByAnyIdentifier(identifier) {
   if (!identifier) return null;
   const term = String(identifier).trim();
+
+
+  if (getAcademicScope()) {
+    const roster = await scopedStudentRoster({ user: tenantContext.getUser(), schoolId: tenantContext.getSchoolId() });
+    const query = term.toLowerCase();
+    return roster.find((student) => [student._id, student.id, student.admissionNumber, student.rollNumber].some((value) =>
+      value != null && String(value).toLowerCase() === query))
+      || roster.find((student) => String(student.name || '').toLowerCase().includes(query)) || null;
+  }
 
   if (checkFallback()) {
     const list = FallbackDb.find('students') || [];

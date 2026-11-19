@@ -122,6 +122,7 @@ export async function recordMovement(store, item, req, details) {
     balanceAfter: item.quantity,
     performedBy: performedBy.id,
     performedByName: performedBy.name,
+    sessionId: req.academicSessionId,
     ...details,
     unitPrice,
     totalValue: roundMoney(Math.abs(details.quantity) * unitPrice),

@@ -1,3 +1,6 @@
+import { writeProcurement } from '../services/procurementStore.js';
+import { findScopedEnrollment } from '../services/studentEnrollmentService.js';
+import { academicError, getAcademicScope } from '../utils/academicScope.js';
 // 3. Configuration
 import { checkFallback } from '../config/db.js';
 
@@ -99,7 +102,7 @@ export const getFees = async (req, res) => {
       ...paginateResult(fees, total, { page, limit })
     });
   } catch (error) {
-    return sendError(res, 'Server error', 500, error);
+    return sendError(res, error.statusCode ? error.message : 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -125,7 +128,7 @@ export const getFeeById = async (req, res) => {
     if (!fee) return sendNotFound(res, 'Fee record not found');
     return sendSuccess(res, undefined, { fee });
   } catch (error) {
-    return sendError(res, 'Server error', 500, error);
+    return sendError(res, error.statusCode ? error.message : 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -142,7 +145,7 @@ export const getFeeActivity = async (req, res) => {
     const logs = await getRecordActivity('finance', id);
     return sendSuccess(res, undefined, { logs, loginHistory: [] });
   } catch (error) {
-    return sendError(res, 'Server error', 500, error);
+    return sendError(res, error.statusCode ? error.message : 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -231,16 +234,58 @@ export const collectFee = async (req, res) => {
       return sendBadRequest(res, 'Student ID or Fee ID is required');
     }
 
+
+    const scope = getAcademicScope();
+    const enrollment = scope && targetStudentId && !targetFeeId ? await findScopedEnrollment(req, targetStudentId) : null;
+    if (scope && targetStudentId && !targetFeeId && !enrollment) {
+      throw academicError('The student has no enrollment in the selected academic session.', 409);
+    }
+    const placement = enrollment ? { classId: enrollment.classId, className: enrollment.className } : {};
     let feeRecord = null;
 
-    if (checkFallback()) {
+    if (scope) {
+      const payment = {
+        amount: paidAmount, method: method || 'Online',
+        reference: reference || 'REF-' + Math.random().toString(36).slice(2, 11).toUpperCase(),
+        date: new Date(),
+      };
+      if (!['Cash', 'Cheque', 'Online', 'Bank Transfer'].includes(payment.method)) {
+        return sendBadRequest(res, 'Choose a valid payment method.');
+      }
+      feeRecord = await writeProcurement(req, ['academicSessions', 'fees'], async (store) => {
+        await store.lockAcademicSettings();
+        const active = await store.get('academicSessions', scope.sessionId);
+        if (!active?.isCurrent) throw academicError('The academic session changed. Reload the fee ledger.', 409);
+        const current = targetFeeId ? await store.get('fees', targetFeeId)
+          : await store.one('fees', { sessionId: scope.sessionId, studentId: targetStudentId });
+        if (targetFeeId && (!current || String(current.sessionId) !== scope.sessionId)) {
+          throw academicError('Fee ledger not found in this academic session.', 404);
+        }
+        const amountPending = Math.max(0, (current?.amountPending ?? 20000) - paidAmount);
+        const changes = {
+          amountPaid: (current?.amountPaid || 0) + paidAmount,
+          amountPending,
+          status: amountPending === 0 ? 'paid' : 'partial',
+          transactions: [...(current?.transactions || []), payment],
+        };
+        if (current) return store.update('fees', current._id || current.id, changes);
+        return store.create('fees', {
+          ...changes, ...placement, studentId: targetStudentId, sessionId: scope.sessionId,
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        });
+      });
+      if (checkFallback()) feeRecord = enrichFee(feeRecord);
+      else feeRecord = await Fee.findById(feeRecord._id).populate('studentId');
+    } else if (checkFallback()) {
       feeRecord = targetFeeId
         ? FallbackDb.findById('fees', targetFeeId)
         : FallbackDb.findOne('fees', { studentId: targetStudentId });
 
+      if (!feeRecord && targetFeeId) return sendNotFound(res, 'Fee ledger not found in the selected session.');
       if (!feeRecord) {
         feeRecord = FallbackDb.create('fees', {
           studentId: targetStudentId,
+          ...placement,
           amountPaid: 0,
           amountPending: 20000,
           status: 'unpaid',
@@ -272,12 +317,14 @@ export const collectFee = async (req, res) => {
         ? await Fee.findById(targetFeeId)
         : await Fee.findOne({ studentId: targetStudentId });
 
+      if (!feeRecord && targetFeeId) return sendNotFound(res, 'Fee ledger not found in the selected session.');
       if (!feeRecord) {
         const studentObj = await Student.findById(targetStudentId);
         if (!studentObj) return sendNotFound(res, 'Student record not found');
 
         feeRecord = new Fee({
           studentId: targetStudentId,
+          ...placement,
           amountPaid: 0,
           amountPending: 20000,
           dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -312,7 +359,7 @@ export const collectFee = async (req, res) => {
 
     return sendSuccess(res, 'Payment recorded successfully', { fee: feeRecord });
   } catch (error) {
-    return sendError(res, 'Server error', 500, error);
+    return sendError(res, error.statusCode ? error.message : 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -348,7 +395,7 @@ export const getExpenses = async (req, res) => {
       ...paginateResult(expenses, total, { page, limit })
     });
   } catch (error) {
-    return sendError(res, 'Server error', 500, error);
+    return sendError(res, error.statusCode ? error.message : 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -389,7 +436,7 @@ export const createExpense = async (req, res) => {
 
     return sendCreated(res, 'Expense logged successfully', { expense: newRecord });
   } catch (error) {
-    return sendError(res, 'Server error', 500, error);
+    return sendError(res, error.statusCode ? error.message : 'Server error', error.statusCode || 500, error);
   }
 };
 
@@ -421,6 +468,6 @@ export const exportFees = async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename=fees.csv');
     return res.send(csv);
   } catch (error) {
-    return sendError(res, 'Server error', 500, error);
+    return sendError(res, error.statusCode ? error.message : 'Server error', error.statusCode || 500, error);
   }
 };

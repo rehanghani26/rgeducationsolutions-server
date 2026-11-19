@@ -1,7 +1,9 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const LibrarySchema = new mongoose.Schema({
+  className: String,
   bookId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Book',
@@ -31,6 +33,8 @@ const LibrarySchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+LibrarySchema.plugin(academicRecordPlugin, { collection: 'library' });
 
 const Library = mongoose.models.Library || mongoose.model('Library', LibrarySchema);
 export default createDynamicModelProxy('Library', Library);

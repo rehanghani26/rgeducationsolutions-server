@@ -1,7 +1,16 @@
 import mongoose from 'mongoose';
 import { checkFallback } from '../config/db.js';
 import AcademicSession from '../models/AcademicSession.js';
+import Book from '../models/Book.js';
 import BudgetAllocation from '../models/BudgetAllocation.js';
+import Class from '../models/Class.js';
+import ClassRoom from '../models/ClassRoom.js';
+import Fee from '../models/Fee.js';
+import Library from '../models/Library.js';
+import SessionRollover from '../models/SessionRollover.js';
+import Setting from '../models/Setting.js';
+import Student from '../models/Student.js';
+import StudentSessionHistory from '../models/StudentSessionHistory.js';
 import Inventory from '../models/Inventory.js';
 import InventoryIssuance from '../models/InventoryIssuance.js';
 import InventoryPurchase from '../models/InventoryPurchase.js';
@@ -13,12 +22,20 @@ import { FallbackDb } from './dbFallback.js';
 
 const models = {
   academicSessions: AcademicSession,
+  books: Book,
   budgetAllocations: BudgetAllocation,
   inventory: Inventory,
   inventoryIssuances: InventoryIssuance,
   inventoryPurchases: InventoryPurchase,
   inventoryTransactions: InventoryTransaction,
   vendors: Vendor,
+  classes: Class,
+  classRooms: ClassRoom,
+  fees: Fee,
+  library: Library,
+  sessionRollovers: SessionRollover,
+  students: Student,
+  studentSessionHistories: StudentSessionHistory,
 };
 
 const LEGACY_SCHOOL = 'IQRA_P01001';
@@ -150,6 +167,14 @@ function operations(req, fallback, session = null) {
     async remove(collection, id) {
       if (fallback) return fallback.delete(collection, id);
       return models[collection].deleteOne(scoped(idFilter(id))).session(session);
+    },
+    async lockAcademicSettings() {
+      if (!fallback) {
+        await Setting.updateOne({ schoolId: school }, {
+          $inc: { academicVersion: 1 },
+          $setOnInsert: { schoolId: school },
+        }, { session, upsert: true });
+      }
     },
     async lockBudget(sessionId) {
       if (!fallback) {

@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -72,6 +73,8 @@ const HomeworkSchema = new mongoose.Schema(
 HomeworkSchema.index({ className: 1, sectionName: 1, dueDate: 1 });
 HomeworkSchema.index({ assignedByUser: 1, dueDate: 1 });
 HomeworkSchema.index({ status: 1, dueDate: 1 });
+
+HomeworkSchema.plugin(academicRecordPlugin, { collection: 'homework' });
 
 const Homework = mongoose.models.Homework || mongoose.model('Homework', HomeworkSchema);
 export default createDynamicModelProxy('Homework', Homework);

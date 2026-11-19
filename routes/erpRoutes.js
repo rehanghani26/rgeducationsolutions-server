@@ -5,6 +5,11 @@ import multer from "multer";
 // 5. Middleware
 import { protect } from "../middleware/auth.js";
 import { authorize } from "../middleware/rbac.js";
+import { getClassMaster, updateClassOrder } from "../controllers/sessionController.js";
+import {
+  createHostelOccupancy, createTransportAssignment, createTransportRoute, getAcademicReports,
+  getHostelOccupancies, getTransportAssignments,
+} from "../controllers/sessionOperationsController.js";
 
 // 7. Utilities
 import { sendBadRequest } from "../utils/responseUtil.js";
@@ -61,6 +66,8 @@ const upload = multer({
 
 // Academic Routes
 router.get("/classes", protect, getClasses);
+router.get("/class-master", protect, getClassMaster);
+router.patch("/class-master/:id/order", protect, authorize("super-admin", "school-admin", "principal", "admin"), updateClassOrder);
 router.post(
   "/classes",
   protect,
@@ -170,6 +177,13 @@ router.post(
 
 // Transport Routes
 router.get("/transport", protect, getTransport);
+const operationsAdmin = authorize("super-admin", "school-admin", "admin", "principal");
+router.post("/transport", protect, operationsAdmin, createTransportRoute);
+router.get("/transport/assignments", protect, getTransportAssignments);
+router.post("/transport/assignments", protect, operationsAdmin, createTransportAssignment);
+router.get("/hostel/occupancies", protect, getHostelOccupancies);
+router.post("/hostel/occupancies", protect, operationsAdmin, createHostelOccupancy);
+router.get("/reports/academic", protect, authorize("super-admin", "school-admin", "admin", "principal", "accountant"), getAcademicReports);
 
 // Notification Routes
 router.get("/notifications", protect, getNotifications);

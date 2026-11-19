@@ -42,6 +42,13 @@ const SettingSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    academicVersion: { type: Number, default: 0, select: false },
+    academicRollover: {
+      timeZone: { type: String, default: "Asia/Kolkata" },
+      prepareTime: { type: String, default: "00:00" },
+      cutoffTime: { type: String, default: "00:00" },
+      autoPromote: { type: Boolean, default: false },
+    },
 
     // Contact Information
     contactEmail: {

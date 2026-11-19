@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from "mongoose";
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -49,7 +50,11 @@ const ClassSyllabusSchema = new mongoose.Schema(
   }
 );
 
-ClassSyllabusSchema.index({ classId: 1, academicYear: 1 }, { unique: true });
+ClassSyllabusSchema.index({ schoolId: 1, classId: 1, sessionId: 1 }, {
+  unique: true, partialFilterExpression: { sessionId: { $type: 'objectId' } },
+});
+
+ClassSyllabusSchema.plugin(academicRecordPlugin, { collection: 'syllabus' });
 
 const ClassSyllabus = mongoose.models.ClassSyllabus || mongoose.model('ClassSyllabus', ClassSyllabusSchema);
 export default createDynamicModelProxy('ClassSyllabus', ClassSyllabus);

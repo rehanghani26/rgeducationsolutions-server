@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -42,6 +43,8 @@ const MasterPeriodSchema = new mongoose.Schema(
   },
   { timestamps: true, strict: false }
 );
+
+MasterPeriodSchema.plugin(academicRecordPlugin, { collection: 'masterPeriods' });
 
 const MasterPeriod = mongoose.models.MasterPeriod || mongoose.model('MasterPeriod', MasterPeriodSchema);
 export default createDynamicModelProxy('MasterPeriod', MasterPeriod);

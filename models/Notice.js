@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -15,6 +16,8 @@ const noticeSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+noticeSchema.plugin(academicRecordPlugin, { collection: 'notices' });
 
 const Notice = mongoose.models.Notice || mongoose.model('Notice', noticeSchema);
 export default createDynamicModelProxy('Notice', Notice);

@@ -6,6 +6,7 @@ import User from "../models/User.js";
 import { FallbackDb } from "../services/dbFallback.js";
 import tenantContext from "../utils/tenantContext.js";
 import { sendForbidden, sendUnauthorized } from "../utils/responseUtil.js";
+import { resolveAcademicScope } from "./academicSession.js";
 
 /**
  * @file auth.js
@@ -157,11 +158,22 @@ export const protect = async (req, res, next) => {
       req.headers["x-school-id"] = schoolId;
     }
 
+    let academicScope;
+    try {
+      academicScope = await resolveAcademicScope(req);
+      if (academicScope?.legacy && !["GET", "HEAD"].includes(req.method)) {
+        return res.status(409).json({ success: false, message: "Unassigned academic records are read-only." });
+      }
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    }
+
     // Wrap downstream execution inside tenantContext AsyncLocalStorage
     tenantContext.run(
       {
         schoolId,
         user: req.user,
+        academicScope,
         skipTenantFilter: decoded.role === "platform-super-admin",
       },
       () => {

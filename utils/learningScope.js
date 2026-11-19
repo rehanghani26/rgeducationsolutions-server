@@ -1,3 +1,4 @@
+import { scopedStudentRoster } from '../services/studentEnrollmentService.js';
 // 2. External packages
 import mongoose from "mongoose";
 
@@ -84,6 +85,8 @@ const enrichFallbackStudent = (student) => {
 };
 
 export const getStudentProfileForUser = async (req) => {
+  const roster = await scopedStudentRoster(req);
+  if (roster) return roster[0] || null;
   const userId = getUserId(req);
   const profileId = req.user?.profileId;
 

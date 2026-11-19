@@ -1,3 +1,4 @@
+import { saveSessionConfiguration } from '../../services/academicSessionService.js';
 import Setting from "../../models/Setting.js";
 import AcademicSession from "../../models/AcademicSession.js";
 import MasterPeriod from "../../models/MasterPeriod.js";
@@ -508,73 +509,15 @@ export const setupToolExecutors = {
   },
 
   async runSetupStep2_AcademicSession(args, context) {
-    const { sessionName, startDate, endDate, notes } = args;
-    if (!sessionName || !startDate || !endDate) {
-      return {
-        success: false,
-        error:
-          "sessionName, startDate (YYYY-MM-DD), and endDate (YYYY-MM-DD) are required.",
-      };
+    const role = String(context.user?.role || '').toLowerCase().replaceAll('_', '-');
+    if (!['super-admin', 'superadmin', 'school-admin', 'admin', 'principal'].includes(role)) {
+      return { success: false, error: 'School administrator permission is required.' };
     }
-
-    try {
-      const payload = {
-        sessionName: sessionName.trim(),
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        isCurrent: true,
-        notes:
-          notes ||
-          `Created via AI Setup Wizard on ${new Date().toLocaleDateString()}`,
-      };
-
-      if (checkFallback()) {
-        // Deactivate existing
-        const existing = FallbackDb.find("academicSessions") || [];
-        for (const s of existing) {
-          FallbackDb.update("academicSessions", s.id || s._id, {
-            isCurrent: false,
-          });
-        }
-        FallbackDb.create("academicSessions", payload);
-      } else {
-        // Deactivate all others first
-        await AcademicSession.updateMany({}, { isCurrent: false });
-        await AcademicSession.create(payload);
-      }
-
-      // Mark wizard flag
-      if (checkFallback()) {
-        const s = FallbackDb.getSettings() || {};
-        if (!s.setupWizard) s.setupWizard = {};
-        s.setupWizard.academicSession = true;
-        FallbackDb.updateSettings(s);
-      } else {
-        await Setting.findOneAndUpdate(
-          {},
-          { "setupWizard.academicSession": true },
-          { upsert: true }
-        );
-      }
-
-      await logActivity({
-        userId: context.user?._id || context.user?.id,
-        action: "CREATE",
-        module: "setup-wizard",
-        details: `AI completed Setup Step 2 — Academic Session "${sessionName}" created and activated`,
-        ipAddress: context.ip || "AI",
-      });
-
-      return {
-        success: true,
-        message: `✅ Step 2 complete! Academic session **${sessionName}** (${startDate} → ${endDate}) is now active.`,
-        session: { sessionName, startDate, endDate, isCurrent: true },
-        nextStep:
-          "Step 3 — Master Period & Bell Schedule. I need: school start time, end time, period duration in minutes.",
-      };
-    } catch (err) {
-      return { success: false, error: err.message };
+    if (!args.startClassId || !args.endClassId) {
+      return { success: false, error: 'Choose the starting and ending classes in Academic Session & Curriculum Setup.' };
     }
+    const session = await saveSessionConfiguration({ ...context, body: args }, { confirm: true });
+    return { success: true, message: 'Academic session and curriculum saved.', session };
   },
 
   async runSetupStep3_MasterPeriods(args, context) {

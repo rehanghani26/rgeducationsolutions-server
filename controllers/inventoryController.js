@@ -218,7 +218,8 @@ export async function adjustStock(req, res) {
 export async function getInventorySummary(req, res) {
   try {
     const store = readProcurement(req);
-    const session = req.query.sessionId ? await sessionById(store, req.query.sessionId) : await activeSession(store);
+    const session = req.query.sessionId === 'legacy' ? null
+      : req.query.sessionId ? await sessionById(store, req.query.sessionId) : await activeSession(store);
     const [items, budget] = await Promise.all([store.find('inventory'), sessionBudget(store, session)]);
     const budgetHealth = budget
       ? { sessionId: recordId(session), sessionName: session.sessionName, allocationStatus: budget.status, ...budgetAmounts(budget) }
@@ -257,7 +258,9 @@ export async function getPurchases(req, res) {
       if (!vendor) throw procurementError('Vendor not found.', 404);
       match.vendorId = recordId(vendor);
     }
-    if (typeof sessionId === 'string' && sessionId) match.sessionId = recordId(await sessionById(store, sessionId));
+    if (sessionId === 'legacy') match.sessionId = null;
+    else if (typeof sessionId === 'string' && sessionId) match.sessionId = recordId(await sessionById(store, sessionId));
+    else if (req.academicSessionId) match.sessionId = req.academicSessionId;
     if (['Paid', 'Partial', 'Unpaid'].includes(status)) match.paymentStatus = status;
     const page = await store.page('inventoryPurchases', { ...req.query, sort: req.query.sort || '-billDate' }, {
       match,

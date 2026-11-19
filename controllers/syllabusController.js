@@ -1,3 +1,4 @@
+import { academicGrade, getAcademicScope } from '../utils/academicScope.js';
 // 3. Configuration
 import { checkFallback } from "../config/db.js";
 
@@ -365,8 +366,11 @@ export const getAllSyllabus = async (req, res) => {
 export const getSyllabusByClass = async (req, res) => {
   try {
     const { classId } = req.params;
-    const normalized = normalizeClassId(classId);
-    const defaultCurriculum = getDefaultCurriculumForClass(classId);
+    const scope = getAcademicScope();
+    const grade = scope && !scope.legacy ? academicGrade(scope, classId) : null;
+    const normalized = grade?.id || normalizeClassId(classId);
+    const defaultCurriculum = getDefaultCurriculumForClass(grade?.name || classId);
+    if (grade && defaultCurriculum) Object.assign(defaultCurriculum, { classId: grade.id, className: grade.name, academicYear: scope.session.sessionName });
 
     if (checkFallback()) {
       const list = FallbackDb.find("syllabus") || [];
@@ -418,8 +422,10 @@ export const upsertClassSyllabus = async (req, res) => {
     const { classId } = req.params;
     const { className, academicYear, description, subjects } = req.body;
 
-    const normalized = normalizeClassId(classId);
-    const cleanClassName = className || classId;
+    const scope = getAcademicScope();
+    const grade = scope ? academicGrade(scope, classId) : null;
+    const normalized = grade?.id || normalizeClassId(classId);
+    const cleanClassName = grade?.name || className || classId;
 
     const validatedSubjects = (subjects || []).map((s) => ({
       subjectName: s.subjectName || "Subject",
@@ -502,7 +508,9 @@ export const upsertClassSyllabus = async (req, res) => {
 export const resetClassSyllabus = async (req, res) => {
   try {
     const { classId } = req.params;
-    const defaultTemplate = getDefaultCurriculumForClass(classId);
+    const scope = getAcademicScope();
+    const grade = scope ? academicGrade(scope, classId) : null;
+    const defaultTemplate = getDefaultCurriculumForClass(grade?.name || classId);
     req.body = defaultTemplate;
     return upsertClassSyllabus(req, res);
   } catch (error) {

@@ -245,9 +245,10 @@ export const onboardSchool = async (req, res) => {
       await AcademicSession.create({
         schoolId: resolvedSchoolId,
         sessionName: `${currentYear}-${currentYear + 1}`,
-        startDate: new Date(currentYear, 3, 1), // April 1st
-        endDate: new Date(currentYear + 1, 2, 31), // March 31st
+        startDate: new Date(Date.UTC(currentYear, 3, 1)), // April 1st
+        endDate: new Date(Date.UTC(currentYear + 1, 2, 31)), // March 31st
         isCurrent: true,
+        status: 'active',
         notes: 'Auto-provisioned initial academic session',
       });
     } catch (provisionErr) {

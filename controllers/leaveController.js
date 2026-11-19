@@ -1,3 +1,5 @@
+import { findScopedEnrollment } from '../services/studentEnrollmentService.js';
+import { academicError, getAcademicScope } from '../utils/academicScope.js';
 // 2. External packages
 import mongoose from 'mongoose';
 
@@ -353,6 +355,13 @@ export const requestLeave = async (req, res) => {
       );
     }
 
+
+    const scope = getAcademicScope();
+    const studentEnrollment = scope && applicant.applicantModel === 'Student'
+      ? await findScopedEnrollment(req, applicant.applicantId) : null;
+    if (scope && applicant.applicantModel === 'Student' && !studentEnrollment) {
+      throw academicError('The applicant has no enrollment in the selected academic session.', 409);
+    }
     const leaveCode = await generateLeaveCode();
 
     const payload = {
@@ -365,11 +374,12 @@ export const requestLeave = async (req, res) => {
       admissionNumber: applicant.admissionNumber || '',
       rollNumber: applicant.rollNumber || '',
       employeeId: applicant.employeeId || '',
-      classRoomId: applicant.classRoomId || null,
+      classRoomId: studentEnrollment?.classRoomId || applicant.classRoomId || null,
+      classId: studentEnrollment?.classId,
       className: applicant.className || '',
       sectionName: applicant.sectionName || '',
       classSection: applicant.classSection || '',
-      sessionId: applicant.sessionId || null,
+      sessionId: scope?.sessionId || applicant.sessionId || null,
       category,
       startDate: new Date(startDate),
       endDate: new Date(endDate),

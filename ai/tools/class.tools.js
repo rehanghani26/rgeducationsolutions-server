@@ -1,3 +1,6 @@
+import { scopedStudentRoster } from '../../services/studentEnrollmentService.js';
+import { getAcademicScope } from '../../utils/academicScope.js';
+import { gradeByValue } from '../../utils/academicClass.js';
 /**
  * @file class.tools.js
  * @description AI Tool definitions and executors for Classes, Sections, and Subjects.
@@ -49,7 +52,10 @@ export const classToolDefinitions = [
 ];
 
 export const classToolExecutors = {
+
   async getClasses(args, context) {
+    const scope = getAcademicScope();
+    if (scope) return { success: true, count: scope.grades.length, classes: scope.grades.map(({ id, name, code }) => ({ id, name, code })) };
     let list = [];
     if (checkFallback()) {
       list = FallbackDb.find('classes') || [];
@@ -122,6 +128,19 @@ export const classToolExecutors = {
 
   async getClassStudents(args, context) {
     if (!args.class) return { success: false, error: 'Class name is required.' };
+
+
+    const scope = getAcademicScope();
+    if (scope) {
+      const grade = gradeByValue(scope.grades, args.class);
+      const students = (await scopedStudentRoster(context)).filter((student) => grade && String(student.classId) === grade.id &&
+        (!args.section || String(student.section || '').replace(/section\s*/i, '').trim().toLowerCase() === String(args.section).replace(/section\s*/i, '').trim().toLowerCase()));
+      return {
+        success: true, class: args.class, section: args.section || 'All sections', count: students.length,
+        ...(!args.countOnly && { students: students.slice(0, 50).map(({ _id, id, name, rollNumber, admissionNumber, section, status }) =>
+          ({ id: _id || id, name, rollNumber, admissionNumber, section, status })) }),
+      };
+    }
 
     const classRegex = new RegExp(args.class.replace(/class\s*/i, '').trim(), 'i');
     const filter = { $or: [{ class: classRegex }, { className: classRegex }] };

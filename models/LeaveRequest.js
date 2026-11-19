@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -209,6 +210,8 @@ LeaveRequestSchema.index({ startDate: 1, endDate: 1, status: 1 });
 LeaveRequestSchema.index({ applicantModel: 1, status: 1 });
 LeaveRequestSchema.index({ classRoomId: 1, status: 1 });
 LeaveRequestSchema.index({ organizationId: 1, status: 1 });
+
+LeaveRequestSchema.plugin(academicRecordPlugin, { collection: 'leaveRequests' });
 
 const LeaveRequest = mongoose.models.LeaveRequest || mongoose.model('LeaveRequest', LeaveRequestSchema);
 export default createDynamicModelProxy('LeaveRequest', LeaveRequest);

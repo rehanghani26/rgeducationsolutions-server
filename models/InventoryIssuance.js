@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
 const IssuanceItemSchema = new mongoose.Schema({
@@ -147,6 +148,7 @@ const InventoryIssuanceSchema = new mongoose.Schema(
   }
 );
 
+InventoryIssuanceSchema.plugin(academicRecordPlugin, { collection: 'inventoryIssuances' });
 const InventoryIssuance = mongoose.models.InventoryIssuance || mongoose.model('InventoryIssuance', InventoryIssuanceSchema);
 export default createDynamicModelProxy('InventoryIssuance', InventoryIssuance);
 

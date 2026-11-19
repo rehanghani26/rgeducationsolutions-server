@@ -1,3 +1,6 @@
+import { academicError, academicGrade, getAcademicScope } from '../utils/academicScope.js';
+import { findScopedEnrollment } from '../services/studentEnrollmentService.js';
+import { sessionDay } from '../utils/academicDates.js';
 // 2. External packages
 import mongoose from "mongoose";
 
@@ -411,13 +414,12 @@ export const getAttendanceById = async (req, res) => {
  */
 export const createAttendance = async (req, res) => {
   try {
+    let { classId, className } = req.body;
     const {
       date,
       attendanceDate,
       attendanceTakenDate,
-      classId,
       sectionId,
-      className,
       sectionName,
       classSection,
       takenBy,
@@ -432,6 +434,25 @@ export const createAttendance = async (req, res) => {
     }
 
     const inputDate = date || attendanceDate || new Date();
+    const scope = getAcademicScope();
+    if (scope) {
+      const day = sessionDay(new Date(inputDate));
+      if (day < sessionDay(scope.session.startDate) || day > sessionDay(scope.session.endDate)) {
+        throw academicError('The attendance date is outside the selected session.');
+      }
+      if (type !== 'teacher') {
+        const grade = academicGrade(scope, classId || className || classSection);
+        classId = grade.id;
+        className = grade.name;
+        for (const member of rawList) {
+          const enrollment = await findScopedEnrollment(req, member.studentId || member.id || member._id);
+          if (!enrollment || String(enrollment.classId) !== classId ||
+            (sectionId && String(enrollment.sectionId) !== String(sectionId))) {
+            throw academicError('The attendance list contains a student outside the selected class or section.');
+          }
+        }
+      }
+    }
     const attDateObj = new Date(inputDate);
     if (isNaN(attDateObj.getTime())) {
       return sendBadRequest(res, "A valid attendance date is required");
@@ -586,6 +607,7 @@ export const createAttendance = async (req, res) => {
     console.error("createAttendance error:", error);
 
     // Gracefully handle MongoDB E11000 duplicate key error by upserting
+    if (error.statusCode) return sendError(res, error.message, error.statusCode);
     if (error.code === 11000) {
       try {
         const inputDate = req.body.date || req.body.attendanceDate || new Date();

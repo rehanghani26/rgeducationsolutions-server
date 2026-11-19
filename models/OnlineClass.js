@@ -1,3 +1,4 @@
+import academicRecordPlugin from '../utils/academicRecordPlugin.js';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -72,6 +73,8 @@ const OnlineClassSchema = new mongoose.Schema(
 OnlineClassSchema.index({ className: 1, sectionName: 1, scheduledDate: 1 });
 OnlineClassSchema.index({ teacherUser: 1, scheduledDate: 1 });
 OnlineClassSchema.index({ status: 1, scheduledDate: 1 });
+
+OnlineClassSchema.plugin(academicRecordPlugin, { collection: 'onlineClasses' });
 
 const OnlineClass = mongoose.models.OnlineClass || mongoose.model('OnlineClass', OnlineClassSchema);
 export default createDynamicModelProxy('OnlineClass', OnlineClass);

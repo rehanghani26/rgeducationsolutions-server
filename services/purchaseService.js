@@ -225,6 +225,7 @@ export async function postPurchase(req) {
       });
       await recordMovement(store, updated, req, {
         type: 'STOCK_IN_PURCHASE',
+        sessionId: recordId(session),
         quantity: line.quantity,
         unitPrice: line.unitCost,
         referenceId: recordId(purchase),

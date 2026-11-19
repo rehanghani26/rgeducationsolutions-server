@@ -12,13 +12,24 @@ import {
   deleteAcademicSession,
   getAcademicSessions,
   getActiveSession,
+  getSessionClasses,
+  getRolloverPreview,
+  getSchedule,
+  saveSchedule,
+  upgradeSchoolSession,
   updateAcademicSession,
 } from "../controllers/sessionController.js";
 
 const router = express.Router();
+const sessionAdmin = authorize("super-admin", "school-admin", "principal", "admin");
 
 router.get("/", protect, getAcademicSessions);
 router.get("/active", protect, getActiveSession);
+router.get("/rollover-settings", protect, sessionAdmin, getSchedule);
+router.put("/rollover-settings", protect, sessionAdmin, saveSchedule);
+router.get("/:id/classes", protect, getSessionClasses);
+router.get("/:id/rollover/preview", protect, sessionAdmin, getRolloverPreview);
+router.post("/:id/rollover", protect, sessionAdmin, upgradeSchoolSession);
 router.post(
   "/",
   protect,

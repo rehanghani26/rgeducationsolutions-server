@@ -452,15 +452,15 @@ export const getClassTimetable = async (req, res) => {
   try {
     const { classSection, classId, className, scheduleType = 'regular' } = req.query;
     const targetClass = className || classSection;
+    const exactSection = Boolean(classSection && /\s[–—-]\s/.test(classSection));
 
     if (checkFallback()) {
       const all = FallbackDb.find('classTimetables') || [];
       if (targetClass || classId) {
         const found = all.find(
           (t) =>
-            (t.classSectionKey === targetClass ||
-              t.className === targetClass ||
-              (classId && t.classId === classId)) &&
+            (exactSection ? t.classSectionKey === targetClass :
+              t.classSectionKey === targetClass || t.className === targetClass || (classId && String(t.classId) === String(classId))) &&
             (t.scheduleType || 'regular') === scheduleType
         );
         return sendSuccess(res, undefined, { timetable: found || null, timetables: all });
@@ -470,11 +470,11 @@ export const getClassTimetable = async (req, res) => {
 
     if (targetClass || classId) {
       const filter = {
-        $or: [
+        ...(exactSection ? { classSectionKey: targetClass } : { $or: [
           { classSectionKey: targetClass },
           { className: targetClass },
           ...(classId ? [{ classId }] : []),
-        ],
+        ] }),
         scheduleType,
       };
       const timetable = await ClassTimetable.findOne(filter);
@@ -521,9 +521,7 @@ export const saveClassTimetable = async (req, res) => {
       const all = FallbackDb.find('classTimetables') || [];
       const idx = all.findIndex(
         (t) =>
-          (t.classSectionKey === resolvedKey ||
-            t.className === targetClassName ||
-            (classId && t.classId === classId)) &&
+          (t.classSectionKey === resolvedKey || (classId && sectionId && String(t.classId) === String(classId) && t.sectionId === sectionId)) &&
           (t.scheduleType || 'regular') === scheduleType
       );
 
@@ -552,8 +550,7 @@ export const saveClassTimetable = async (req, res) => {
         {
           $or: [
             { classSectionKey: resolvedKey },
-            { className: targetClassName },
-            ...(classId ? [{ classId }] : []),
+            ...(classId && sectionId ? [{ classId, sectionId }] : []),
           ],
           scheduleType,
         },

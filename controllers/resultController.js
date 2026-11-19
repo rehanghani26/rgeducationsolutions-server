@@ -1,3 +1,5 @@
+import { academicError, academicGrade, getAcademicScope } from '../utils/academicScope.js';
+import { findScopedEnrollment, scopedStudentRoster } from '../services/studentEnrollmentService.js';
 // 3. Configuration
 import { checkFallback } from '../config/db.js';
 
@@ -117,7 +119,7 @@ export const getResults = async (req, res) => {
 
     return sendSuccess(res, undefined, { results, ...paginateResult(results, total, { page, limit }) });
   } catch (err) {
-    return sendError(res, 'Server error', 500, err);
+    return sendError(res, err.statusCode ? err.message : 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -147,7 +149,7 @@ export const getStudentResults = async (req, res) => {
 
     return sendSuccess(res, undefined, { results });
   } catch (err) {
-    return sendError(res, 'Server error', 500, err);
+    return sendError(res, err.statusCode ? err.message : 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -176,7 +178,7 @@ export const getStudentExamResult = async (req, res) => {
 
     return sendSuccess(res, undefined, { result });
   } catch (err) {
-    return sendError(res, 'Server error', 500, err);
+    return sendError(res, err.statusCode ? err.message : 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -195,7 +197,10 @@ export const getClassResults = async (req, res) => {
     let targetClassStr = classId ? String(classId).trim() : '';
     let targetSecStr = section && section !== 'all' && section !== 'All' ? String(section).trim() : null;
 
-    if (targetClassStr && targetClassStr.includes('-')) {
+    const scope = getAcademicScope();
+    const grade = scope && !scope.legacy ? academicGrade(scope, targetClassStr) : null;
+    if (grade) targetClassStr = grade.name;
+    if (!grade && targetClassStr && targetClassStr.includes('-')) {
       const parts = targetClassStr.split(/\s*[-–—|]\s*/);
       if (parts.length >= 2) {
         targetClassStr = parts[0].trim();
@@ -225,7 +230,7 @@ export const getClassResults = async (req, res) => {
         results = results.filter((r) => r.status === status);
       }
 
-      const allFallbackStudents = FallbackDb.find('students') || [];
+      const allFallbackStudents = (await scopedStudentRoster(req)) || FallbackDb.find('students');
       const filteredStudents = allFallbackStudents.filter((s) => {
         const matchesClass = !targetClassStr ||
           String(s.classId) === String(classId) ||
@@ -296,7 +301,12 @@ export const getClassResults = async (req, res) => {
       studentFilter.section = new RegExp(`^${secVal}$|^${targetSecStr}$`, 'i');
     }
 
-    const allStudents = await Student.find(studentFilter)
+    const roster = await scopedStudentRoster(req);
+    const studentFields = ({ _id, id, name, firstName, lastName, admissionNumber, rollNumber, email, section, className, classId, avatar }) =>
+      ({ _id: _id || id, name, firstName, lastName, admissionNumber, rollNumber, email, section, className, classId, avatar });
+    const allStudents = roster ? roster.filter((student) => (!grade || String(student.classId) === grade.id) &&
+      (!targetSecStr || String(student.section).replace(/section\s*/i, '').toLowerCase() === targetSecStr.replace(/section\s*/i, '').toLowerCase()))
+      .map(studentFields) : await Student.find(studentFilter)
       .select('name firstName lastName admissionNumber rollNumber email section class className classId avatar')
       .sort({ rollNumber: 1, name: 1 });
 
@@ -307,7 +317,7 @@ export const getClassResults = async (req, res) => {
 
     return sendSuccess(res, undefined, { results, exam, allStudents, studentsWithoutResult });
   } catch (err) {
-    return sendError(res, 'Server error', 500, err);
+    return sendError(res, err.statusCode ? err.message : 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -354,7 +364,7 @@ export const getExamStats = async (req, res) => {
       stats: { total, passed, failed, passPercentage: parseFloat(((passed / total) * 100).toFixed(1)), avgPercentage, toppers, gradeDistribution },
     });
   } catch (err) {
-    return sendError(res, 'Server error', 500, err);
+    return sendError(res, err.statusCode ? err.message : 'Server error', err.statusCode || 500, err);
   }
 };
 
@@ -367,18 +377,37 @@ export const getExamStats = async (req, res) => {
  */
 export const bulkUpsertResults = async (req, res) => {
   try {
-    const { examId, classId, className, section, resultsData } = req.body;
+    let { classId, className } = req.body;
+    const { examId, section, resultsData } = req.body;
 
     if (!examId || !classId || !resultsData?.length) {
       return sendBadRequest(res, 'examId, classId, and resultsData are required');
     }
 
-    if (checkFallback()) {
-      return sendSuccess(res, 'Results saved (fallback mode)', { saved: resultsData.length });
-    }
-
-    const exam = await Exam.findById(examId);
+    const scope = getAcademicScope();
+    const fallback = checkFallback();
+    const exam = fallback ? FallbackDb.findById('exams', examId) : await Exam.findById(examId);
     if (!exam) return sendNotFound(res, 'Exam not found');
+    const enrollmentByStudent = new Map();
+    if (scope) {
+      const grade = academicGrade(scope, classId);
+      classId = grade.id;
+      className = grade.name;
+      if (!exam.classIds.some((id) => String(id) === classId)) {
+        throw academicError('The class is outside this exam’s assigned classes.');
+      }
+      for (const entry of resultsData) {
+        const enrollment = await findScopedEnrollment(req, entry.studentId);
+        if (!enrollment || String(enrollment.classId) !== classId) {
+          throw academicError('A result refers to a student outside this session and class.');
+        }
+        if (exam.classTargets?.length && !exam.classTargets.some((target) =>
+          target.classId === classId && (!target.sectionId || target.sectionId === enrollment.sectionId))) {
+          throw academicError('A student is outside the sections assigned to the exam.');
+        }
+        enrollmentByStudent.set(String(entry.studentId), enrollment);
+      }
+    }
 
     const savedResults = [];
 
@@ -397,7 +426,7 @@ export const bulkUpsertResults = async (req, res) => {
         rollNumber: entry.rollNumber,
         classId,
         className: className || entry.className,
-        section: section || entry.section,
+        section: enrollmentByStudent.get(String(entry.studentId))?.sectionName || section || entry.section,
         marks: enrichedMarks,
         totalObtained,
         totalMaxMarks,
@@ -411,6 +440,11 @@ export const bulkUpsertResults = async (req, res) => {
         uploadedBy: req.user?._id || req.user?.id,
       };
 
+      if (fallback) {
+        const previous = FallbackDb.findOne('results', { examId, studentId: entry.studentId });
+        savedResults.push(previous ? FallbackDb.update('results', previous._id || previous.id, resultData) : FallbackDb.create('results', resultData));
+        continue;
+      }
       const saved = await Result.findOneAndUpdate(
         { examId, studentId: entry.studentId },
         { $set: resultData },
@@ -419,7 +453,7 @@ export const bulkUpsertResults = async (req, res) => {
       savedResults.push(saved);
     }
 
-    await recomputeRanks(examId, classId);
+    if (!fallback) await recomputeRanks(examId, classId);
 
     await logActivity({
       userId: req.user?._id || req.user?.id,
