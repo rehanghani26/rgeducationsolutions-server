@@ -1,378 +1,255 @@
-// server/controllers/vendorController.js
 import Vendor from '../models/Vendor.js';
-import Inventory from '../models/Inventory.js';
-import InventoryPurchase from '../models/InventoryPurchase.js';
-import { checkFallback } from '../config/db.js';
-import { FallbackDb } from '../services/dbFallback.js';
-import { parsePagination, buildSearchFilter, paginateResult } from '../utils/paginateQuery.js';
+import { getSchool, readProcurement, writeProcurement } from '../services/procurementStore.js';
+import { applyVendorPayment } from '../services/purchaseService.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { escapeRegex } from '../utils/commonUtil.js';
+import { sendCreated, sendSuccess } from '../utils/responseUtil.js';
 import {
-  sendSuccess,
-  sendCreated,
-  sendBadRequest,
-  sendNotFound,
-  sendError,
-} from '../utils/responseUtil.js';
+  cleanText,
+  generatedCode,
+  numeric,
+  optionalCode,
+  procurementError,
+  recordId,
+  roundMoney,
+  sendProcurementError,
+  stockStatus,
+} from '../utils/procurementValues.js';
 
-/**
- * Retrieves paginated vendor suppliers with search & filtering.
- */
-export const getVendors = async (req, res) => {
-  try {
-    const { page, limit, skip, sort, search, status } = parsePagination(req.query);
-    const category = req.query.category || '';
-    const searchFields = ['name', 'vendorCode', 'contactPerson', 'email', 'phone', 'category'];
+const profileFields = [
+  'name', 'contactPerson', 'phone', 'altPhone', 'address', 'city', 'state', 'pincode',
+  'gstin', 'pan', 'notes', 'email', 'billingEmail', 'website',
+];
+const bankFields = ['accountHolderName', 'bankName', 'accountNumber', 'ifscCode', 'branchName', 'upiId'];
+const searchFields = ['name', 'vendorCode', 'contactPerson', 'phone', 'email', 'billingEmail', 'city', 'gstin'];
 
-    if (checkFallback()) {
-      let list = FallbackDb.find('vendors') || [];
-      if (search) {
-        const term = search.toLowerCase();
-        list = list.filter((v) =>
-          searchFields.some((f) => String(v[f] || '').toLowerCase().includes(term))
-        );
-      }
-      if (category && category !== 'All') list = list.filter((v) => v.category === category);
-      if (status && status !== 'All') list = list.filter((v) => v.status === status);
-
-      const total = list.length;
-      const data = list.slice(skip, skip + limit);
-      return sendSuccess(res, undefined, {
-        vendors: data,
-        ...paginateResult(data, total, { page, limit }),
-      });
-    }
-
-    const filter = { ...buildSearchFilter(search, searchFields) };
-    if (category && category !== 'All') filter.category = category;
-    if (status && status !== 'All') filter.status = status;
-
-    const sortObj = {};
-    const sortField = sort.startsWith('-') ? sort.slice(1) : sort;
-    sortObj[sortField] = sort.startsWith('-') ? -1 : 1;
-
-    const [vendors, total] = await Promise.all([
-      Vendor.find(filter).sort(sortObj).skip(skip).limit(limit),
-      Vendor.countDocuments(filter),
-    ]);
-
-    return sendSuccess(res, undefined, {
-      vendors,
-      ...paginateResult(vendors, total, { page, limit }),
-    });
-  } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+function vendorProfile(input, existing = {}) {
+  const values = {};
+  for (const field of profileFields) {
+    if (Object.hasOwn(input, field)) values[field] = cleanText(input[field]);
   }
-};
+  if (!(values.name ?? existing.name)) {
+    throw procurementError('Enter the vendor name.');
+  }
 
-/**
- * Retrieves a single vendor by ID with complete ledger metrics, supplied products & spend analytics.
- */
-export const getVendorById = async (req, res) => {
+  for (const field of ['email', 'billingEmail']) {
+    if (!values[field]) continue;
+    values[field] = values[field].toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values[field])) throw procurementError('Enter a valid ' + (field === 'email' ? 'contact email.' : 'billing email.'));
+  }
+  for (const field of ['gstin', 'pan']) {
+    if (values[field]) values[field] = values[field].toUpperCase();
+  }
+  if (values.website) {
+    const address = /^https?:\/\//i.test(values.website) ? values.website : 'https://' + values.website;
+    if (!URL.canParse(address)) throw procurementError('Enter a valid vendor website.');
+    const url = new URL(address);
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname.includes('.') || url.username || url.password) {
+      throw procurementError('Enter a valid vendor website.');
+    }
+    values.website = url.href;
+  }
+  if (Object.hasOwn(input, 'bankDetails')) {
+    values.bankDetails = { ...existing.bankDetails };
+    for (const field of bankFields) {
+      if (Object.hasOwn(input.bankDetails || {}, field)) values.bankDetails[field] = cleanText(input.bankDetails[field]);
+    }
+    if (values.bankDetails.ifscCode) values.bankDetails.ifscCode = values.bankDetails.ifscCode.toUpperCase();
+  }
+  for (const [field, fallback] of Object.entries({ category: 'General', status: 'active', paymentTerms: 'Net 30' })) {
+    if (Object.hasOwn(input, field) || !existing[field]) {
+      const value = cleanText(input[field]) || fallback;
+      if (!Vendor.schema.path(field).enumValues.includes(value)) throw procurementError('Select a valid vendor ' + field + '.');
+      values[field] = value;
+    }
+  }
+  if (Object.hasOwn(input, 'rating')) values.rating = numeric(input.rating, 'Rating', { min: 1, max: 5, fallback: 5 });
+  if (Object.hasOwn(input, 'leadTimeDays')) {
+    const days = numeric(input.leadTimeDays, 'Lead time', { max: 365, fallback: null, round: (n) => n });
+    if (days != null && !Number.isInteger(days)) throw procurementError('Enter the lead time in whole days.');
+    values.leadTimeDays = days;
+  }
+  if (Object.hasOwn(input, 'vendorCode') || !existing.vendorCode) {
+    values.vendorCode = optionalCode(input.vendorCode) || existing.vendorCode || generatedCode('VND');
+  }
+  return values;
+}
+
+function publicVendor(vendor, showBankDetails = false) {
+  const { bankDetails, payments, ...profile } = vendor;
+  return showBankDetails ? { ...profile, bankDetails, payments: payments || [] } : profile;
+}
+
+function vendorAudit(req, vendor, action, details) {
+  return logActivity({
+    schoolId: getSchool(req), userId: req.user?._id || req.user?.id,
+    action, module: 'vendors', recordId: recordId(vendor), details,
+    ipAddress: req.ip, userAgent: req.headers?.['user-agent'],
+  });
+}
+
+async function requireVendor(store, id) {
+  const vendor = await store.get('vendors', id);
+  if (!vendor) throw procurementError('Vendor not found.', 404);
+  return vendor;
+}
+
+async function checkDuplicates(store, values, existing) {
+  const lookups = [];
+  if (values.vendorCode) lookups.push(['vendorCode', values.vendorCode, 'Vendor code']);
+  if (values.name) lookups.push(['name', new RegExp('^' + escapeRegex(values.name) + '$', 'i'), 'Vendor name']);
+  for (const [field, value, label] of lookups) {
+    const duplicate = await store.one('vendors', { [field]: value });
+    if (duplicate && String(recordId(duplicate)) !== String(recordId(existing))) {
+      throw procurementError(label + ' already exists.', 409);
+    }
+  }
+}
+
+export async function getVendors(req, res) {
   try {
-    const { id } = req.params;
-    let vendor = null;
-    let bills = [];
-    let suppliedProducts = [];
+    const store = readProcurement(req);
+    const { status, category } = req.query;
+    const match = {};
+    if (typeof status === 'string' && status !== 'All' && status) match.status = status;
+    if (typeof category === 'string' && category !== 'All' && category) match.category = category;
+    const page = await store.page('vendors', req.query, { match, searchFields, sortFields: ['createdAt', 'name', 'vendorCode'] });
+    const vendors = page.data.map((vendor) => publicVendor(vendor));
+    let summary;
+    if (req.query.summary === 'true') {
+      const all = await store.find('vendors');
+      summary = {
+        total: all.length,
+        active: all.filter((vendor) => vendor.status === 'active').length,
+        billed: roundMoney(all.reduce((sum, vendor) => sum + Number(vendor.totalBilled || 0), 0)),
+        outstanding: roundMoney(all.reduce((sum, vendor) => sum + Number(vendor.outstandingBalance || 0), 0)),
+      };
+    }
+    return sendSuccess(res, undefined, { ...page, data: vendors, vendors, summary });
+  } catch (error) {
+    return sendProcurementError(res, error);
+  }
+}
 
-    if (checkFallback()) {
-      vendor = FallbackDb.findById('vendors', id);
-      const allPurchases = FallbackDb.find('inventoryPurchases') || [];
-      bills = allPurchases.filter((p) => String(p.vendorId) === String(id));
-      const allItems = FallbackDb.find('inventory') || [];
-      suppliedProducts = allItems.filter(
-        (it) => String(it.vendorId) === String(id) || String(it.primaryVendorId) === String(id)
-      );
-    } else {
-      vendor = await Vendor.findById(id);
-      if (vendor) {
-        const [bList, pList] = await Promise.all([
-          InventoryPurchase.find({ vendorId: id }).sort({ billDate: -1 }),
-          Inventory.find({ $or: [{ vendorId: id }, { primaryVendorId: id }] }).sort({ name: 1 }),
-        ]);
-        bills = bList;
-        suppliedProducts = pList;
+export async function getVendorById(req, res) {
+  try {
+    const store = readProcurement(req);
+    const vendor = await requireVendor(store, req.params.id);
+    const vendorId = recordId(vendor);
+    const [unsortedBills, preferred] = await Promise.all([
+      store.find('inventoryPurchases', { vendorId }),
+      store.find('inventory', { vendorId }),
+    ]);
+    const bills = unsortedBills.sort((a, b) => new Date(b.billDate) - new Date(a.billDate));
+    const suppliedItems = new Map(preferred.map((item) => [String(recordId(item)), item]));
+    const billedItems = new Set(bills.flatMap((bill) => (bill.items || []).map((item) => String(item.itemId))));
+    const otherItems = await store.byIds('inventory', [...billedItems].filter((id) => !suppliedItems.has(id)));
+    otherItems.forEach((item) => suppliedItems.set(String(recordId(item)), item));
+
+    const monthlySpend = new Map();
+    const categorySpend = new Map();
+    const monthFormat = new Intl.DateTimeFormat('en-IN', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    for (const bill of [...bills].reverse()) {
+      const date = new Date(bill.billDate);
+      if (Number.isFinite(date.getTime())) {
+        const month = monthFormat.format(date);
+        monthlySpend.set(month, (monthlySpend.get(month) || 0) + Number(bill.grandTotal || 0));
+      }
+      for (const item of bill.items || []) {
+        const category = item.category || vendor.category || 'General';
+        categorySpend.set(category, (categorySpend.get(category) || 0) + Number(item.totalCost || 0));
       }
     }
 
-    if (!vendor) return sendNotFound(res, 'Vendor not found');
-
-    // Calculate dynamic analytics
-    const totalBilled = vendor.totalBilled || bills.reduce((s, b) => s + (b.grandTotal || 0), 0);
-    const totalPaid = vendor.totalPaid || bills.reduce((s, b) => s + (b.amountPaid || 0), 0);
-    const outstandingBalance = Math.max(0, totalBilled - totalPaid);
-    const averageOrderValue = bills.length > 0 ? Math.round(totalBilled / bills.length) : 0;
-
-    // Monthly Spend breakdown for charts
-    const monthlySpend = {};
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    bills.forEach((bill) => {
-      const d = new Date(bill.billDate);
-      const mKey = `${months[d.getMonth()]} ${d.getFullYear().toString().slice(-2)}`;
-      monthlySpend[mKey] = (monthlySpend[mKey] || 0) + (bill.grandTotal || 0);
-    });
-    const spendTrend = Object.entries(monthlySpend).map(([month, amount]) => ({ month, amount }));
-
-    // Category breakdown
-    const categorySpend = {};
-    bills.forEach((bill) => {
-      bill.items?.forEach((it) => {
-        const cat = it.category || vendor.category || 'General';
-        categorySpend[cat] = (categorySpend[cat] || 0) + (it.totalCost || 0);
-      });
-    });
-    const categoryBreakdown = Object.entries(categorySpend).map(([category, amount]) => ({ category, amount }));
-
+    const totalBilled = Number(vendor.totalBilled || 0);
+    const totalPaid = Number(vendor.totalPaid || 0);
+    const billTotal = roundMoney(bills.reduce((sum, bill) => sum + Number(bill.grandTotal || 0), 0));
+    const role = String(req.user?.role || '').toLowerCase().replace(/_/g, '-');
+    const financialAccess = ['admin', 'school-admin', 'super-admin', 'superadmin', 'accountant', 'principal'].includes(role);
+    const suppliedProducts = [...suppliedItems.values()].map((item) => ({ ...item, status: stockStatus(item) }));
     return sendSuccess(res, undefined, {
-      vendor,
+      vendor: publicVendor(vendor, financialAccess),
       bills,
       suppliedProducts,
       kpis: {
         totalBilled,
         totalPaid,
-        outstandingBalance,
+        outstandingBalance: roundMoney(totalBilled - totalPaid),
         totalBillsCount: bills.length,
         suppliedProductsCount: suppliedProducts.length,
-        averageOrderValue,
+        averageOrderValue: bills.length ? roundMoney(billTotal / bills.length) : 0,
       },
-      spendTrend,
-      categoryBreakdown,
+      spendTrend: Array.from(monthlySpend, ([month, amount]) => ({ month, amount: roundMoney(amount) })),
+      categoryBreakdown: Array.from(categorySpend, ([category, amount]) => ({ category, amount: roundMoney(amount) })),
     });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendProcurementError(res, error);
   }
-};
+}
 
-/**
- * Registers a new vendor supplier.
- */
-export const createVendor = async (req, res) => {
+export async function createVendor(req, res) {
   try {
-    const data = req.body;
-    if (!data.name || !String(data.name).trim()) {
-      return sendBadRequest(res, 'Company / Vendor name is required.');
-    }
+    const values = vendorProfile(req.body || {});
+    const vendor = await writeProcurement(req, ['vendors'], async (store) => {
+      await checkDuplicates(store, values);
+      return store.create('vendors', { ...values, totalBilled: 0, totalPaid: 0, outstandingBalance: 0 });
+    }, { atomic: false });
+    await vendorAudit(req, vendor, 'CREATE', 'Registered vendor ' + vendor.vendorCode);
+    return sendCreated(res, 'Vendor registered.', { vendor });
+  } catch (error) {
+    return sendProcurementError(res, error);
+  }
+}
 
-    let newVendor = null;
+export async function updateVendor(req, res) {
+  try {
+    const vendor = await writeProcurement(req, ['vendors'], async (store) => {
+      const existing = await requireVendor(store, req.params.id);
+      const values = vendorProfile(req.body || {}, existing);
+      await checkDuplicates(store, values, existing);
+      return store.update('vendors', recordId(existing), values);
+    }, { atomic: false });
+    await vendorAudit(req, vendor, 'UPDATE', 'Updated vendor ' + vendor.vendorCode);
+    return sendSuccess(res, 'Vendor saved.', { vendor });
+  } catch (error) {
+    return sendProcurementError(res, error);
+  }
+}
 
-    if (checkFallback()) {
-      const existing = FallbackDb.find('vendors') || [];
-      const code = data.vendorCode || `VND-${String(existing.length + 1).padStart(3, '0')}`;
-      newVendor = FallbackDb.create('vendors', {
-        ...data,
-        name: String(data.name).trim(),
-        category: data.category || 'General',
-        vendorCode: code,
-        phone: data.phone || '',
-        email: data.email || '',
-        contactPerson: data.contactPerson || '',
-        totalBilled: Number(data.totalBilled) || 0,
-        totalPaid: Number(data.totalPaid) || 0,
-        outstandingBalance: (Number(data.totalBilled) || 0) - (Number(data.totalPaid) || 0),
-        rating: Number(data.rating) || 5,
-        status: data.status || 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-    } else {
-      const count = await Vendor.countDocuments();
-      if (!data.vendorCode) {
-        data.vendorCode = `VND-${String(count + 1).padStart(3, '0')}`;
-      }
-      data.category = data.category || 'General';
-      const vendor = new Vendor(data);
-      newVendor = await vendor.save();
-    }
+export async function deleteVendor(req, res) {
+  try {
+    const vendor = await writeProcurement(req, ['vendors'], async (store) => {
+      const existing = await requireVendor(store, req.params.id);
+      return store.update('vendors', recordId(existing), { status: 'inactive' });
+    }, { atomic: false });
+    await vendorAudit(req, vendor, 'UPDATE', 'Deactivated vendor ' + vendor.vendorCode);
+    return sendSuccess(res, 'Vendor deactivated.', { archived: true, vendor: publicVendor(vendor) });
+  } catch (error) {
+    return sendProcurementError(res, error);
+  }
+}
 
-    await logActivity({
-      userId: req.user?._id || req.user?.id,
-      action: 'CREATE',
-      module: 'vendors',
-      recordId: newVendor.id || newVendor._id,
-      details: `Registered vendor ${newVendor.name} (${newVendor.vendorCode})`,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
+export async function getVendorBills(req, res) {
+  try {
+    const store = readProcurement(req);
+    const vendor = await requireVendor(store, req.params.id);
+    const { data: bills, pagination } = await store.page('inventoryPurchases', { ...req.query, sort: '-billDate' }, {
+      match: { vendorId: recordId(vendor) },
+      searchFields: ['billNumber', 'supplierBillNumber', 'poNumber'],
+      sortFields: ['billDate'],
     });
-
-    return sendCreated(res, 'Vendor registered successfully', { vendor: newVendor });
+    return sendSuccess(res, undefined, { bills, pagination });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendProcurementError(res, error);
   }
-};
+}
 
-/**
- * Updates vendor details, coordinates, and bank information.
- */
-export const updateVendor = async (req, res) => {
+export async function recordVendorPayment(req, res) {
   try {
-    const { id } = req.params;
-    const data = { ...req.body };
-    delete data.id;
-    delete data._id;
-
-    let updatedVendor = null;
-
-    if (checkFallback()) {
-      const existing = FallbackDb.findById('vendors', id);
-      if (!existing) return sendNotFound(res, 'Vendor not found');
-
-      const totalBilled = data.totalBilled !== undefined ? Number(data.totalBilled) : existing.totalBilled;
-      const totalPaid = data.totalPaid !== undefined ? Number(data.totalPaid) : existing.totalPaid;
-      data.outstandingBalance = totalBilled - totalPaid;
-
-      updatedVendor = FallbackDb.update('vendors', id, {
-        ...data,
-        updatedAt: new Date().toISOString(),
-      });
-    } else {
-      updatedVendor = await Vendor.findByIdAndUpdate(id, data, { new: true });
-    }
-
-    if (!updatedVendor) return sendNotFound(res, 'Vendor not found');
-
-    await logActivity({
-      userId: req.user?._id || req.user?.id,
-      action: 'UPDATE',
-      module: 'vendors',
-      recordId: id,
-      details: `Updated vendor details for ${updatedVendor.name}`,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-    });
-
-    return sendSuccess(res, 'Vendor updated successfully', { vendor: updatedVendor });
+    const result = await applyVendorPayment(req);
+    if (!result.alreadyRecorded) await vendorAudit(req, result.vendor, 'UPDATE', 'Recorded a payment for ' + result.vendor.vendorCode);
+    return sendSuccess(res, 'Payment recorded.', result);
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendProcurementError(res, error);
   }
-};
-
-/**
- * Deactivates or removes a vendor.
- */
-export const deleteVendor = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (checkFallback()) {
-      const allPurchases = FallbackDb.find('inventoryPurchases') || [];
-      const hasPurchases = allPurchases.some((p) => String(p.vendorId) === String(id));
-      if (hasPurchases) {
-        // Soft deactivate
-        const updated = FallbackDb.update('vendors', id, { status: 'inactive' });
-        return sendSuccess(res, 'Vendor has historical purchase records, deactivated status instead.', { vendor: updated });
-      }
-      FallbackDb.delete('vendors', id);
-    } else {
-      const hasPurchases = await InventoryPurchase.exists({ vendorId: id });
-      if (hasPurchases) {
-        const updated = await Vendor.findByIdAndUpdate(id, { status: 'inactive' }, { new: true });
-        return sendSuccess(res, 'Vendor has historical purchase records, deactivated status instead.', { vendor: updated });
-      }
-      await Vendor.findByIdAndDelete(id);
-    }
-
-    return sendSuccess(res, 'Vendor removed successfully');
-  } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
-  }
-};
-
-/**
- * Retrieves all purchase invoices/bills associated with this vendor.
- */
-export const getVendorBills = async (req, res) => {
-  try {
-    const { id } = req.params;
-    let bills = [];
-
-    if (checkFallback()) {
-      const allPurchases = FallbackDb.find('inventoryPurchases') || [];
-      bills = allPurchases.filter((p) => String(p.vendorId) === String(id));
-    } else {
-      bills = await InventoryPurchase.find({ vendorId: id }).sort({ billDate: -1 });
-    }
-
-    return sendSuccess(res, undefined, { count: bills.length, bills });
-  } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
-  }
-};
-
-/**
- * Records a payment against a vendor bill / general vendor balance.
- */
-export const recordVendorPayment = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { amount, paymentType, transactionReference, notes, billId } = req.body;
-    const payAmount = Number(amount);
-
-    if (isNaN(payAmount) || payAmount <= 0) {
-      return sendBadRequest(res, 'Please provide a valid payment amount greater than zero.');
-    }
-
-    let vendor = null;
-
-    if (checkFallback()) {
-      vendor = FallbackDb.findById('vendors', id);
-      if (!vendor) return sendNotFound(res, 'Vendor not found');
-
-      const newTotalPaid = (vendor.totalPaid || 0) + payAmount;
-      const newOutstanding = Math.max(0, (vendor.totalBilled || 0) - newTotalPaid);
-
-      vendor = FallbackDb.update('vendors', id, {
-        totalPaid: newTotalPaid,
-        outstandingBalance: newOutstanding,
-        updatedAt: new Date().toISOString(),
-      });
-
-      if (billId) {
-        const bill = FallbackDb.findById('inventoryPurchases', billId);
-        if (bill) {
-          const billPaid = (bill.amountPaid || 0) + payAmount;
-          const billDue = Math.max(0, (bill.grandTotal || 0) - billPaid);
-          const billStatus = billDue === 0 ? 'Paid' : 'Partial';
-          FallbackDb.update('inventoryPurchases', billId, {
-            amountPaid: billPaid,
-            balanceDue: billDue,
-            paymentStatus: billStatus,
-            transactionReference: transactionReference || bill.transactionReference,
-          });
-        }
-      }
-    } else {
-      vendor = await Vendor.findById(id);
-      if (!vendor) return sendNotFound(res, 'Vendor not found');
-
-      vendor.totalPaid = (vendor.totalPaid || 0) + payAmount;
-      vendor.outstandingBalance = Math.max(0, (vendor.totalBilled || 0) - vendor.totalPaid);
-      await vendor.save();
-
-      if (billId) {
-        const bill = await InventoryPurchase.findById(billId);
-        if (bill) {
-          bill.amountPaid = (bill.amountPaid || 0) + payAmount;
-          bill.balanceDue = Math.max(0, (bill.grandTotal || 0) - bill.amountPaid);
-          bill.paymentStatus = bill.balanceDue === 0 ? 'Paid' : 'Partial';
-          if (transactionReference) bill.transactionReference = transactionReference;
-          await bill.save();
-        }
-      }
-    }
-
-    await logActivity({
-      userId: req.user?._id || req.user?.id,
-      action: 'UPDATE',
-      module: 'vendors',
-      recordId: id,
-      details: `Recorded payment of ₹${payAmount} to vendor ${vendor.name} via ${paymentType || 'Bank Transfer'}`,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      metadata: { amount: payAmount, paymentType, transactionReference, billId },
-    });
-
-    return sendSuccess(res, `Payment of ₹${payAmount} recorded successfully.`, { vendor });
-  } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
-  }
-};
-
+}

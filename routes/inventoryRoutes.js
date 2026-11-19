@@ -8,20 +8,22 @@ import {
   adjustStock,
   createBulkInventoryItems,
   createInventoryItem,
-  createVendor,
+  createPurchase,
   deleteInventoryItem,
   getAlerts,
   getInventory,
   getInventoryActivity,
   getInventoryById,
   getInventorySummary,
+  getPurchases,
   getTransactions,
-  getVendors,
   updateInventoryItem,
   uploadInventoryAttachments,
 } from '../controllers/inventoryController.js';
+import { createVendor, getVendors } from '../controllers/vendorController.js';
 
 const router = express.Router();
+const readInventory = authorize('super-admin', 'school-admin', 'accountant', 'principal', 'librarian', 'hod', 'director');
 
 const inventoryUpload = multer({
   storage: multer.memoryStorage(),
@@ -53,9 +55,11 @@ const inventoryUpload = multer({
 });
 
 // Summary, KPIs & Alerts
-router.get('/summary', protect, getInventorySummary);
-router.get('/alerts', protect, getAlerts);
-router.get('/transactions', protect, getTransactions);
+router.get('/summary', protect, readInventory, getInventorySummary);
+router.get('/alerts', protect, readInventory, getAlerts);
+router.get('/transactions', protect, readInventory, getTransactions);
+router.get('/purchases', protect, readInventory, getPurchases);
+router.post('/purchases', protect, authorize('super-admin', 'school-admin', 'accountant'), createPurchase);
 
 
 // Stock Adjustments
@@ -67,7 +71,7 @@ router.post(
 );
 
 // Vendors (backward compatibility)
-router.get('/vendors', protect, getVendors);
+router.get('/vendors', protect, readInventory, getVendors);
 router.post(
   '/vendors',
   protect,
@@ -92,9 +96,9 @@ router.post(
 );
 
 // Inventory Items CRUD
-router.get('/', protect, getInventory);
-router.get('/:id/activity', protect, getInventoryActivity);
-router.get('/:id', protect, getInventoryById);
+router.get('/', protect, readInventory, getInventory);
+router.get('/:id/activity', protect, readInventory, getInventoryActivity);
+router.get('/:id', protect, readInventory, getInventoryById);
 
 router.post(
   '/',

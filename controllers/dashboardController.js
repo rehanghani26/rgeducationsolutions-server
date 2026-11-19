@@ -20,13 +20,40 @@ import Teacher from "../models/Teacher.js";
 
 // 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
+import { loadCampusOverview, loadStudentOverview } from "../services/dashboardOverviewService.js";
 
 // 7. Utilities
 import {
   sendError,
+  sendForbidden,
   sendNotFound,
   sendSuccess,
 } from "../utils/responseUtil.js";
+
+export async function getStudentOverview(req, res) {
+  const schoolId = String(req.schoolId || req.user?.schoolId || '').trim().toUpperCase();
+  if (!schoolId) return sendForbidden(res, 'A school account is required.');
+  try {
+    const overview = await loadStudentOverview(req.user, schoolId);
+    if (!overview) return sendNotFound(res, 'Student profile not found.');
+    return sendSuccess(res, undefined, overview);
+  } catch (error) {
+    return sendError(res, 'Unable to load the student overview.', 500, error);
+  }
+}
+
+export async function getCampusOverview(req, res) {
+  const schoolId = String(req.schoolId || req.user?.schoolId || '').trim().toUpperCase();
+  if (!schoolId) return sendForbidden(res, 'A school account is required.');
+  try {
+    const role = String(req.user.role).toLowerCase().replace(/_/g, '-').replace(/^superadmin$/, 'super-admin');
+    return sendSuccess(res, undefined, await loadCampusOverview(schoolId, role, {
+      studentDetails: req.query?.view === 'students',
+    }));
+  } catch (error) {
+    return sendError(res, 'Unable to load the campus overview.', 500, error);
+  }
+}
 
 /**
  * @file dashboardController.js

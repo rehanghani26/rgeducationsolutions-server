@@ -31,6 +31,7 @@ import { sendStudentOtpEmail } from '../services/emailService.js';
 // 7. Utilities
 import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
 import { normalizeEmail, formatFullName, generateSecurePassword } from '../utils/commonUtil.js';
+import { currentAcademicYear, isLegacyStudent, isStudentLegacyValue, studentRosterCsv, studentRosterFields } from '../utils/studentUtil.js';
 import { parsePagination, paginateResult, paginateArray } from '../utils/paginateQuery.js';
 import {
   sendSuccess,
@@ -102,23 +103,20 @@ const getNextAdmissionNumber = async () => {
  *
  * @param {string} classId - Class identifier.
  * @param {string} sectionId - Section identifier.
+ * @param {string} academicYear - Academic year for the enrollment.
  * @returns {Promise<number>} Next available roll number.
  */
-const getNextRollNumber = async (classId, sectionId) => {
+const getNextRollNumber = async (classId, sectionId, academicYear) => {
   if (!classId || !sectionId) {
     return Math.floor(1000 + Math.random() * 9000);
   }
-
-  const year = new Date().getFullYear();
-  const month = new Date().getMonth();
-  const academicYear =
-    month >= 3 ? `${year}-${String(year + 1).slice(-2)}` : `${year - 1}-${String(year).slice(-2)}`;
 
   if (checkFallback()) {
     const existing = FallbackDb.find('students').filter(
       (s) =>
         String(s.classId) === String(classId) &&
         String(s.sectionId) === String(sectionId) &&
+        (!s.academicYear || s.academicYear === academicYear) &&
         s.rollNumber != null
     );
     const maxRoll = existing.length
@@ -246,19 +244,14 @@ const buildStudentPayload = async (data) => {
   const resolvedClassId = matchedClass ? matchedClass.id : data.classId || null;
   const resolvedSectionId = matchedSection ? matchedSection.id : data.sectionId || null;
 
-  const rollNumber = await getNextRollNumber(resolvedClassId, resolvedSectionId);
+  const academicYear = data.academicYear || data.sessionName || data.session || currentAcademicYear();
+  const rollNumber = await getNextRollNumber(resolvedClassId, resolvedSectionId, academicYear);
 
   const name = formatFullName(data) || `Student ${admissionNumber}`;
   const email = normalizeEmail(
     data.email || `${admissionNumber.toLowerCase().replace(/-/g, '.')}@school.local`
   );
 
-  const year = new Date().getFullYear();
-  const month = new Date().getMonth();
-  const fallbackYear =
-    month >= 3 ? `${year}-${String(year + 1).slice(-2)}` : `${year - 1}-${String(year).slice(-2)}`;
-  const academicYear =
-    data.academicYear || data.sessionName || data.session || fallbackYear;
   const sessionId = data.sessionId || null;
 
   return {
@@ -304,8 +297,9 @@ const buildStudentPayload = async (data) => {
         (data.aadhaarDocument || data.AdharRef?.pdf ? `doc_${Date.now()}` : ''),
       pdf: data.aadhaarDocument || data.AdharRef?.pdf || data.aadhaarPdf || data.adharPdf || '',
     },
-    joiningDate: data.admissionDate || data.joiningDate || new Date(),
+    joiningDate: data.joiningDate || data.admissionDate || new Date(),
     admissionDate: data.admissionDate || data.joiningDate || new Date(),
+    isLegacyStudent: isLegacyStudent(data.isLegacyStudent),
     admissionType: data.admissionType || 'New Admission',
     previousSchoolName: data.previousSchoolName?.trim() || '',
     previousClass: data.previousClass?.trim() || '',
@@ -323,6 +317,7 @@ const buildStudentPayload = async (data) => {
     specialEducationNeeds: data.specialEducationNeeds?.trim() || 'None',
     careerInterest: data.careerInterest?.trim() || '',
 
+    fatherName: typeof data.fatherName === 'string' ? data.fatherName.trim() : '',
     fatherOccupation: data.fatherOccupation?.trim() || '',
     fatherOrganization: data.fatherOrganization?.trim() || '',
     motherName: data.motherName?.trim() || '',
@@ -432,6 +427,7 @@ const enrichStudent = (stud) => {
 
   return {
     ...s,
+    isLegacyStudent: isLegacyStudent(s.isLegacyStudent),
     class: className,
     section: sectionName,
     className,
@@ -465,11 +461,15 @@ const enrichStudent = (stud) => {
 const resolveStudentFileUrls = async (student) => {
   if (!student) return student;
 
-  const [photoUrl, aadhaarUrl, imagesRefImg, adharRefPdf] = await Promise.all([
-    resolveFileUrl(student.photo, 3600),
-    resolveFileUrl(student.aadhaarDocument, 3600),
-    resolveFileUrl(student.imagesRef?.img, 3600),
-    resolveFileUrl(student.AdharRef?.pdf, 3600),
+  const photoKey = student.imagesRef?.id;
+  const aadhaarKey = student.AdharRef?.id;
+  const photoSource = typeof photoKey === 'string' && photoKey.startsWith('school-erp/students/photos/')
+    ? photoKey : student.photo || student.imagesRef?.img;
+  const aadhaarSource = typeof aadhaarKey === 'string' && aadhaarKey.startsWith('school-erp/students/aadhaar/')
+    ? aadhaarKey : student.aadhaarDocument || student.AdharRef?.pdf;
+  const [photoUrl, aadhaarUrl] = await Promise.all([
+    resolveFileUrl(photoSource),
+    resolveFileUrl(aadhaarSource),
   ]);
 
   return {
@@ -478,11 +478,11 @@ const resolveStudentFileUrls = async (student) => {
     aadhaarDocument: aadhaarUrl,
     imagesRef: {
       id: student.imagesRef?.id || '',
-      img: imagesRefImg,
+      img: photoUrl,
     },
     AdharRef: {
       id: student.AdharRef?.id || '',
-      pdf: adharRefPdf,
+      pdf: aadhaarUrl,
     },
   };
 };
@@ -931,6 +931,9 @@ export const verifyStudentEmailOtp = async (req, res) => {
  */
 export const createStudent = async (req, res) => {
   try {
+    if (req.body.isLegacyStudent !== undefined && !isStudentLegacyValue(req.body.isLegacyStudent)) {
+      return sendBadRequest(res, 'Legacy student must be true or false');
+    }
     const payload = await buildStudentPayload(req.body);
     let password = req.body.password;
     if (!password || password.length < 6) {
@@ -974,7 +977,6 @@ export const createStudent = async (req, res) => {
         });
       }
 
-      // Clean up any unlinked/orphaned user with this email or admission number from previous failed attempts
       const existingUser =
         FallbackDb.findOne('users', { email: payload.email }) ||
         FallbackDb.findOne('users', { admissionNumber: payload.admissionNumber });
@@ -982,7 +984,7 @@ export const createStudent = async (req, res) => {
         const linkedStudent = FallbackDb.findOne('students', {
           user: existingUser.id || existingUser._id,
         });
-        if (linkedStudent) {
+        if (linkedStudent || existingUser.role !== 'student') {
           return res.status(409).json({
             success: false,
             message: 'Student admission number or email already exists',
@@ -1061,15 +1063,6 @@ export const createStudent = async (req, res) => {
       });
     }
 
-    // Purge any lingering user record with this student's email or admission number to prevent collisions
-    await User.deleteMany({
-      $or: [
-        { email: payload.email },
-        { admissionNumber: payload.admissionNumber },
-        { role: { $in: ['student', 'parent'] } },
-      ],
-    }).catch(() => null);
-
     // Students are stored exclusively in Student collection
     const studentRecord = await Student.create({
       ...payload,
@@ -1118,7 +1111,13 @@ export const createStudent = async (req, res) => {
 export const updateStudent = async (req, res) => {
   try {
     const { id } = req.params;
+    if (req.body.isLegacyStudent !== undefined && !isStudentLegacyValue(req.body.isLegacyStudent)) {
+      return sendBadRequest(res, 'Legacy student must be true or false');
+    }
     const updateData = { ...req.body };
+    if (updateData.isLegacyStudent !== undefined) {
+      updateData.isLegacyStudent = isLegacyStudent(updateData.isLegacyStudent);
+    }
     delete updateData.password;
     delete updateData.confirmPassword;
     if (updateData.email) updateData.email = normalizeEmail(updateData.email);
@@ -1166,9 +1165,9 @@ export const updateStudent = async (req, res) => {
     if (updateData.isEmailVerified !== undefined) {
       updateData.isEmailVerified = Boolean(updateData.isEmailVerified);
     }
-    if (updateData.admissionDate && !updateData.joiningDate) {
+    if (updateData.admissionDate && updateData.joiningDate === undefined) {
       updateData.joiningDate = updateData.admissionDate;
-    } else if (updateData.joiningDate && !updateData.admissionDate) {
+    } else if (updateData.joiningDate && updateData.admissionDate === undefined) {
       updateData.admissionDate = updateData.joiningDate;
     }
     if (updateData.transferCertificateNumber) {
@@ -1464,62 +1463,12 @@ export const bulkPromoteStudents = async (req, res) => {
  */
 export const exportStudents = async (req, res) => {
   try {
-    let students = [];
-    if (checkFallback()) {
-      students = FallbackDb.find('students');
-    } else {
-      students = await Student.find().select(
-        'name admissionNumber rollNumber classId sectionId parentName contactNumber status admissionDate admissionType enrollmentStatus houseName studentCategory studentType motherName motherContact createdAt'
-      );
-    }
-
-    const headers = [
-      'Name',
-      'Admission Number',
-      'Roll Number',
-      'Class',
-      'Section',
-      'Parent',
-      'Phone',
-      'Status',
-      'Admission Date',
-      'Admission Type',
-      'Enrollment Status',
-      'House',
-      'Category',
-      'Student Type',
-      'Mother Name',
-      'Mother Phone',
-      'Created',
-    ];
-    const rows = students.map((s) =>
-      [
-        s.name,
-        s.admissionNumber,
-        s.rollNumber,
-        s.classId,
-        s.sectionId,
-        s.parentName,
-        s.contactNumber,
-        s.status,
-        s.admissionDate ? new Date(s.admissionDate).toISOString().slice(0, 10) : '',
-        s.admissionType || '',
-        s.enrollmentStatus || '',
-        s.houseName || '',
-        s.studentCategory || '',
-        s.studentType || '',
-        s.motherName || '',
-        s.motherContact || '',
-        s.createdAt,
-      ]
-        .map((v) => `"${String(v || '').replace(/"/g, '""')}"`)
-        .join(',')
-    );
-
-    const csv = [headers.join(','), ...rows].join('\n');
-    res.setHeader('Content-Type', 'text/csv');
+    const students = checkFallback()
+      ? FallbackDb.find('students')
+      : await Student.find().select(studentRosterFields).lean();
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=students.csv');
-    return res.send(csv);
+    return res.send(studentRosterCsv(students));
   } catch (error) {
     return sendError(res, 'Server error', 500, error);
   }
@@ -1594,77 +1543,58 @@ export const bulkImportStudents = async (req, res) => {
     let successCount = 0;
     const errors = [];
 
-    // Fetch active academic session once if available
+    const useFallback = checkFallback();
+    // Use the same active-session fallback as the registration page.
     let activeSession = null;
     try {
-      if (!checkFallback()) {
-        activeSession = await AcademicSession.findOne({ isCurrent: true }).lean();
+      if (useFallback) {
+        const sessions = FallbackDb.find('academicSessions');
+        activeSession = sessions.find((session) => session.isCurrent) || sessions[0];
+      } else {
+        activeSession = await AcademicSession.findOne({ isCurrent: true }).lean()
+          || await AcademicSession.findOne().sort({ startDate: -1 }).lean();
       }
     } catch (_e) {
       // Non-blocking
     }
 
+    const activeSessionId = activeSession?._id || activeSession?.id;
     for (let i = 0; i < students.length; i++) {
       const raw = students[i];
       try {
-        // Strict row validation: ignore binary/null junk, trailers, and header lines
-        const rawFirst = String(raw.firstName || raw.name || '').trim();
-        const rawLast = String(raw.lastName || '').trim();
-
-        // Check for binary unprintable characters (e.g. from raw xlsx reading)
-        if (
-          !rawFirst ||
-          /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(rawFirst) ||
-          /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/.test(rawLast)
-        ) {
-          continue;
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+          throw new Error('Invalid student row.');
+        }
+        const first = String(raw.firstName || raw.name || '').trim();
+        const last = String(raw.lastName || '').trim();
+        const invalidName = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD]/u;
+        if (!/[\p{L}\p{N}]/u.test(first) || invalidName.test(first) || invalidName.test(last)) {
+          throw new Error('Enter a valid student name.');
+        }
+        const trailers = ['firstname', 'first name', 'total', 'subtotal', 'classid', 'sectionid', 'students', 'summary', 'count'];
+        const lowerFirst = first.toLowerCase();
+        if (trailers.includes(lowerFirst) || (!last && lowerFirst.startsWith('cls-'))) {
+          throw new Error('Remove the repeated header or summary row.');
+        }
+        if (raw.isLegacyStudent !== undefined && !isStudentLegacyValue(raw.isLegacyStudent)) {
+          throw new Error('Legacy student must be true or false.');
         }
 
-        const lowerFirst = rawFirst.toLowerCase();
-        // Skip header lines or summary table rows
-        if (
-          [
-            'firstname',
-            'first name',
-            'total',
-            'subtotal',
-            'classid',
-            'sectionid',
-            'students',
-            'summary',
-            'count',
-          ].includes(lowerFirst)
-        ) {
-          continue;
+        const payload = await buildStudentPayload({
+          ...raw,
+          academicYear: raw.academicYear || activeSession?.sessionName,
+          sessionId: raw.sessionId || activeSessionId,
+        });
+        const conflictingEmail = useFallback
+          ? FallbackDb.findOne('students', { email: payload.email }) || FallbackDb.findOne('users', { email: payload.email })
+          : await Student.exists({ email: payload.email }) || await User.exists({ email: payload.email });
+        if (conflictingEmail) {
+          throw new Error('This student email is already registered.');
         }
-
-        if (lowerFirst.startsWith('cls-') && !rawLast) {
-          continue; // trailer summary row
-        }
-
-        // Must contain at least one valid alphanumeric character
-        if (!/[a-zA-Z0-9\u00C0-\u024F\u0900-\u097F]/.test(rawFirst)) {
-          continue;
-        }
-
-        // Inject active session if missing from raw data
-        if (activeSession) {
-          if (!raw.academicYear) raw.academicYear = activeSession.sessionName;
-          if (!raw.sessionId) raw.sessionId = activeSession._id;
-        }
-
-        const payload = await buildStudentPayload(raw);
-        let password = raw.password;
-        if (!password || password.length < 6) {
-          password = generateRandomPassword();
-        }
-
-        if (!payload.name) payload.name = `${payload.firstName} ${payload.lastName}`.trim();
-        if (!payload.contactNumber) payload.contactNumber = '';
-        if (!payload.parentName) payload.parentName = `Guardian of ${payload.name}`;
-        if (!payload.parentContact) payload.parentContact = payload.contactNumber;
-
-        if (checkFallback()) {
+        const password = typeof raw.password === 'string' && raw.password.length >= 6
+          ? raw.password
+          : generateSecurePassword('Std@');
+        if (useFallback) {
           const createdStudent = FallbackDb.create('students', {
             ...payload,
             password,
@@ -1672,20 +1602,11 @@ export const bulkImportStudents = async (req, res) => {
             role: 'student',
           });
           try {
-            await createOrLinkParent(payload, createdStudent.id, password);
+            if (payload.parentContact) await createOrLinkParent(payload, createdStudent.id, password);
           } catch (_pErr) {
             // Non-blocking
           }
         } else {
-          if (payload.email || payload.admissionNumber) {
-            await User.deleteMany({
-              $or: [
-                ...(payload.email ? [{ email: payload.email }] : []),
-                ...(payload.admissionNumber ? [{ admissionNumber: payload.admissionNumber }] : []),
-              ],
-            }).catch(() => null);
-          }
-
           const studentRecord = await Student.create({
             ...payload,
             password,
@@ -1695,13 +1616,13 @@ export const bulkImportStudents = async (req, res) => {
           });
 
           try {
-            await createOrLinkParent(payload, studentRecord._id, password);
+            if (payload.parentContact) await createOrLinkParent(payload, studentRecord._id, password);
           } catch (_pErr) {
             // Non-blocking parent account linking
           }
 
           // Track session enrollment history if active session exists
-          if (activeSession) {
+          if (activeSessionId && String(payload.sessionId) === String(activeSessionId)) {
             try {
               await StudentSessionHistory.findOneAndUpdate(
                 { studentId: studentRecord._id, sessionId: activeSession._id },
@@ -1732,8 +1653,8 @@ export const bulkImportStudents = async (req, res) => {
       } catch (err) {
         errors.push({
           index: i,
-          name: raw.firstName || raw.name || `Row ${i + 1}`,
-          error: err.message,
+          name: raw?.firstName || raw?.name || `Row ${i + 1}`,
+          error: err.code === 11000 ? 'A student with these details already exists. Check the directory before retrying.' : err.message,
         });
       }
     }

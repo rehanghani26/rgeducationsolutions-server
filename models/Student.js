@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
+import { currentAcademicYear } from "../utils/studentUtil.js";
 import tenantPlugin from "../utils/tenantPlugin.js";
 
 const StudentSchema = new mongoose.Schema(
@@ -81,15 +82,7 @@ const StudentSchema = new mongoose.Schema(
     // Academic year e.g. "2025-26"
     academicYear: {
       type: String,
-      default: () => {
-        const now = new Date();
-        const yr = now.getFullYear();
-        const month = now.getMonth(); // 0-indexed
-        // Academic year starts April, so April 2026 = 2026-27
-        return month >= 3
-          ? `${yr}-${String(yr + 1).slice(-2)}`
-          : `${yr - 1}-${String(yr).slice(-2)}`;
-      },
+      default: () => currentAcademicYear(),
     },
     // ── Current ClassRoom reference (added for ClassRoom module) ──
     currentClassRoomId: {
@@ -141,6 +134,10 @@ const StudentSchema = new mongoose.Schema(
     joiningDate: {
       type: Date,
       default: Date.now,
+    },
+    isLegacyStudent: {
+      type: Boolean,
+      default: false,
     },
     admissionType: {
       type: String,
@@ -221,6 +218,11 @@ const StudentSchema = new mongoose.Schema(
     },
 
     // ── 3. Family & Guardian Fields ──
+    fatherName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     fatherOccupation: {
       type: String,
       trim: true,

@@ -22,7 +22,7 @@ const PurchaseItemSchema = new mongoose.Schema({
   quantity: {
     type: Number,
     required: true,
-    min: 1,
+    min: 0.001,
   },
   unit: {
     type: String,
@@ -38,6 +38,8 @@ const PurchaseItemSchema = new mongoose.Schema({
     required: true,
     min: 0,
   },
+  gstRate: { type: Number, min: 0, max: 100, default: 0 },
+  gstAmount: { type: Number, min: 0, default: 0 },
 });
 
 const InventoryPurchaseSchema = new mongoose.Schema(
@@ -48,6 +50,7 @@ const InventoryPurchaseSchema = new mongoose.Schema(
       unique: true,
       trim: true,
     },
+    supplierBillNumber: { type: String, trim: true, uppercase: true },
     poNumber: {
       type: String,
       trim: true,
@@ -75,6 +78,9 @@ const InventoryPurchaseSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    dueDate: Date,
+    expectedDeliveryDate: Date,
+    vendorName: { type: String, trim: true, default: '' },
     items: [PurchaseItemSchema],
     subtotal: {
       type: Number,
@@ -89,6 +95,8 @@ const InventoryPurchaseSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    shippingCharges: { type: Number, min: 0, default: 0 },
+    otherCharges: { type: Number, min: 0, default: 0 },
     grandTotal: {
       type: Number,
       required: true,
@@ -156,8 +164,14 @@ const InventoryPurchaseSchema = new mongoose.Schema(
   }
 );
 
+InventoryPurchaseSchema.index(
+  { vendorId: 1, supplierBillNumber: 1 },
+  { unique: true, partialFilterExpression: { supplierBillNumber: { $type: 'string' } } }
+);
+InventoryPurchaseSchema.index({ schoolId: 1, sessionId: 1, billDate: -1 });
+
 InventoryPurchaseSchema.pre('save', function (next) {
-  this.balanceDue = Math.max(0, (this.grandTotal || 0) - (this.amountPaid || 0));
+  this.balanceDue = Math.max(0, Math.round(((this.grandTotal || 0) - (this.amountPaid || 0)) * 100) / 100);
   if (this.balanceDue === 0) {
     this.paymentStatus = 'Paid';
   } else if (this.amountPaid > 0) {

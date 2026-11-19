@@ -48,6 +48,7 @@ const initialDb = {
 };
 
 let db = { ...initialDb };
+let revision = 0;
 
 // Ensure upload directory exists
 const uploadDir = path.join(__dirname, "..", "uploads");
@@ -105,6 +106,7 @@ const loadData = () => {
  * Persists fallback database state to disk.
  */
 const saveData = () => {
+  revision += 1;
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), "utf-8");
   } catch (err) {
@@ -118,6 +120,34 @@ loadData();
  * Generic synchronous CRUD operations for fallback collections.
  */
 export const FallbackDb = {
+  // Stage related writes and publish them together only after the disk write succeeds.
+  transaction: async (collections, work) => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const startRevision = revision;
+      const draft = Object.fromEntries(
+        collections.map((name) => [name, structuredClone(db[name] || [])])
+      );
+      const result = await work(draft);
+      if (revision !== startRevision) continue;
+
+      const next = { ...db, ...draft };
+      const temp = `${DATA_FILE}.${process.pid}.tmp`;
+      try {
+        fs.writeFileSync(temp, JSON.stringify(next, null, 2), 'utf-8');
+        fs.renameSync(temp, DATA_FILE);
+      } catch (error) {
+        if (fs.existsSync(temp)) fs.unlinkSync(temp);
+        throw error;
+      }
+      db = next;
+      revision += 1;
+      return result;
+    }
+    const error = new Error('Records changed during this operation. Please try again.');
+    error.statusCode = 409;
+    throw error;
+  },
+
   find: (collection) => {
     return db[collection] || [];
   },

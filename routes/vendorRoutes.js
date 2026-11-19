@@ -13,10 +13,11 @@ import {
 } from '../controllers/vendorController.js';
 
 const router = express.Router();
+const readVendors = authorize('super-admin', 'school-admin', 'accountant', 'principal', 'librarian', 'hod', 'director');
 
-router.get('/', protect, getVendors);
-router.get('/:id', protect, getVendorById);
-router.get('/:id/bills', protect, getVendorBills);
+router.get('/', protect, readVendors, getVendors);
+router.get('/:id', protect, readVendors, getVendorById);
+router.get('/:id/bills', protect, readVendors, getVendorBills);
 
 router.post(
   '/',

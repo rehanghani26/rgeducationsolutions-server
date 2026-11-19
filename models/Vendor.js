@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import mongoose from 'mongoose';
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
@@ -49,6 +50,9 @@ const VendorSchema = new mongoose.Schema(
       lowercase: true,
       default: '',
     },
+    billingEmail: { type: String, trim: true, lowercase: true, default: '' },
+    website: { type: String, trim: true, default: '' },
+    leadTimeDays: { type: Number, min: 0, max: 365 },
     address: {
       type: String,
       trim: true,
@@ -80,6 +84,7 @@ const VendorSchema = new mongoose.Schema(
       default: '',
     },
     bankDetails: {
+      accountHolderName: { type: String, trim: true, default: '' },
       bankName: { type: String, trim: true, default: '' },
       accountNumber: { type: String, trim: true, default: '' },
       ifscCode: { type: String, trim: true, default: '' },
@@ -105,6 +110,17 @@ const VendorSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    payments: [{
+      requestId: String,
+      requestHash: String,
+      amount: { type: Number, required: true },
+      paymentDate: { type: Date, required: true },
+      paymentType: { type: String, required: true },
+      transactionReference: String,
+      notes: String,
+      appliedBills: [{ billId: mongoose.Schema.Types.ObjectId, billNumber: String, amount: Number }],
+      recordedByName: String,
+    }],
     rating: {
       type: Number,
       default: 5,
@@ -128,12 +144,11 @@ const VendorSchema = new mongoose.Schema(
 );
 
 // Auto-generate vendorCode if missing
-VendorSchema.pre('save', async function (next) {
+VendorSchema.pre('save', function (next) {
   if (!this.vendorCode) {
-    const count = await mongoose.model('Vendor').countDocuments();
-    this.vendorCode = `VND-${String(count + 1).padStart(3, '0')}`;
+    this.vendorCode = `VND-${randomUUID().slice(0, 12).toUpperCase()}`;
   }
-  this.outstandingBalance = (this.totalBilled || 0) - (this.totalPaid || 0);
+  this.outstandingBalance = Math.round(((this.totalBilled || 0) - (this.totalPaid || 0)) * 100) / 100;
   next();
 });
 

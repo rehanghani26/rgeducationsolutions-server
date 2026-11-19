@@ -98,6 +98,9 @@ const BudgetAllocationSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    budgetOwner: { type: String, trim: true, default: '' },
+    approvalReference: { type: String, trim: true, default: '' },
+    approvedDate: Date,
     status: {
       type: String,
       enum: ['draft', 'active', 'revised', 'closed'],

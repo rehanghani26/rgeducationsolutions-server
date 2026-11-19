@@ -43,6 +43,7 @@ const AcademicSessionSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    budgetVersion: { type: Number, default: 0, select: false },
   },
   { timestamps: true }
 );

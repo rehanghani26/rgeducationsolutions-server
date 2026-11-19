@@ -1,367 +1,171 @@
-// 2. External packages
-import mongoose from 'mongoose';
-
-// 3. Configuration
-import { checkFallback } from '../config/db.js';
-
-// 4. Models
-import BudgetAllocation from '../models/BudgetAllocation.js';
-import AcademicSession from '../models/AcademicSession.js';
-
-// 6. Services
-import { FallbackDb } from '../services/dbFallback.js';
-
-// 7. Utilities
-import { isValidObjectId } from '../utils/commonUtil.js';
+import { readProcurement, writeProcurement } from '../services/procurementStore.js';
+import { actor } from '../services/purchaseService.js';
 import {
-  sendSuccess,
-  sendCreated,
-  sendBadRequest,
-  sendNotFound,
-  sendError
-} from '../utils/responseUtil.js';
+  BUDGET_BUCKETS,
+  cleanText,
+  dateValue,
+  numeric,
+  procurementError,
+  recordId,
+  roundMoney,
+  sendProcurementError,
+  sessionBudget,
+} from '../utils/procurementValues.js';
+import { sendCreated, sendSuccess } from '../utils/responseUtil.js';
 
-/**
- * Retrieves all session budget allocations.
- *
- * @param {import('express').Request} req - Express request object.
- * @param {import('express').Response} res - Express response object.
- * @returns {Promise<void>}
- */
-export const getBudgets = async (req, res) => {
+const budgetFields = ['salaryBudget', 'schoolRequirementsBudget', 'operationalBufferBudget'];
+const spentFields = ['salarySpent', 'schoolRequirementsSpent', 'operationalBufferSpent'];
+const budgetLabels = {
+  salaryBudget: 'Staff salary allocation',
+  schoolRequirementsBudget: 'School requirements allocation',
+  operationalBufferBudget: 'Operational buffer allocation',
+  totalBudget: 'Approved total',
+};
+const sumFields = (record, fields) => roundMoney(fields.reduce((sum, field) => sum + Number(record[field] || 0), 0));
+
+function budgetView(budget) {
+  if (!budget) return null;
+  const totalSpent = sumFields(budget, spentFields);
+  return {
+    ...budget,
+    unallocated: roundMoney(Number(budget.totalBudget || 0) - sumFields(budget, budgetFields)),
+    totalSpent,
+    remaining: roundMoney(Number(budget.totalBudget || 0) - totalSpent),
+    salaryRemaining: roundMoney(Number(budget.salaryBudget || 0) - Number(budget.salarySpent || 0)),
+    schoolRequirementsRemaining: roundMoney(Number(budget.schoolRequirementsBudget || 0) - Number(budget.schoolRequirementsSpent || 0)),
+    operationalBufferRemaining: roundMoney(Number(budget.operationalBufferBudget || 0) - Number(budget.operationalBufferSpent || 0)),
+  };
+}
+
+function revision(req, category, before, after, reason) {
+  const user = actor(req);
+  return {
+    revisedBy: user.id,
+    revisedByName: user.name,
+    category,
+    previousAmount: before,
+    newAmount: after,
+    deltaAmount: roundMoney(after - before),
+    reason,
+    revisedAt: new Date().toISOString(),
+  };
+}
+
+async function findBudget(store, id) {
+  const direct = await store.get('budgetAllocations', id);
+  if (direct) return direct;
+  const session = await store.get('academicSessions', id);
+  if (session) return sessionBudget(store, session);
+  return store.one('budgetAllocations', { sessionName: id });
+}
+
+export async function getBudgets(req, res) {
   try {
-    if (checkFallback()) {
-      const budgets = FallbackDb.find('budgetAllocations') || [];
-      return sendSuccess(res, undefined, { budgets }, 200, { budgets });
-    }
-    const budgets = await BudgetAllocation.find()
-      .populate('sessionId', 'sessionName startDate endDate isCurrent')
-      .sort({ createdAt: -1 });
+    const store = readProcurement(req);
+    const budgets = (await store.find('budgetAllocations'))
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .map(budgetView);
     return sendSuccess(res, undefined, { budgets }, 200, { budgets });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendProcurementError(res, error);
   }
-};
+}
 
-/**
- * Retrieves budget allocation for a specific academic session with live remainder calculations.
- *
- * @param {import('express').Request} req - Express request object.
- * @param {import('express').Response} res - Express response object.
- * @returns {Promise<void>}
- */
-export const getBudgetBySession = async (req, res) => {
+export async function getBudgetBySession(req, res) {
   try {
-    const { sessionId } = req.params;
-
-    if (checkFallback()) {
-      const budgets = FallbackDb.find('budgetAllocations') || [];
-      const budget = budgets.find((b) => String(b.sessionId) === String(sessionId));
-
-      if (!budget) {
-        // Find session to get name
-        const sessions = FallbackDb.find('academicSessions') || [];
-        const sess = sessions.find((s) => String(s._id) === String(sessionId));
-        const sessionName = sess ? sess.sessionName : '';
-        return sendSuccess(res, 'No budget allocated yet for this session', {
-          budget: null,
-          sessionName,
-        }, 200, { budget: null, sessionName });
-      }
-
-      const salaryRemaining = Math.max(0, (budget.salaryBudget || 0) - (budget.salarySpent || 0));
-      const reqRemaining = Math.max(0, (budget.schoolRequirementsBudget || 0) - (budget.schoolRequirementsSpent || 0));
-      const bufferRemaining = Math.max(0, (budget.operationalBufferBudget || 0) - (budget.operationalBufferSpent || 0));
-
-      const payload = {
-        budget: {
-          ...budget,
-          salaryRemaining,
-          schoolRequirementsRemaining: reqRemaining,
-          operationalBufferRemaining: bufferRemaining,
-          totalSpent: (budget.salarySpent || 0) + (budget.schoolRequirementsSpent || 0) + (budget.operationalBufferSpent || 0),
-          totalRemaining: Math.max(0, (budget.totalBudget || 0) - ((budget.salarySpent || 0) + (budget.schoolRequirementsSpent || 0) + (budget.operationalBufferSpent || 0))),
-        },
-      };
-
-      return sendSuccess(res, undefined, payload, 200, payload);
-    }
-
-    const budget = (sessionId && isValidObjectId(sessionId))
-      ? await BudgetAllocation.findOne({ sessionId })
-      : null;
-
-    if (!budget) {
-      const session = (sessionId && isValidObjectId(sessionId))
-        ? await AcademicSession.findById(sessionId)
-        : null;
-      const sessionName = session ? session.sessionName : '';
-      return sendSuccess(res, 'No budget allocated yet for this session', {
-        budget: null,
-        sessionName,
-      }, 200, { budget: null, sessionName });
-    }
-
-    const salaryRemaining = Math.max(0, budget.salaryBudget - budget.salarySpent);
-    const reqRemaining = Math.max(0, budget.schoolRequirementsBudget - budget.schoolRequirementsSpent);
-    const bufferRemaining = Math.max(0, budget.operationalBufferBudget - budget.operationalBufferSpent);
-    const totalSpent = budget.salarySpent + budget.schoolRequirementsSpent + budget.operationalBufferSpent;
-    const totalRemaining = Math.max(0, budget.totalBudget - totalSpent);
-
-    const payload = {
-      budget: {
-        ...budget.toObject(),
-        salaryRemaining,
-        schoolRequirementsRemaining: reqRemaining,
-        operationalBufferRemaining: bufferRemaining,
-        totalSpent,
-        totalRemaining,
-      },
-    };
-
-    return sendSuccess(res, undefined, payload, 200, payload);
+    const store = readProcurement(req);
+    const id = req.params.sessionId;
+    const session = await store.get('academicSessions', id) || await store.one('academicSessions', { sessionName: id });
+    const budget = budgetView(session ? await sessionBudget(store, session) : await findBudget(store, id));
+    const details = { budget, sessionName: session?.sessionName || budget?.sessionName || '' };
+    return sendSuccess(res, undefined, details, 200, details);
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendProcurementError(res, error);
   }
-};
+}
 
-/**
- * Creates or updates budget allocation for an academic session.
- *
- * @param {import('express').Request} req - Express request object.
- * @param {import('express').Response} res - Express response object.
- * @returns {Promise<void>}
- */
-export const saveBudget = async (req, res) => {
+export async function saveBudget(req, res) {
   try {
-    const {
-      sessionId,
-      sessionName,
-      salaryBudget = 0,
-      schoolRequirementsBudget = 0,
-      operationalBufferBudget = 0,
-      totalBudget,
-      notes = '',
-    } = req.body;
-
-    if (!sessionId) {
-      return sendBadRequest(res, 'Academic Session ID is required');
-    }
-
-    const numSalary = Number(salaryBudget) || 0;
-    const numReq = Number(schoolRequirementsBudget) || 0;
-    const numBuffer = Number(operationalBufferBudget) || 0;
-    const computedTotal = totalBudget ? Number(totalBudget) : numSalary + numReq + numBuffer;
-
-    if (checkFallback()) {
-      const budgets = FallbackDb.find('budgetAllocations') || [];
-      const existingIndex = budgets.findIndex((b) => String(b.sessionId) === String(sessionId));
-
-      if (existingIndex > -1) {
-        budgets[existingIndex] = {
-          ...budgets[existingIndex],
-          sessionName: sessionName || budgets[existingIndex].sessionName,
-          salaryBudget: numSalary,
-          schoolRequirementsBudget: numReq,
-          operationalBufferBudget: numBuffer,
-          totalBudget: computedTotal,
-          notes: notes || budgets[existingIndex].notes,
-          updatedAt: new Date().toISOString(),
-        };
-        return sendSuccess(res, 'Budget updated successfully', {
-          budget: budgets[existingIndex]
-        });
-      }
-
-      const newBudget = {
-        _id: `bgt-${Date.now()}`,
-        sessionId,
-        sessionName: sessionName || 'Current Session',
-        salaryBudget: numSalary,
-        salarySpent: 0,
-        schoolRequirementsBudget: numReq,
-        schoolRequirementsSpent: 0,
-        operationalBufferBudget: numBuffer,
-        operationalBufferSpent: 0,
-        totalBudget: computedTotal,
-        notes,
-        status: 'active',
-        revisionLogs: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      budgets.push(newBudget);
-      return sendCreated(res, 'Budget allocated successfully', { budget: newBudget }, { budget: newBudget });
-    }
-
-    let budget = await BudgetAllocation.findOne({ sessionId });
-    if (budget) {
-      budget.salaryBudget = numSalary;
-      budget.schoolRequirementsBudget = numReq;
-      budget.operationalBufferBudget = numBuffer;
-      budget.totalBudget = computedTotal;
-      if (notes) budget.notes = notes;
-      if (sessionName) budget.sessionName = sessionName;
-      await budget.save();
-      return sendSuccess(res, 'Budget updated successfully', { budget }, 200, { budget });
-    }
-
-    // Lookup session name if omitted
-    let finalSessionName = sessionName;
-    if (!finalSessionName) {
-      const sess = await AcademicSession.findById(sessionId);
-      finalSessionName = sess ? sess.sessionName : 'Academic Session';
-    }
-
-    budget = new BudgetAllocation({
-      sessionId,
-      sessionName: finalSessionName,
-      salaryBudget: numSalary,
-      salarySpent: 0,
-      schoolRequirementsBudget: numReq,
-      schoolRequirementsSpent: 0,
-      operationalBufferBudget: numBuffer,
-      operationalBufferSpent: 0,
-      totalBudget: computedTotal,
-      notes,
-      status: 'active',
-      revisionLogs: [],
-    });
-
-    await budget.save();
-    return sendCreated(res, 'Budget allocated successfully', { budget }, { budget });
-  } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
-  }
-};
-
-/**
- * Revises session budget with an audited supplementary increase/adjustment.
- *
- * @param {import('express').Request} req - Express request object.
- * @param {import('express').Response} res - Express response object.
- * @returns {Promise<void>}
- */
-export const reviseBudget = async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    const { category, additionalAmount, reason } = req.body;
-
-    const delta = Number(additionalAmount);
-    if (!delta || delta <= 0) {
-      return sendBadRequest(res, 'A valid positive revision amount is required');
-    }
-    if (!reason || !reason.trim()) {
-      return sendBadRequest(res, 'Justification reason is required for budget revision');
-    }
-
-    const validCategories = ['salary', 'schoolRequirements', 'operationalBuffer', 'total'];
-    if (!validCategories.includes(category)) {
-      return sendBadRequest(res, 'Invalid budget category for revision');
-    }
-
-    const userName = req.user?.name || 'Administrator';
-    const userId = req.user?._id;
-
-    if (checkFallback()) {
-      const budgets = FallbackDb.find('budgetAllocations') || [];
-      const budget = budgets.find((b) => String(b.sessionId) === String(sessionId) || String(b._id) === String(sessionId));
-
-      if (!budget) {
-        return sendNotFound(res, 'Budget allocation not found for this session');
-      }
-
-      let prevAmount = 0;
-      let newAmount = 0;
-
-      if (category === 'salary') {
-        prevAmount = budget.salaryBudget || 0;
-        newAmount = prevAmount + delta;
-        budget.salaryBudget = newAmount;
-        budget.totalBudget = (budget.totalBudget || 0) + delta;
-      } else if (category === 'schoolRequirements') {
-        prevAmount = budget.schoolRequirementsBudget || 0;
-        newAmount = prevAmount + delta;
-        budget.schoolRequirementsBudget = newAmount;
-        budget.totalBudget = (budget.totalBudget || 0) + delta;
-      } else if (category === 'operationalBuffer') {
-        prevAmount = budget.operationalBufferBudget || 0;
-        newAmount = prevAmount + delta;
-        budget.operationalBufferBudget = newAmount;
-        budget.totalBudget = (budget.totalBudget || 0) + delta;
-      } else if (category === 'total') {
-        prevAmount = budget.totalBudget || 0;
-        newAmount = prevAmount + delta;
-        budget.totalBudget = newAmount;
-      }
-
-      budget.status = 'revised';
-      if (!budget.revisionLogs) budget.revisionLogs = [];
-      budget.revisionLogs.unshift({
-        _id: `rev-${Date.now()}`,
-        revisedBy: userId,
-        revisedByName: userName,
-        category,
-        previousAmount: prevAmount,
-        newAmount,
-        deltaAmount: delta,
-        reason: reason.trim(),
-        revisedAt: new Date().toISOString(),
+    const input = req.body || {};
+    if (!input.sessionId) throw procurementError('Select an academic session.');
+    const saved = await writeProcurement(req, ['academicSessions', 'budgetAllocations', 'inventoryPurchases'], async (store) => {
+      const session = await store.get('academicSessions', input.sessionId);
+      if (!session) throw procurementError('Academic session not found.', 404);
+      const sessionId = recordId(session);
+      await store.lockBudget(sessionId);
+      const existing = await sessionBudget(store, session);
+      if (existing?.status === 'closed') throw procurementError('This budget is closed.', 409);
+      const amounts = Object.fromEntries(budgetFields.map((field) => [
+        field, numeric(input[field], budgetLabels[field], { fallback: existing?.[field] || 0 }),
+      ]));
+      const allocated = sumFields(amounts, budgetFields);
+      const totalBudget = numeric(input.totalBudget, 'Approved total', {
+        fallback: Object.hasOwn(input, 'totalBudget') ? allocated : existing?.totalBudget ?? allocated,
       });
+      if (allocated > totalBudget) throw procurementError('The category allocations exceed the approved total.');
 
-      return sendSuccess(res, 'Revised budget committed successfully', { budget }, 200, { budget });
-    }
+      const changes = { sessionId, sessionName: session.sessionName, ...amounts, totalBudget };
+      for (const field of ['notes', 'budgetOwner', 'approvalReference']) {
+        if (Object.hasOwn(input, field)) changes[field] = cleanText(input[field]);
+      }
+      if (Object.hasOwn(input, 'approvedDate')) changes.approvedDate = dateValue(input.approvedDate, 'Approval date');
 
-    const searchOr = [{ sessionName: sessionId }];
-    if (sessionId && isValidObjectId(sessionId)) {
-      searchOr.push({ sessionId });
-      searchOr.push({ _id: sessionId });
-    }
-    const budget = await BudgetAllocation.findOne({ $or: searchOr });
+      if (!existing) {
+        const purchases = await store.find('inventoryPurchases', { sessionId });
+        changes.schoolRequirementsSpent = roundMoney(purchases.reduce((sum, bill) => sum + Number(bill.grandTotal || 0), 0));
+        changes.salarySpent = 0;
+        changes.operationalBufferSpent = 0;
+        changes.status = 'active';
+        changes.revisionLogs = [];
+        return { created: true, budget: await store.create('budgetAllocations', changes) };
+      }
 
-    if (!budget) {
-      return sendNotFound(res, 'Budget allocation not found for this session');
-    }
-
-    let prevAmount = 0;
-    let newAmount = 0;
-
-    if (category === 'salary') {
-      prevAmount = budget.salaryBudget;
-      newAmount = prevAmount + delta;
-      budget.salaryBudget = newAmount;
-      budget.totalBudget += delta;
-    } else if (category === 'schoolRequirements') {
-      prevAmount = budget.schoolRequirementsBudget;
-      newAmount = prevAmount + delta;
-      budget.schoolRequirementsBudget = newAmount;
-      budget.totalBudget += delta;
-    } else if (category === 'operationalBuffer') {
-      prevAmount = budget.operationalBufferBudget;
-      newAmount = prevAmount + delta;
-      budget.operationalBufferBudget = newAmount;
-      budget.totalBudget += delta;
-    } else if (category === 'total') {
-      prevAmount = budget.totalBudget;
-      newAmount = prevAmount + delta;
-      budget.totalBudget = newAmount;
-    }
-
-    budget.status = 'revised';
-    budget.revisionLogs.unshift({
-      revisedBy: userId,
-      revisedByName: userName,
-      category,
-      previousAmount: prevAmount,
-      newAmount,
-      deltaAmount: delta,
-      reason: reason.trim(),
-      revisedAt: new Date(),
+      const logs = Object.entries(BUDGET_BUCKETS).flatMap(([category, field]) => {
+        const before = Number(existing[field] || 0);
+        const after = changes[field];
+        return before === after ? [] : [revision(req, category, before, after, cleanText(input.revisionReason) || 'Allocation updated')];
+      });
+      if (logs.length) {
+        changes.status = 'revised';
+        changes.revisionLogs = [...logs, ...(existing.revisionLogs || [])];
+      }
+      return { created: false, budget: await store.update('budgetAllocations', recordId(existing), changes) };
     });
 
-    await budget.save();
-    return sendSuccess(res, 'Revised budget committed successfully', { budget }, 200, { budget });
+    const budget = budgetView(saved.budget);
+    if (saved.created) return sendCreated(res, 'Budget allocated.', { budget }, { budget });
+    return sendSuccess(res, 'Budget saved.', { budget }, 200, { budget });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendProcurementError(res, error);
   }
-};
+}
+
+export async function reviseBudget(req, res) {
+  try {
+    const { category, additionalAmount, reason } = req.body || {};
+    if (!Object.hasOwn(BUDGET_BUCKETS, category)) throw procurementError('Select a valid budget category.');
+    const delta = numeric(additionalAmount, 'Increase amount', { min: 0.01 });
+    const justification = cleanText(reason);
+    if (!delta || !justification) throw procurementError('Enter an increase and a reason for the revision.');
+
+    const budget = budgetView(await writeProcurement(req, ['academicSessions', 'budgetAllocations'], async (store) => {
+      const existing = await findBudget(store, req.params.sessionId);
+      if (!existing) throw procurementError('Budget allocation not found.', 404);
+      if (existing.status === 'closed') throw procurementError('This budget is closed.', 409);
+      const field = BUDGET_BUCKETS[category];
+      const before = Number(existing[field] || 0);
+      const after = roundMoney(before + delta);
+      const totalBudget = roundMoney(Number(existing.totalBudget || 0) + delta);
+      if (totalBudget > 1e12) throw procurementError('The approved total is too large.');
+      return store.update('budgetAllocations', recordId(existing), {
+        [field]: after,
+        totalBudget,
+        status: 'revised',
+        revisionLogs: [revision(req, category, before, after, justification), ...(existing.revisionLogs || [])],
+      });
+    }));
+    return sendSuccess(res, 'Budget revised.', { budget }, 200, { budget });
+  } catch (error) {
+    return sendProcurementError(res, error);
+  }
+}

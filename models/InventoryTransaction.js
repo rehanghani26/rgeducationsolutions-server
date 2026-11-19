@@ -17,6 +17,7 @@ const InventoryTransactionSchema = new mongoose.Schema(
       type: String,
       enum: [
         'STOCK_IN_PURCHASE',
+        'STOCK_OPENING',
         'STOCK_OUT_CLASS',
         'STOCK_OUT_STUDENT',
         'STOCK_OUT_TEACHER',

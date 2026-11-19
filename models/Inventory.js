@@ -76,6 +76,9 @@ const InventorySchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    brand: { type: String, trim: true, default: '' },
+    barcode: { type: String, trim: true, default: '' },
+    storageBin: { type: String, trim: true, default: '' },
     items: [InventoryItemLineSchema],
     itemCount: {
       type: Number,
@@ -134,6 +137,7 @@ const InventorySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    unitCostVerified: { type: Boolean, default: false },
     gstRate: {
       type: Number,
       default: 0,
@@ -211,6 +215,7 @@ InventorySchema.pre('save', function (next) {
     this.price = this.unitCost;
   }
 
+  if (this.status === 'discontinued') return next();
   if (this.quantity <= 0) {
     this.status = 'out-of-stock';
   } else if (this.quantity <= this.minStockLevel) {

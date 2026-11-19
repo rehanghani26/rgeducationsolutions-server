@@ -17,6 +17,11 @@ import {
   sendError
 } from '../utils/responseUtil.js';
 
+const sessionSchool = (value) => String(value || 'IQRA_P01001').toUpperCase();
+const schoolSessions = (req) => FallbackDb.find('academicSessions').filter(
+  (session) => sessionSchool(session.schoolId) === sessionSchool(req.schoolId || req.user?.schoolId)
+);
+
 /**
  * Retrieves all institutional academic sessions.
  *
@@ -27,7 +32,8 @@ import {
 export const getAcademicSessions = async (req, res) => {
   try {
     if (checkFallback()) {
-      const sessions = FallbackDb.find('academicSessions') || [];
+      const sessions = schoolSessions(req)
+        .sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
       return sendSuccess(res, undefined, { sessions }, 200, { sessions });
     }
     const sessions = await AcademicSession.find().sort({ startDate: -1 });
@@ -54,11 +60,16 @@ export const createAcademicSession = async (req, res) => {
 
     if (checkFallback()) {
       const all = FallbackDb.find('academicSessions') || [];
+      const schoolId = sessionSchool(req.schoolId || req.user?.schoolId);
       if (isCurrent) {
-        all.forEach((s) => (s.isCurrent = false));
+        for (const session of schoolSessions(req)) {
+          session.isCurrent = false;
+          if (session.status === 'active') session.status = 'completed';
+        }
       }
       const newSession = {
         _id: `sess-${Date.now()}`,
+        schoolId,
         sessionName: sessionName.trim(),
         startDate,
         endDate,
@@ -73,7 +84,7 @@ export const createAcademicSession = async (req, res) => {
     }
 
     if (isCurrent) {
-      await AcademicSession.updateMany({}, { isCurrent: false });
+      await AcademicSession.updateMany({ isCurrent: true }, { isCurrent: false, status: 'completed' });
     }
 
     const session = await AcademicSession.create({
@@ -106,20 +117,20 @@ export const activateAcademicSession = async (req, res) => {
 
     if (checkFallback()) {
       const all = FallbackDb.find('academicSessions') || [];
-      all.forEach((s) => {
-        if (String(s._id) === String(id) || String(s.id) === String(id)) {
-          s.isCurrent = true;
-          s.status = 'active';
-          activated = s;
-        } else {
-          s.isCurrent = false;
-        }
-      });
+      const eligible = schoolSessions(req);
+      activated = eligible.find((session) => session._id === id || session.id === id);
+      if (!activated) return sendNotFound(res, 'Session not found');
+      for (const session of eligible) {
+        session.isCurrent = session === activated;
+        if (session !== activated && session.status === 'active') session.status = 'completed';
+      }
+      activated.status = 'active';
       FallbackDb.updateAll('academicSessions', all);
       return sendSuccess(res, 'Academic session activated', { session: activated }, 200, { session: activated });
     }
 
-    await AcademicSession.updateMany({}, { isCurrent: false });
+    if (!await AcademicSession.exists({ _id: id })) return sendNotFound(res, 'Session not found');
+    await AcademicSession.updateMany({ _id: { $ne: id }, isCurrent: true }, { isCurrent: false, status: 'completed' });
     activated = await AcademicSession.findByIdAndUpdate(
       id,
       { isCurrent: true, status: 'active' },
@@ -274,7 +285,7 @@ export const deleteAcademicSession = async (req, res) => {
 export const getActiveSession = async (req, res) => {
   try {
     if (checkFallback()) {
-      const all = FallbackDb.find('academicSessions') || [];
+      const all = schoolSessions(req);
       const active = all.find((s) => s.isCurrent) || all[0] || null;
       return sendSuccess(res, undefined, { session: active }, 200, { session: active });
     }
