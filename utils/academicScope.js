@@ -38,7 +38,7 @@ export function academicError(message, statusCode = 400) {
 export function academicGrade(scope, value) {
   const grade = gradeByValue(scope.grades, value) ||
     gradeByValue(scope.grades, String(value || '').split(/_sec-|\s+[–—-]\s+/)[0]);
-  if (!grade) throw academicError('Choose a class in the selected academic session.');
+  if (!grade) throw academicError('Choose a class from the school class range.');
   return grade;
 }
 

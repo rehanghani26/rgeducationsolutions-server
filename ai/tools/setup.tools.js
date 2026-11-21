@@ -1,4 +1,5 @@
 import { saveSessionConfiguration } from '../../services/academicSessionService.js';
+import { saveMasterPeriod } from '../../services/masterPeriodService.js';
 import Setting from "../../models/Setting.js";
 import AcademicSession from "../../models/AcademicSession.js";
 import MasterPeriod from "../../models/MasterPeriod.js";
@@ -176,7 +177,7 @@ export const setupToolDefinitions = [
   {
     name: "runSetupStep2_AcademicSession",
     description:
-      "Execute Setup Step 2: Create and activate an academic session (the foundation calendar anchor). If a session already exists, you can activate it instead.",
+      "Create the first current academic session after the school class range has been configured.",
     parameters: {
       type: "object",
       properties: {
@@ -513,11 +514,9 @@ export const setupToolExecutors = {
     if (!['super-admin', 'superadmin', 'school-admin', 'admin', 'principal'].includes(role)) {
       return { success: false, error: 'School administrator permission is required.' };
     }
-    if (!args.startClassId || !args.endClassId) {
-      return { success: false, error: 'Choose the starting and ending classes in Academic Session & Curriculum Setup.' };
-    }
-    const session = await saveSessionConfiguration({ ...context, body: args }, { confirm: true });
-    return { success: true, message: 'Academic session and curriculum saved.', session };
+    const { sessionName, startDate, endDate, notes } = args;
+    const { session } = await saveSessionConfiguration({ ...context, body: { sessionName, startDate, endDate, notes, isCurrent: true } });
+    return { success: true, message: 'Academic session saved.', session };
   },
 
   async runSetupStep3_MasterPeriods(args, context) {
@@ -548,74 +547,49 @@ export const setupToolExecutors = {
       "Saturday",
     ];
 
-    // Build period slots from start time + durations
-    const buildPeriodSlots = () => {
-      const [sh, sm] = startTime.split(":").map(Number);
-      const slots = [];
-      let cursor = sh * 60 + sm;
+    const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+    if (!clock.test(startTime) || !clock.test(endTime) || endTime <= startTime ||
+        ![periodsPerDay, periodDuration, breakDuration, lunchDuration].every(Number.isInteger) ||
+        periodsPerDay < 1 || periodDuration < 1 || breakDuration < 0 || lunchDuration < 0) {
+      return { success: false, error: 'Enter valid school hours and whole-minute period and break lengths.' };
+    }
+    const minutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+    const time = (mins) => String(Math.floor(mins / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0');
+    const fixedBreaks = periodsPerDay > 1 ? lunchDuration + (periodsPerDay - 2) * breakDuration : 0;
+    const available = minutes(endTime) - minutes(startTime) - fixedBreaks;
+    if (available < periodsPerDay) {
+      return { success: false, error: 'Extend the school hours or shorten breaks to fit the requested periods.' };
+    }
 
-      for (let i = 1; i <= periodsPerDay; i++) {
-        const sH = String(Math.floor(cursor / 60)).padStart(2, "0");
-        const sM = String(cursor % 60).padStart(2, "0");
-        cursor += periodDuration;
-        const eH = String(Math.floor(cursor / 60)).padStart(2, "0");
-        const eM = String(cursor % 60).padStart(2, "0");
-
-        slots.push({
-          periodNumber: i,
-          label: `Period ${i}`,
-          startTime: `${sH}:${sM}`,
-          endTime: `${eH}:${eM}`,
-          type: "teaching",
-          duration: periodDuration,
-        });
-
-        // Add breaks
-        if (i === Math.floor(periodsPerDay / 2)) {
-          // Lunch break in the middle
-          cursor += lunchDuration;
-        } else if (i < periodsPerDay) {
-          // Short break between periods
-          cursor += breakDuration;
-        }
-      }
-      return slots;
-    };
-
-    const periodSlots = buildPeriodSlots();
+    const teaching = Math.min(available, periodDuration * periodsPerDay);
+    const length = Math.floor(teaching / periodsPerDay);
+    let cursor = minutes(startTime);
+    const periodSlots = [];
+    function addSlot(type, customLabel, durationMinutes) {
+      if (!durationMinutes) return;
+      const start = time(cursor);
+      cursor += durationMinutes;
+      periodSlots.push({ type, customLabel, startTime: start, endTime: time(cursor), durationMinutes });
+    }
+    for (let index = 1; index <= periodsPerDay; index += 1) {
+      addSlot('class', 'Period ' + index, length + Number(index <= teaching % periodsPerDay));
+      if (index === Math.floor(periodsPerDay / 2)) addSlot('lunch', 'Lunch', lunchDuration);
+      else if (index < periodsPerDay) addSlot('recess', 'Recess', breakDuration);
+    }
 
     const payload = {
-      scheduleName: scheduleName.trim(),
-      startTime,
-      endTime,
-      periodDuration,
-      breakDuration,
-      lunchDuration,
-      periodsPerDay,
-      workingDays: defaultWorkingDays,
+      name: scheduleName.trim(),
+      scheduleType: 'regular',
+      schoolStartTime: startTime,
+      schoolEndTime: endTime,
+      days: defaultWorkingDays.map((day) => day.toLowerCase()),
       periods: periodSlots,
       isActive: true,
       isDefault: true,
     };
 
     try {
-      if (checkFallback()) {
-        const existing = FallbackDb.find("masterPeriods") || [];
-        if (existing.length > 0) {
-          FallbackDb.update(
-            "masterPeriods",
-            existing[0].id || existing[0]._id,
-            payload
-          );
-        } else {
-          FallbackDb.create("masterPeriods", payload);
-        }
-      } else {
-        await MasterPeriod.findOneAndUpdate({ isDefault: true }, payload, {
-          upsert: true,
-          new: true,
-        });
-      }
+      await saveMasterPeriod({ ...context, body: payload });
 
       // Mark wizard flag
       if (checkFallback()) {
@@ -647,10 +621,10 @@ export const setupToolExecutors = {
           startTime,
           endTime,
           periodsPerDay,
-          periodDuration,
+          periodDuration: length,
           workingDays: defaultWorkingDays,
         },
-        samplePeriods: periodSlots.slice(0, 3),
+        samplePeriods: periodSlots.filter((period) => period.type === 'class').slice(0, 3),
         nextStep:
           "Step 4 — Academic & Grading Rules. I need: minimum passing percentage (e.g. 33, 40, 50).",
       };

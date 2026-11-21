@@ -5,8 +5,11 @@ import Book from '../models/Book.js';
 import BudgetAllocation from '../models/BudgetAllocation.js';
 import Class from '../models/Class.js';
 import ClassRoom from '../models/ClassRoom.js';
+import ClassTimetable from '../models/ClassTimetable.js';
 import Fee from '../models/Fee.js';
 import Library from '../models/Library.js';
+import MasterPeriod from '../models/MasterPeriod.js';
+import SchoolCurriculum from '../models/SchoolCurriculum.js';
 import SessionRollover from '../models/SessionRollover.js';
 import Setting from '../models/Setting.js';
 import Student from '../models/Student.js';
@@ -31,8 +34,11 @@ const models = {
   vendors: Vendor,
   classes: Class,
   classRooms: ClassRoom,
+  classTimetables: ClassTimetable,
   fees: Fee,
   library: Library,
+  masterPeriods: MasterPeriod,
+  schoolCurricula: SchoolCurriculum,
   sessionRollovers: SessionRollover,
   students: Student,
   studentSessionHistories: StudentSessionHistory,
@@ -190,9 +196,10 @@ export function readProcurement(req) {
   return operations(req, checkFallback() ? FallbackDb : null);
 }
 
-export async function writeProcurement(req, collections, work, { atomic = true } = {}) {
+export async function writeProcurement(req, collections, work, { atomic = true, allowFallback = true } = {}) {
   try {
     if (checkFallback()) {
+      if (!allowFallback) throw procurementError('Connect to MongoDB to complete this operation.', 503);
       return await FallbackDb.transaction(collections, (draft) => {
         const draftDb = {
           find: (collection) => draft[collection] || [],
@@ -218,7 +225,7 @@ export async function writeProcurement(req, collections, work, { atomic = true }
       });
     }
     if (!atomic) return await work(operations(req, null));
-    return await mongoose.connection.transaction((session) => work(operations(req, null, session)));
+    return await mongoose.connection.transaction((session) => work(operations(req, null, session), session));
   } catch (error) {
     if (error.code === 20 && /transaction/i.test(error.message)) {
       throw procurementError('This operation requires MongoDB transactions. Connect to a replica set to continue.', 503);

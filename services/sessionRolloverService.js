@@ -3,20 +3,31 @@ import { checkFallback } from '../config/db.js';
 import AcademicSession from '../models/AcademicSession.js';
 import School from '../models/School.js';
 import { gradeByValue } from '../utils/academicClass.js';
-import { addSessionDays, defaultSessionEnd, schoolClock, sessionDay } from '../utils/academicDates.js';
+import { addSessionDays, schoolClock, sessionDay } from '../utils/academicDates.js';
 import { procurementError, recordId as rawRecordId } from '../utils/procurementValues.js';
 import tenantContext from '../utils/tenantContext.js';
 import {
-  isConfiguredSession, readRolloverSettings, sessionCollections, sessionGrades, validateSessionWindow,
+  curriculumCollections, curriculumGrades, ensureSchoolUpcomingSession, ensureUpcomingSession,
+  readRolloverSettings, scheduledSuccessor, schoolCurriculum,
 } from './academicSessionService.js';
 import { readProcurement, writeProcurement } from './procurementStore.js';
 import { FallbackDb } from './dbFallback.js';
 
-const rolloverCollections = [...sessionCollections, 'sessionRollovers', 'studentSessionHistories', 'students', 'classRooms'];
+const rolloverCollections = [...curriculumCollections, 'sessionRollovers', 'studentSessionHistories', 'students', 'classRooms'];
 const recordId = (record) => String(rawRecordId(record) || '');
 const placementsKey = (classId, sectionId) => String(classId) + '/' + String(sectionId);
 const same = (a, b) => String(a ?? '') === String(b ?? '');
 const mongoUnavailable = () => checkFallback() && Boolean(process.env.MONGODB_URI?.trim());
+const scheduleMessage = 'Edit the upcoming session dates so it starts the day after the current session ends.';
+
+const datesAreConsecutive = (source, target) =>
+  sessionDay(target.startDate) === addSessionDays(sessionDay(source.endDate), 1);
+
+function rolloverDue(target, settings, now) {
+  const clock = schoolClock(now, settings.timeZone);
+  const start = sessionDay(target.startDate);
+  return clock.day > start || (clock.day === start && clock.time >= settings.cutoffTime);
+}
 
 async function updateExecution(store, sourceSessionId, fields) {
   const run = await store.one('sessionRollovers', { sourceSessionId });
@@ -27,56 +38,22 @@ async function updateExecution(store, sourceSessionId, fields) {
 }
 
 async function findSuccessor(store, source) {
-  const sourceId = recordId(source);
-  const nextDay = addSessionDays(sessionDay(source.endDate), 1);
-  const sessions = await store.find('academicSessions');
-  const linked = sessions.find((candidate) => same(candidate.previousSessionId, sourceId));
-  if (linked) {
-    if (linked.status !== 'upcoming' || sessionDay(linked.startDate) < nextDay) {
-      throw procurementError('The linked successor must be upcoming and start after the closing session.', 409);
-    }
-    return linked;
-  }
-  return sessions.find((candidate) =>
-    candidate.status === 'upcoming' && !candidate.previousSessionId && sessionDay(candidate.startDate) === nextDay
-  );
+  return scheduledSuccessor(await store.find('academicSessions'), source);
 }
 
 async function prepareSuccessor(store, source, settings, now) {
-  const sourceId = recordId(source);
-  const existing = await findSuccessor(store, source);
+  const target = await ensureUpcomingSession(store, source);
+  if (!datesAreConsecutive(source, target)) throw procurementError(scheduleMessage, 409);
+  if (target.previousSessionId) return target;
   const clock = schoolClock(now, settings.timeZone);
   const finalDay = sessionDay(source.endDate);
   const due = clock.day > finalDay || (clock.day === finalDay && clock.time >= settings.prepareTime);
-  if (existing) {
-    if (!due || same(existing.previousSessionId, sourceId)) return existing;
-    return store.update('academicSessions', recordId(existing), { previousSessionId: sourceId });
-  }
-  if (!due) return null;
-  const startDate = addSessionDays(finalDay, 1);
-  const endDate = defaultSessionEnd(startDate);
-  const startYear = Number(startDate.slice(0, 4));
-  const fields = {
-    sessionName: String(startYear) + '-' + (startYear + 1),
-    startDate,
-    endDate,
-    status: 'upcoming',
-    isCurrent: false,
-    previousSessionId: sourceId,
-    startClassId: source.startClassId,
-    endClassId: source.endClassId,
-    classIds: source.classIds,
-    setupConfirmedAt: now,
-    createdBy: 'Academic rollover',
-  };
-  await validateSessionWindow(store, fields);
-  return store.create('academicSessions', fields);
+  return due ? store.update('academicSessions', recordId(target), { previousSessionId: recordId(source) }) : target;
 }
 
-async function buildPlan(store, source, target) {
-  const catalog = await sessionGrades(store, source);
-  const targetCatalog = await sessionGrades(store, target);
-  if (catalog.length !== source.classIds.length || targetCatalog.length !== target.classIds.length) {
+async function buildPlan(store, source, target, curriculum) {
+  const catalog = await curriculumGrades(store, curriculum);
+  if (!curriculum || catalog.length !== curriculum.classIds.length) {
     throw procurementError('A saved curriculum class is missing from the Class Master.', 409);
   }
   const enrollments = await store.find('studentSessionHistories', { sessionId: recordId(source), status: 'active' });
@@ -88,17 +65,21 @@ async function buildPlan(store, source, target) {
   const issues = students.filter((student) => !sourceIds.has(recordId(student)) &&
     (same(student.sessionId, recordId(source)) || (!student.sessionId && student.academicYear === source.sessionName))
   ).map((student) => ({ studentId: recordId(student), name: student.name, reason: 'Missing enrollment in the closing session' }));
+  for (const enrollment of targetEnrollments) {
+    const studentId = String(enrollment.studentId);
+    if (enrollment.status === 'active' && !sourceIds.has(studentId) && !gradeByValue(catalog, enrollment.classId)) {
+      issues.push({ studentId, name: enrollment.studentName, reason: 'The incoming enrollment is outside the school class range' });
+    }
+  }
   const entries = [];
   for (const enrollment of enrollments) {
     const student = activeById.get(String(enrollment.studentId));
     if (!student) continue;
     const grade = gradeByValue(catalog, enrollment.classId);
-    const next = grade && catalog[catalog.indexOf(grade) + 1];
-    const destination = next && gradeByValue(targetCatalog, next.id);
+    const destination = grade && catalog[catalog.indexOf(grade) + 1];
     const existing = existingById.get(recordId(student));
     let reason = '';
     if (!grade || !enrollment.sectionId) reason = 'Closing class or section is missing from the configured curriculum';
-    else if (next && !destination) reason = 'The destination class is outside the incoming curriculum';
     else if (existing && (!destination || !same(existing.classId, destination.id) ||
       !same(existing.sectionId, enrollment.sectionId) || existing.status !== 'active')) {
       reason = 'An incompatible enrollment already exists in the incoming session';
@@ -118,7 +99,7 @@ async function buildPlan(store, source, target) {
     action: destination ? 'promoted' : 'passout',
   }));
   const version = createHash('sha256').update(JSON.stringify([
-    recordId(target), sessionDay(source.endDate), sessionDay(target.startDate), rows,
+    recordId(target), sessionDay(source.endDate), sessionDay(target.startDate), sessionDay(target.endDate), rows,
   ])).digest('hex');
   return { entries, rows, issues, version, enrollments, targetEnrollments };
 }
@@ -215,7 +196,8 @@ async function commitPlan(store, source, target, plan, now, actor) {
   const sourceRooms = await store.find('classRooms', { sessionId: sourceSessionId, status: 'active' });
   for (const room of sourceRooms) await store.update('classRooms', recordId(room), { status: 'completed' });
   await store.update('academicSessions', sourceSessionId, { status: 'completed', isCurrent: false });
-  await store.update('academicSessions', targetSessionId, { status: 'active', isCurrent: true });
+  const current = await store.update('academicSessions', targetSessionId, { status: 'active', isCurrent: true });
+  await ensureUpcomingSession(store, current);
   return updateExecution(store, sourceSessionId, {
     targetSessionId, status: 'completed', completedAt: now, promotedCount, passoutCount, error: '',
   });
@@ -229,17 +211,16 @@ export async function previewRollover(req, sourceId, now = new Date()) {
   if (!source.isCurrent) return { source, execution, rows: [], issues: [] };
   const settings = await readRolloverSettings(req);
   const target = await findSuccessor(store, source);
-  if (!target || !isConfiguredSession(source) || !isConfiguredSession(target)) {
+  const curriculum = await schoolCurriculum(store);
+  if (!target || !curriculum || !datesAreConsecutive(source, target)) {
     return {
       source, target, execution, settings, rows: [], issues: [],
-      message: 'An upcoming session with a confirmed curriculum is required for preview.',
+      message: !curriculum ? 'Set the school class range to preview the upgrade.'
+        : target ? scheduleMessage : 'The next academic session is scheduled automatically. Refresh the sessions to view it.',
     };
   }
-  const { rows, issues, version } = await buildPlan(store, source, target);
-  const clock = schoolClock(now, settings.timeZone);
-  const due = clock.day > sessionDay(target.startDate) ||
-    (clock.day === sessionDay(target.startDate) && clock.time >= settings.cutoffTime);
-  return { source, target, execution, settings, rows, issues, version, due };
+  const { rows, issues, version } = await buildPlan(store, source, target, curriculum);
+  return { source, target, execution, settings, rows, issues, version, due: rolloverDue(target, settings, now) };
 }
 
 export async function runRollover(req, sourceId, { planVersion, scheduled = false, now = new Date() } = {}) {
@@ -254,26 +235,20 @@ export async function runRollover(req, sourceId, { planVersion, scheduled = fals
       if (!source) throw procurementError('Academic session not found.', 404);
       const execution = await store.one('sessionRollovers', { sourceSessionId: sourceId });
       if (execution?.status === 'completed') return { execution };
-      if (!source.isCurrent || !isConfiguredSession(source)) {
-        throw procurementError('Choose an active session with a confirmed curriculum.', 409);
-      }
+      if (!source.isCurrent) throw procurementError('Choose the current academic session.', 409);
+      const curriculum = await schoolCurriculum(store, { persist: true });
+      if (!curriculum) throw procurementError('Set the school class range before running the upgrade.', 409);
       const target = await prepareSuccessor(store, source, settings, now);
-      if (!target || !isConfiguredSession(target)) return { target, execution };
       if (!scheduled) {
-        const preview = await buildPlan(store, source, target);
+        const preview = await buildPlan(store, source, target, curriculum);
         if (preview.issues.length) throw procurementError('Resolve the enrollment issues in the preview first.', 409);
-        if (planVersion !== preview.version) throw procurementError('The enrollments changed. Refresh and confirm the preview.', 409);
+        if (planVersion !== preview.version) throw procurementError('Session dates or enrollments changed. Refresh and confirm the preview.', 409);
         await updateExecution(store, sourceId, {
           targetSessionId: recordId(target), approvedAt: now,
           approvedBy: req.user?.name || 'Administrator', planVersion, status: 'pending', error: '',
         });
       }
-      const clock = schoolClock(now, settings.timeZone);
-      return {
-        target,
-        due: clock.day > sessionDay(target.startDate) ||
-          (clock.day === sessionDay(target.startDate) && clock.time >= settings.cutoffTime),
-      };
+      return { target, due: rolloverDue(target, settings, now) };
     });
     if (!prepared?.due) return prepared?.execution || {
       status: 'pending', targetSessionId: recordId(prepared?.target),
@@ -287,13 +262,14 @@ export async function runRollover(req, sourceId, { planVersion, scheduled = fals
       const source = await store.get('academicSessions', sourceId);
       if (!source?.isCurrent) throw procurementError('The closing session is no longer active.', 409);
       const target = await findSuccessor(store, source);
-      if (!target || !same(recordId(target), recordId(prepared.target))) {
+      if (!target || !datesAreConsecutive(source, target) || !same(recordId(target), recordId(prepared.target))) {
         throw procurementError('The session configuration changed. Refresh the rollover preview.', 409);
       }
+      if (!rolloverDue(target, settings, now)) return execution || { status: 'pending', targetSessionId: recordId(target) };
       eligibleToAttempt = true;
-      const plan = await buildPlan(store, source, target);
+      const plan = await buildPlan(store, source, target, await schoolCurriculum(store));
       if (plan.issues.length || (!settings.autoPromote && plan.version !== execution.planVersion)) {
-        throw procurementError('Enrollment issues or changes require a new rollover preview.', 409);
+        throw procurementError('Session dates or enrollments changed. Review the rollover preview before upgrading.', 409);
       }
       await updateExecution(store, sourceId, { startedAt: now, targetSessionId: recordId(target) });
       return commitPlan(store, source, target, plan, now, execution?.approvedBy || 'Academic rollover');
@@ -317,18 +293,20 @@ export function startAcademicRolloverJob() {
     try {
       const fallback = checkFallback();
       const active = fallback
-        ? FallbackDb.find('academicSessions').filter((session) => session.isCurrent && isConfiguredSession(session))
-        : await AcademicSession.find({ isCurrent: true, setupConfirmedAt: { $exists: true } }).lean();
+        ? FallbackDb.find('academicSessions').filter((session) => session.isCurrent)
+        : await AcademicSession.find({ isCurrent: true }).lean();
       const now = new Date();
       for (const session of active) {
         const schoolId = session.schoolId || 'IQRA_P01001';
         await tenantContext.run({ schoolId }, async () => {
           if (!fallback && !await School.exists({ schoolId, status: { $in: ['active', 'ACTIVE'] } })) return;
           const req = { schoolId };
+          await ensureSchoolUpcomingSession(req);
           const settings = await readRolloverSettings(req);
           const clock = schoolClock(now, settings.timeZone);
           const end = sessionDay(session.endDate);
           if (clock.day < end || (clock.day === end && clock.time < settings.prepareTime)) return;
+          if (!await schoolCurriculum(readProcurement(req))) return;
           await runRollover(req, recordId(session), { scheduled: true, now });
         }).catch((error) => console.error('Academic rollover for school ' + schoolId + ':', error.message));
       }

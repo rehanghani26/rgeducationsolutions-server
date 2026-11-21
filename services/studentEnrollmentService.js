@@ -4,6 +4,7 @@ import { academicError, academicGrade, getAcademicScope } from '../utils/academi
 import { recordId as rawRecordId } from '../utils/procurementValues.js';
 import { getSchool, readProcurement, writeProcurement } from './procurementStore.js';
 import { FallbackDb } from './dbFallback.js';
+import { schoolClassOptions } from './academicSessionService.js';
 
 const idOf = (record) => String(rawRecordId(record) || '');
 const enrollmentCollections = ['academicSessions', 'students', 'studentSessionHistories', 'classRooms'];
@@ -24,7 +25,9 @@ async function confirmActiveSession(store, scope) {
   await store.lockAcademicSettings();
   const session = await store.get('academicSessions', scope.sessionId);
   if (!session?.isCurrent) throw academicError('The active academic session changed. Reload the page.', 409);
-  if ((session.classIds || []).map(String).join(',') !== scope.grades.map((grade) => grade.id).join(',')) {
+  const { classRange, classes } = await schoolClassOptions(store);
+  if (!classRange || classes.length !== classRange.classIds.length
+    || classes.map((grade) => grade.id).join(',') !== scope.grades.map((grade) => grade.id).join(',')) {
     throw academicError('The curriculum changed. Reload the page.', 409);
   }
 }

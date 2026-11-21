@@ -1,6 +1,12 @@
 const standardNames = ['Nursery', 'LKG', 'UKG', ...Array.from({ length: 12 }, (_, index) => 'Class ' + (index + 1))];
 const standardCodes = ['cls-nur', 'cls-lkg', 'cls-ukg', ...Array.from({ length: 12 }, (_, index) => 'cls-' + (index + 1))];
 
+export const sectionNamesById = {
+  'sec-a': 'Section A', 'sec-b': 'Section B', 'sec-c': 'Section C',
+  'sec-d': 'Section D', 'sec-e': 'Section E', 'sec-f': 'Section F',
+  'sec-g': 'Section G',
+};
+
 export const standardGrades = standardNames.map((name, index) => ({
   name, code: standardCodes[index], sortOrder: index * 10,
 }));

@@ -2,13 +2,14 @@
 import { checkFallback } from "../config/db.js";
 
 // 4. Models
-import AcademicSession from "../models/AcademicSession.js";
 import MasterPeriod from "../models/MasterPeriod.js";
+import School from "../models/School.js";
 import Setting from "../models/Setting.js";
 
 // 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
-import { academicSetupStatus } from "./sessionController.js";
+import { schoolCurriculum } from "../services/academicSessionService.js";
+import { getSchool, readProcurement } from "../services/procurementStore.js";
 
 // 7. Utilities
 import {
@@ -55,27 +56,15 @@ function evaluateSchoolProfile(settings) {
  * Step 2 — Academic Session
  * Requires: at least one session that isCurrent === true
  */
-async function evaluateAcademicSession() {
-  try {
-    if (checkFallback()) {
-      const sessions = FallbackDb.find("academicSessions") || [];
-      const active = sessions.find((s) => s.isCurrent);
-      return {
-        complete: Boolean(active),
-        sessionCount: sessions.length,
-        activeSession: active?.sessionName || null,
-      };
-    }
-    const count = await AcademicSession.countDocuments();
-    const active = await AcademicSession.findOne({ isCurrent: true }).lean();
-    return {
-      complete: Boolean(active),
-      sessionCount: count,
-      activeSession: active?.sessionName || null,
-    };
-  } catch {
-    return { complete: false, sessionCount: 0, activeSession: null };
-  }
+async function evaluateAcademicSession(req) {
+  const store = readProcurement(req);
+  const sessions = await store.find("academicSessions");
+  const active = sessions.find((session) => session.isCurrent);
+  return {
+    complete: Boolean(active && await schoolCurriculum(store)),
+    sessionCount: sessions.length,
+    activeSession: active?.sessionName || null,
+  };
 }
 
 /**
@@ -122,10 +111,11 @@ function evaluateFinancePolicies(settings) {
 
 // ─── Main Status Builder ──────────────────────────────────────────────────────
 
-async function buildSetupStatus(settings) {
-  const [sessionEval, periodsEval] = await Promise.all([
-    evaluateAcademicSession(),
+async function buildSetupStatus(req, settings) {
+  const [sessionEval, periodsEval, school] = await Promise.all([
+    evaluateAcademicSession(req),
     evaluateMasterPeriods(),
+    checkFallback() ? null : School.exists({ schoolId: getSchool(req) }),
   ]);
 
   const profileEval = evaluateSchoolProfile(settings);
@@ -139,7 +129,7 @@ async function buildSetupStatus(settings) {
       title: "School Profile & Identity",
       description: "Set your school name, logo, contact info, and address.",
       route: "/settings/profile",
-      complete: profileEval.complete,
+      complete: Boolean(school) || profileEval.complete,
       detail: profileEval,
       icon: "school",
       priority: "critical",
@@ -240,19 +230,9 @@ export const getSetupStatus = async (req, res) => {
       }
     }
 
-    const [status, academicSetup] = await Promise.all([
-      buildSetupStatus(settings),
-      academicSetupStatus(req),
-    ]);
-    const profile = status.steps.find((step) => step.key === "schoolProfile");
+    const status = await buildSetupStatus(req, settings);
     const academic = status.steps.find((step) => step.key === "academicSession");
-    if (academicSetup.onboarded && profile) profile.complete = true;
-    if (academic) academic.complete = !academicSetup.pending;
-    status.completedCount = status.steps.filter((step) => step.complete).length;
-    status.percentComplete = Math.round(100 * status.completedCount / status.totalSteps);
-    status.nextStep = status.steps.find((step) => !step.complete) || null;
-    status.isFullyComplete = !status.nextStep;
-    return sendSuccess(res, undefined, null, 200, { ...status, status, academicSetupPending: academicSetup.pending });
+    return sendSuccess(res, undefined, null, 200, { ...status, status, academicSetupPending: !academic.complete });
   } catch (err) {
     console.error("[Setup] getSetupStatus error:", err);
     return sendError(res, "Failed to compute setup status.", 500);
@@ -295,7 +275,7 @@ export const completeStep = async (req, res) => {
       settings = await Setting.findOne().lean();
     }
 
-    const status = await buildSetupStatus(settings);
+    const status = await buildSetupStatus(req, settings);
     return sendSuccess(
       res,
       `Step "${step}" marked complete.`,

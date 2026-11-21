@@ -1,22 +1,24 @@
 import { checkFallback } from '../config/db.js';
 import Setting from '../models/Setting.js';
 import { classKey, gradeByValue, standardGrade, standardGrades } from '../utils/academicClass.js';
-import { defaultSessionEnd, sessionDay, validSessionDay } from '../utils/academicDates.js';
-import { procurementError, recordId as rawRecordId } from '../utils/procurementValues.js';
+import { addSessionDays, defaultSessionEnd, sessionDay, shiftedSessionEnd, validSessionDay } from '../utils/academicDates.js';
+import { procurementError, recordId as rawRecordId, recordIds } from '../utils/procurementValues.js';
 import { FallbackDb } from './dbFallback.js';
 import { getSchool, readProcurement, writeProcurement } from './procurementStore.js';
 
 const recordId = (record) => String(rawRecordId(record) || '');
 
-export const sessionCollections = ['academicSessions', 'classes'];
+export const curriculumCollections = ['academicSessions', 'classes', 'schoolCurricula'];
 export const defaultRolloverSettings = {
   timeZone: 'Asia/Kolkata', prepareTime: '00:00', cutoffTime: '00:00', autoPromote: false,
 };
 
-export const isConfiguredSession = (session) => Boolean(session?.setupConfirmedAt && session.classIds?.length);
-
 export async function orderedGrades(store) {
-  const master = (await store.find('classes'))
+  return classMasterGrades(await store.find('classes'));
+}
+
+export function classMasterGrades(classes = []) {
+  const master = classes
     .filter((grade) => !['passout', 'pass out', 'graduated', 'cls-passout'].some((value) =>
       classKey(grade.name) === value || classKey(grade.code) === value
     ))
@@ -38,10 +40,10 @@ export async function orderedGrades(store) {
   );
 }
 
-export async function sessionGrades(store, session) {
-  if (!session?.classIds?.length) return [];
+export async function curriculumGrades(store, curriculum) {
+  if (!curriculum?.classIds?.length) return [];
   const master = await orderedGrades(store);
-  return session.classIds.map((id) => gradeByValue(master, id)).filter(Boolean);
+  return curriculum.classIds.map((id) => gradeByValue(master, id)).filter(Boolean);
 }
 
 export async function saveClassOrder(req) {
@@ -63,6 +65,34 @@ export async function saveClassOrder(req) {
 
 export async function activeAcademicSession(store) {
   return store.one('academicSessions', { isCurrent: true });
+}
+
+function curriculumRange(classIds) {
+  return { startClassId: classIds[0], endClassId: classIds.at(-1), classIds };
+}
+
+export async function schoolCurriculum(store, { persist = false } = {}) {
+  const saved = await store.one('schoolCurricula', {});
+  if (saved) return curriculumRange(saved.classIds);
+
+  // An existing current curriculum is already in use. Without one, inherit
+  // the previous configuration only when every confirmed range agrees.
+  const configured = (await store.find('academicSessions'))
+    .filter((session) => session.setupConfirmedAt && session.classIds?.length);
+  const current = configured.find((session) => session.isCurrent);
+  const first = configured[0];
+  const shared = first && configured.every((session) => String(session.classIds) === String(first.classIds));
+  const source = current || (shared ? first : null);
+  if (!source) return null;
+  const range = curriculumRange(source.classIds.map(String));
+  if (persist) await store.create('schoolCurricula', range);
+  return range;
+}
+
+export async function schoolClassOptions(store) {
+  const classRange = await schoolCurriculum(store);
+  const classes = await curriculumGrades(store, classRange);
+  return { classRange, classes };
 }
 
 async function materializeRange(store, startClassId, endClassId) {
@@ -89,11 +119,77 @@ async function materializeRange(store, startClassId, endClassId) {
       classIds.push(grade.id);
     }
   }
-  return { startClassId: classIds[0], endClassId: classIds.at(-1), classIds };
+  return curriculumRange(classIds);
 }
 
-export async function validateSessionWindow(store, fields, id) {
-  const sessions = await store.find('academicSessions');
+export async function initializeSchoolCurriculum(store, { startClassId, endClassId } = {}) {
+  const current = await schoolCurriculum(store, { persist: true });
+  if (current) {
+    const classes = await curriculumGrades(store, current);
+    const first = gradeByValue(classes, startClassId);
+    const last = gradeByValue(classes, endClassId);
+    if (first && last && first === classes[0] && last === classes.at(-1) && classes.length === current.classIds.length) {
+      return current;
+    }
+    throw procurementError('The school class range is already configured.', 409);
+  }
+
+  const range = await materializeRange(store, startClassId, endClassId);
+  const openSessions = (await store.find('academicSessions')).filter((session) => session.isCurrent || session.status === 'upcoming');
+  if (openSessions.length) {
+    const openIds = new Set(openSessions.map(recordId));
+    const grades = await curriculumGrades(store, range);
+    const enrollments = await store.find('studentSessionHistories', { status: 'active' });
+    if (enrollments.some((row) => openIds.has(String(row.sessionId)) && !gradeByValue(grades, row.classId || row.className))) {
+      throw procurementError('The range excludes an active enrollment. Review student placements first.', 409);
+    }
+  }
+  await store.create('schoolCurricula', range);
+  return range;
+}
+
+export function saveSchoolCurriculum(req, { allowFallback = !process.env.MONGODB_URI?.trim() } = {}) {
+  return writeProcurement(req, [...curriculumCollections, 'studentSessionHistories'], async (store) => {
+    await store.lockAcademicSettings();
+    await initializeSchoolCurriculum(store, req.body || {});
+    return schoolClassOptions(store);
+  }, { allowFallback });
+}
+
+export function sessionsInDateOrder(sessions) {
+  return [...sessions].sort((left, right) =>
+    sessionDay(left.startDate).localeCompare(sessionDay(right.startDate))
+    || recordId(left).localeCompare(recordId(right))
+  );
+}
+
+export function isUpcomingSession(session) {
+  return !session.isCurrent && (!session.status || session.status === 'upcoming');
+}
+
+export function scheduledSuccessor(sessions, source) {
+  const ordered = sessionsInDateOrder(sessions);
+  const sourceId = recordId(source);
+  const index = ordered.findIndex((candidate) => recordId(candidate) === sourceId);
+  const next = ordered[index + 1] || null;
+  const linked = ordered.find((candidate) => String(candidate.previousSessionId || '') === sourceId);
+  if (index < 0 || (linked && recordId(linked) !== recordId(next)) ||
+      (next && (!isUpcomingSession(next) || (next.previousSessionId && String(next.previousSessionId) !== sourceId)))) {
+    throw procurementError('Review the order of the upcoming academic sessions.', 409);
+  }
+  return next;
+}
+
+export function defaultSessionName(startDate, sessions) {
+  const year = Number(startDate.slice(0, 4));
+  const base = year + '-' + (year + 1);
+  const names = new Set(sessions.map((session) => classKey(session.sessionName)));
+  let name = base;
+  for (let number = 2; names.has(classKey(name)); number += 1) name = base + ' (' + number + ')';
+  return name;
+}
+
+export function validateSessionWindow(sessions, fields, id) {
   for (const session of sessions) {
     if (recordId(session) === id) continue;
     if (classKey(session.sessionName) === classKey(fields.sessionName)) {
@@ -105,67 +201,141 @@ export async function validateSessionWindow(store, fields, id) {
   }
 }
 
-export async function saveSessionConfiguration(req, { id, confirm = false } = {}) {
-  return writeProcurement(req, [...sessionCollections, 'budgetAllocations', 'studentSessionHistories'], async (store) => {
+// Use the school's academic settings lock when creating a successor.
+export async function ensureUpcomingSession(store, source, sessions) {
+  const schedule = sessions ?? await store.find('academicSessions');
+  const next = scheduledSuccessor(schedule, source);
+  if (next) return next;
+  const startDate = addSessionDays(sessionDay(source.endDate), 1);
+  const endDate = defaultSessionEnd(startDate);
+  if (!validSessionDay(startDate) || !validSessionDay(endDate)) {
+    throw procurementError('Set a valid end date for the current session to schedule its successor.', 409);
+  }
+  const fields = {
+    sessionName: defaultSessionName(startDate, schedule),
+    startDate,
+    endDate,
+    status: 'upcoming',
+    isCurrent: false,
+    previousSessionId: recordId(source),
+    createdBy: 'Academic schedule',
+  };
+  validateSessionWindow(schedule, fields);
+  return store.create('academicSessions', fields);
+}
+
+export async function ensureSchoolUpcomingSession(req) {
+  const sessions = await readProcurement(req).find('academicSessions');
+  const source = sessions.find((session) => session.isCurrent);
+  if (!source) return null;
+  const next = scheduledSuccessor(sessions, source);
+  if (next) return next;
+
+  return writeProcurement(req, ['academicSessions'], async (store) => {
     await store.lockAcademicSettings();
-    const active = await activeAcademicSession(store);
-    const current = id ? await store.get('academicSessions', id) : confirm ? active : null;
-    if (id && !current) throw procurementError('Academic session not found.', 404);
-    if (current?.status === 'completed' && !current.isCurrent) {
-      throw procurementError('Completed academic sessions are read-only.', 409);
+    const schedule = await store.find('academicSessions');
+    const current = schedule.find((session) => session.isCurrent);
+    return current ? ensureUpcomingSession(store, current, schedule) : null;
+  }, { allowFallback: !process.env.MONGODB_URI?.trim() });
+}
+
+export function followingSessionDates(following, priorEndDate) {
+  const changes = [];
+  let endDate = priorEndDate;
+  for (const session of following) {
+    const startDate = addSessionDays(endDate, 1);
+    const existingStart = sessionDay(session.startDate);
+    endDate = sessionDay(session.endDate);
+    if (existingStart === startDate) continue;
+    if (!isUpcomingSession(session)) {
+      throw procurementError('The date change would move ' + session.sessionName + ', which is already active or completed.', 409);
     }
-    if (confirm && active && recordId(active) !== recordId(current)) {
-      throw procurementError('The active session changed. Reload the setup form.', 409);
+    endDate = shiftedSessionEnd(session, startDate);
+    if (!validSessionDay(startDate) || !validSessionDay(endDate) || endDate <= startDate) {
+      throw procurementError('Check the dates for ' + session.sessionName + ' before changing the schedule.', 409);
     }
-    const body = req.body || {};
-    const sessionName = String(body.sessionName ?? current?.sessionName ?? '').trim();
-    const startDate = sessionDay(body.startDate ?? current?.startDate);
-    if (!sessionName || !validSessionDay(startDate)) throw procurementError('Enter a session name and valid start date.');
-    const endDate = sessionDay(body.endDate ?? current?.endDate ?? defaultSessionEnd(startDate));
-    if (!validSessionDay(endDate) || endDate <= startDate) {
-      throw procurementError('The end date must be after the start date.');
-    }
-    const currentId = recordId(current);
-    const makeActive = confirm || Boolean(current?.isCurrent) || body.isCurrent === true;
-    if (makeActive && active && recordId(active) !== currentId) {
-      throw procurementError('Use the whole-school upgrade to switch from the active session.', 409);
-    }
-    const fields = {
-      sessionName, startDate, endDate,
-      notes: String(body.notes ?? body.description ?? current?.notes ?? '').trim(),
-      isCurrent: makeActive,
-      status: makeActive ? 'active' : 'upcoming',
-    };
-    await validateSessionWindow(store, fields, currentId);
-    const changesRange = (body.startClassId && String(body.startClassId) !== String(current?.startClassId))
-      || (body.endClassId && String(body.endClassId) !== String(current?.endClassId));
-    if (confirm || changesRange) {
-      Object.assign(fields, await materializeRange(
-        store, body.startClassId || current?.startClassId, body.endClassId || current?.endClassId
-      ), { setupConfirmedAt: current?.setupConfirmedAt || new Date() });
-      if (current?.isCurrent) {
-        const enrollments = await store.find('studentSessionHistories', { sessionId: currentId, status: 'active' });
-        const grades = await sessionGrades(store, fields);
-        if (enrollments.some((enrollment) => !gradeByValue(grades, enrollment.classId || enrollment.className))) {
-          throw procurementError('The range excludes an active enrollment. Review student placements first.', 409);
-        }
-      }
-    } else if (!current && active?.classIds?.length) {
-      Object.assign(fields, {
-        classIds: active.classIds,
-        startClassId: active.startClassId,
-        endClassId: active.endClassId,
-        setupConfirmedAt: active.setupConfirmedAt,
-      });
-    }
-    if (!current) return store.create('academicSessions', { ...fields, createdBy: req.user?.name });
-    const updated = await store.update('academicSessions', currentId, fields);
-    if (current.sessionName !== sessionName) {
-      const budgets = await store.find('budgetAllocations', { sessionId: currentId });
-      for (const budget of budgets) await store.update('budgetAllocations', recordId(budget), { sessionName });
-    }
-    return updated;
-  });
+    changes.push({ id: recordId(session), startDate, endDate });
+  }
+  return changes;
+}
+
+export async function updateFollowingSessionDates(store, changes) {
+  const shiftedSessions = [];
+  for (const { id, startDate, endDate } of changes) {
+    shiftedSessions.push(await store.update('academicSessions', id, { startDate, endDate }));
+  }
+  return shiftedSessions;
+}
+
+export function saveSessionConfiguration(req, { id, allowFallback } = {}) {
+  return writeProcurement(req, [...curriculumCollections, 'budgetAllocations'], (store) =>
+    configureSession(store, req.body || {}, { id, createdBy: req.user?.name }), { allowFallback });
+}
+
+export async function configureSession(store, body, { id, createdBy, initial = false } = {}) {
+  if (['startClassId', 'endClassId', 'classIds', 'classRange', 'setupConfirmedAt'].some((key) => Object.hasOwn(body, key))) {
+    throw procurementError('Set the class range once in School Classes.', 409);
+  }
+  await store.lockAcademicSettings();
+  const sessions = sessionsInDateOrder(await store.find('academicSessions'));
+  const active = sessions.find((session) => session.isCurrent);
+  const index = id ? sessions.findIndex((session) => recordIds(session).includes(String(id))) : sessions.length;
+  const current = sessions[index];
+  if (id && !current) throw procurementError('Academic session not found.', 404);
+  const legacyPrevious = current && !current.status && active
+    && sessionDay(current.endDate) < sessionDay(active.startDate);
+  if (current && !current.isCurrent && (!isUpcomingSession(current) || legacyPrevious)) {
+    throw procurementError('Completed academic sessions are read-only.', 409);
+  }
+  if (initial && sessions.length) {
+    throw procurementError('This school already has academic sessions.', 409);
+  }
+  const previous = index > 0 ? sessions[index - 1] : null;
+  const submittedStart = sessionDay(body.startDate);
+  const originalStart = sessionDay(current?.startDate);
+  const startDate = previous ? addSessionDays(sessionDay(previous.endDate), 1) : submittedStart || originalStart;
+  if (!validSessionDay(startDate) || (body.startDate != null && !validSessionDay(submittedStart))) {
+    throw procurementError('Enter a valid start date.');
+  }
+  if (previous && submittedStart && submittedStart !== startDate && submittedStart !== originalStart) {
+    throw procurementError('The start date must be ' + startDate + ', the day after ' + previous.sessionName + ' ends. Refresh the session dates and try again.', 409);
+  }
+  const sessionName = String(body.sessionName ?? current?.sessionName ?? defaultSessionName(startDate, sessions)).trim();
+  if (!sessionName) throw procurementError('Enter a session name.');
+  const endDate = body.endDate == null
+    ? (current ? shiftedSessionEnd(current, startDate) : defaultSessionEnd(startDate))
+    : sessionDay(body.endDate);
+  if (!validSessionDay(endDate) || endDate <= startDate) {
+    throw procurementError('The end date must be after the start date.');
+  }
+  const currentId = recordId(current);
+  const makeActive = initial || Boolean(current?.isCurrent) || body.isCurrent === true;
+  if (makeActive && active && recordId(active) !== currentId) {
+    throw procurementError('Use the whole-school upgrade to switch from the active session.', 409);
+  }
+  const fields = {
+    sessionName, startDate, endDate,
+    notes: String(body.notes ?? body.description ?? current?.notes ?? '').trim(),
+    isCurrent: makeActive,
+    status: makeActive ? 'active' : 'upcoming',
+  };
+  const changes = followingSessionDates(sessions.slice(index + 1), endDate);
+  const proposed = new Map(changes.map((change) => [change.id, change]));
+  validateSessionWindow(sessions.map((session) => ({ ...session, ...proposed.get(recordId(session)) })), fields, currentId);
+  const curriculum = await schoolCurriculum(store, { persist: true });
+  if (!curriculum && (!current || (makeActive && !current.isCurrent))) {
+    throw procurementError('Set the school class range before creating or activating a session.', 409);
+  }
+  const session = current
+    ? await store.update('academicSessions', currentId, fields)
+    : await store.create('academicSessions', { ...fields, createdBy });
+  if (current && current.sessionName !== sessionName) {
+    const budgets = await store.find('budgetAllocations', { sessionId: currentId });
+    for (const budget of budgets) await store.update('budgetAllocations', recordId(budget), { sessionName });
+  }
+  const shiftedSessions = await updateFollowingSessionDates(store, changes);
+  const upcomingSession = makeActive ? await ensureUpcomingSession(store, session) : null;
+  return { session, shiftedSessions, upcomingSession };
 }
 
 export async function readRolloverSettings(req) {

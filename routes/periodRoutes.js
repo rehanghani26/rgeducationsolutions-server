@@ -8,12 +8,14 @@ import { authorize } from "../middleware/rbac.js";
 // 8. Controllers
 import {
   createMasterPeriod,
+  createSectionTimetables,
   deleteClassTimetable,
   deleteMasterPeriod,
   getClassTimetable,
   getMasterPeriodById,
   getMasterPeriods,
   saveClassTimetable,
+  setDefaultMasterSchedule,
   updateMasterPeriod,
 } from "../controllers/masterPeriodController.js";
 
@@ -24,11 +26,13 @@ const adminOnly = authorize("super-admin", "school-admin", "principal");
 // Timetable endpoints (Must be before /:id)
 router.get("/timetable", protect, getClassTimetable);
 router.post("/timetable", protect, adminOnly, saveClassTimetable);
+router.post("/timetable/sections", protect, adminOnly, createSectionTimetables);
 router.delete("/timetable/:id", protect, adminOnly, deleteClassTimetable);
 
 router.get("/", protect, getMasterPeriods);
 router.get("/:id", protect, getMasterPeriodById);
 router.post("/", protect, adminOnly, createMasterPeriod);
+router.patch("/:id/default", protect, adminOnly, setDefaultMasterSchedule);
 router.put("/:id", protect, adminOnly, updateMasterPeriod);
 router.delete("/:id", protect, adminOnly, deleteMasterPeriod);
 

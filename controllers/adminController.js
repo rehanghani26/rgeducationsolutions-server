@@ -1,522 +1,297 @@
-import bcrypt from 'bcryptjs';
 import School from '../models/School.js';
 import CommonProduct from '../models/CommonProduct.js';
 import CommonCategory from '../models/CommonCategory.js';
 import RGESAdmin from '../models/RGESAdmin.js';
 import User from '../models/User.js';
 import Setting from '../models/Setting.js';
-import AcademicSession from '../models/AcademicSession.js';
 import Student from '../models/Student.js';
 import Teacher from '../models/Teacher.js';
 import { generateTokens } from '../middleware/auth.js';
 import { invalidateSchoolsCache } from '../middleware/tenant.js';
 import {
-  sendBadRequest,
-  sendCreated,
-  sendError,
-  sendNotFound,
-  sendSuccess,
-  sendUnauthorized,
-} from '../utils/responseUtil.js';
+  classMasterGrades,
+  configureSession,
+  curriculumCollections,
+  initializeSchoolCurriculum,
+  orderedGrades,
+  saveSchoolCurriculum,
+  saveSessionConfiguration,
+  schoolClassOptions,
+  sessionsInDateOrder,
+} from '../services/academicSessionService.js';
+import { readProcurement, writeProcurement } from '../services/procurementStore.js';
+import { checkFallback } from '../config/db.js';
+import { escapeRegex } from '../utils/commonUtil.js';
+import { procurementError } from '../utils/procurementValues.js';
+import { sendCreated, sendError, sendSuccess, sendUnauthorized } from '../utils/responseUtil.js';
 
-/**
- * Super Admin Login for RGES Admin UI
- *
- * @route POST /api/v1/admin/login
- */
-export const adminLogin = async (req, res) => {
+const trim = (value) => typeof value === 'string' ? value.trim() : '';
+const cleanSlug = (value) => trim(value).toLowerCase();
+const validSlug = (value) => /^[a-z0-9_]{3,30}$/.test(value);
+
+function adminError(error, message) {
+  if (error.statusCode) return { message: error.message, status: error.statusCode };
+  if (error.code === 11000) {
+    if (error.keyPattern?.sessionName && !error.keyPattern.schoolId) {
+      return {
+        message: 'A legacy database index requires session names to be unique across schools. Contact RGES support to update the index.',
+        status: 409,
+      };
+    }
+    return { message: 'A school or provisioning record with these values already exists.', status: 409 };
+  }
+  if (error.name === 'ValidationError') return { message: error.message, status: 400 };
+  console.error(message, error.name, error.code);
+  return { message, status: 500 };
+}
+
+const handle = (message, action) => async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return sendBadRequest(res, 'Please provide email and password');
-    }
-
-    const cleanEmail = email.toLowerCase().trim();
-
-    // Check RGESAdmin collection
-    let admin = await RGESAdmin.findOne({ email: cleanEmail });
-
-    // Seed initial super-admin if collection is empty
-    if (!admin && cleanEmail === 'admin@rges.com') {
-      admin = new RGESAdmin({
-        name: 'RGES Super Admin',
-        email: 'admin@rges.com',
-        password: password || 'Admin@1234',
-        role: 'super-admin',
-        permissions: ['all'],
-      });
-      await admin.save();
-    }
-
-    if (!admin) {
-      return sendUnauthorized(res, 'Invalid credentials');
-    }
-
-    const isMatch = await admin.comparePassword(password);
-    if (!isMatch) {
-      return sendUnauthorized(res, 'Invalid credentials');
-    }
-
-    if (!admin.isActive) {
-      return sendUnauthorized(res, 'Admin account is deactivated');
-    }
-
-    admin.lastLogin = new Date();
-    await admin.save();
-
-    const { accessToken, refreshToken } = generateTokens({
-      id: admin._id,
-      _id: admin._id,
-      role: admin.role,
-      permissions: admin.permissions || ['all'],
-      name: admin.name,
-    });
-
-    return sendSuccess(
-      res,
-      'Super Admin login successful',
-      {
-        accessToken,
-        user: {
-          id: admin._id,
-          name: admin.name,
-          email: admin.email,
-          role: admin.role,
-        },
-      },
-      200,
-      {
-        accessToken,
-        user: {
-          id: admin._id,
-          name: admin.name,
-          email: admin.email,
-          role: admin.role,
-        },
-      }
-    );
-  } catch (err) {
-    return sendError(res, 'Super Admin login failed', 500, err);
+    return await action(req, res);
+  } catch (error) {
+    const failure = adminError(error, message);
+    return sendError(res, failure.message, failure.status);
   }
 };
 
-/**
- * Validates collection name against strict multi-tenant slug rules
- */
-const isValidCollectionName = (name) => {
-  return typeof name === 'string' && /^[a-z0-9_]{3,30}$/.test(name);
-};
+function requireDatabase() {
+  if (checkFallback()) throw procurementError('Connect to MongoDB to manage schools.', 503);
+}
 
-/**
- * Onboard a new school with a centrally assigned schoolId.
- * Provisions school record, primary admin, settings, and academic session in shared collections.
- *
- * @route POST /api/v1/admin/schools
- */
-export const onboardSchool = async (req, res) => {
-  try {
-    const {
+export const adminLogin = handle('Unable to sign in to RGES Admin.', async (req, res) => {
+  requireDatabase();
+  const email = trim(req.body?.email).toLowerCase();
+  const password = req.body?.password;
+  if (!email || typeof password !== 'string' || !password) {
+    throw procurementError('Enter your email and password.');
+  }
+
+  let admin = await RGESAdmin.findOne({ email });
+  const bootstrapEmail = trim(process.env.RGES_ADMIN_EMAIL).toLowerCase();
+  const bootstrapPassword = process.env.RGES_ADMIN_PASSWORD;
+  if (!admin && bootstrapEmail && bootstrapPassword && email === bootstrapEmail && password === bootstrapPassword) {
+    try {
+      admin = await RGESAdmin.create({ email, password, name: 'RGES Super Admin', permissions: ['all'] });
+    } catch (error) {
+      if (error.code !== 11000) throw error;
+      admin = await RGESAdmin.findOne({ email });
+    }
+  }
+  if (!admin?.isActive || !(await admin.comparePassword(password))) {
+    return sendUnauthorized(res, 'Invalid credentials.');
+  }
+
+  admin.lastLogin = new Date();
+  await admin.save();
+  const { accessToken } = generateTokens(admin);
+  const user = { id: admin._id, name: admin.name, email: admin.email, role: admin.role };
+  return sendSuccess(res, 'Signed in.', { accessToken, user }, 200, { accessToken, user });
+});
+
+export const getOnboardingClasses = (_req, res) =>
+  sendSuccess(res, undefined, { classes: classMasterGrades() });
+
+export const onboardSchool = handle('Failed to onboard school.', async (req, res) => {
+  requireDatabase();
+  const body = req.body || {};
+  const schoolName = trim(body.schoolName);
+  const contactEmail = trim(body.contactEmail).toLowerCase();
+  const collectionName = cleanSlug(body.collectionName);
+  const schoolCode = trim(body.schoolCode).toUpperCase()
+    || (collectionName || schoolName).replace(/[^a-z0-9]/gi, '').slice(0, 5).toUpperCase();
+  const requestedId = trim(body.schoolId).toUpperCase();
+  const adminEmail = trim(body.adminEmail).toLowerCase() || contactEmail;
+  const adminName = trim(body.adminName) || schoolName + ' Admin';
+  const password = body.adminPassword;
+  const academicSession = body.academicSession;
+  const address = body.address || {};
+
+  if (!schoolName || !contactEmail) throw procurementError('Enter the school name and official email.');
+  if (!validSlug(collectionName)) throw procurementError('Use 3–30 lowercase letters, digits, or underscores for the school slug.');
+  if (!schoolCode) throw procurementError('Enter a school code.');
+  if (typeof password !== 'string' || !password.trim()) throw procurementError('Enter a temporary school administrator password.');
+  if (!academicSession?.startDate) throw procurementError('Enter the initial academic session start date.');
+
+  let schoolId = requestedId || schoolCode + '001';
+  if (!requestedId) {
+    const registeredCode = await School.exists({ schoolCode });
+    if (registeredCode) throw procurementError('The school code is already registered.', 409);
+    let suffix = 1;
+    while (await School.exists({ $or: [{ _id: schoolId }, { schoolId }] })) {
+      suffix += 1;
+      schoolId = schoolCode + String(suffix).padStart(3, '0');
+    }
+  }
+  const tenant = { schoolId, user: req.user };
+  const result = await writeProcurement(tenant, curriculumCollections, async (store, transaction) => {
+    const conflict = await School.findOne({
+      $or: [{ _id: schoolId }, { schoolId }, { schoolCode }, { collectionName }],
+    }).session(transaction).lean();
+    if (conflict) throw procurementError('The school slug, code, or ID is already registered.', 409);
+
+    const school = new School({
+      _id: schoolId,
+      schoolId,
       schoolName,
       collectionName,
       schoolCode,
       contactEmail,
-      schoolPhone,
-      alternatePhone,
+      schoolPhone: body.schoolPhone,
+      alternatePhone: body.alternatePhone,
       address,
-      affiliationNumber,
-      board,
-      subscriptionPlan,
-      adminName,
-      adminEmail,
-      adminPassword,
-    } = req.body;
-
-    if (!schoolName || !schoolName.trim()) {
-      return sendBadRequest(res, 'School name is required');
-    }
-
-    if (!contactEmail || !contactEmail.trim()) {
-      return sendBadRequest(res, 'Official contact email is required');
-    }
-
-    // Generate unique schoolCode and schoolId
-    const baseCode = (schoolCode || (collectionName || schoolName).replace(/[^a-zA-Z0-9]/g, '').slice(0, 5))
-      .trim()
-      .toUpperCase();
-
-    let resolvedCode = baseCode;
-    let resolvedSchoolId = (req.body.schoolId || '').trim().toUpperCase();
-
-    if (!resolvedSchoolId) {
-      let seq = 1;
-      resolvedSchoolId = `${resolvedCode}${String(seq).padStart(3, '0')}`;
-      while (
-        await School.findOne({
-          $or: [{ _id: resolvedSchoolId }, { schoolId: resolvedSchoolId }],
-        })
-      ) {
-        seq++;
-        resolvedSchoolId = `${resolvedCode}${String(seq).padStart(3, '0')}`;
-      }
-    }
-
-    // Check if schoolId or schoolCode is already in use
-    const existingSchool = await School.findOne({
-      $or: [
-        { _id: resolvedSchoolId },
-        { schoolId: resolvedSchoolId },
-        { schoolCode: resolvedCode },
-      ],
+      affiliationNumber: body.affiliationNumber,
+      board: body.board,
+      subscriptionPlan: body.subscriptionPlan,
+      primaryAdmin: { name: adminName, email: adminEmail, phone: body.schoolPhone },
     });
-
-    if (existingSchool) {
-      return sendBadRequest(
-        res,
-        `School with code '${resolvedCode}' or ID '${resolvedSchoolId}' is already registered.`
-      );
-    }
-
-    const cleanCollection = collectionName
-      ? String(collectionName).toLowerCase().trim()
-      : resolvedCode.toLowerCase();
-
-    // 1. Create School record in master registry
-    const school = new School({
-      _id: resolvedSchoolId,
-      schoolId: resolvedSchoolId,
-      schoolName: schoolName.trim(),
-      collectionName: cleanCollection,
-      schoolCode: resolvedCode,
-      contactEmail: contactEmail.toLowerCase().trim(),
-      schoolPhone: schoolPhone || '',
-      alternatePhone: alternatePhone || '',
-      address: address || {},
-      affiliationNumber: affiliationNumber || '',
-      board: board || 'CBSE',
-      subscriptionPlan: subscriptionPlan || 'standard',
-      status: 'active',
-      primaryAdmin: {
-        name: adminName || `${schoolName.trim()} Admin`,
-        email: (adminEmail || contactEmail).toLowerCase().trim(),
-        phone: schoolPhone || '',
-      },
+    const admin = new User({
+      schoolId,
+      name: adminName,
+      email: adminEmail,
+      username: adminEmail,
+      password,
+      role: 'super-admin',
+      permissions: ['all'],
+      isActive: true,
+      isEmailVerified: true,
     });
-
-    await school.save();
-
-    // 2. Provision Tenant in Shared Collections (Zero new databases or collections created)
-    try {
-      // 2a. Provision Primary School Admin in shared 'users' collection
-      const defaultPassword = adminPassword || 'Admin@1234';
-      const initialAdmin = new User({
-        schoolId: resolvedSchoolId,
-        name: adminName || `${schoolName.trim()} Admin`,
-        email: (adminEmail || contactEmail).toLowerCase().trim(),
-        username: (adminEmail || contactEmail).toLowerCase().trim(),
-        password: defaultPassword,
-        role: 'super-admin',
-        permissions: ['all'],
-        isActive: true,
-        isEmailVerified: true,
-      });
-      await initialAdmin.save();
-
-      school.primaryAdmin.userId = String(initialAdmin._id);
-      await school.save();
-
-      // 2b. Provision Initial Settings in shared 'settings' collection
-      await Setting.create({
-        schoolId: resolvedSchoolId,
-        schoolName: schoolName.trim(),
-        schoolCode: resolvedCode,
-        contactEmail: contactEmail.toLowerCase().trim(),
-        schoolPhone: schoolPhone || '',
-        addressLine1: address?.addressLine1 || '',
-        city: address?.city || '',
-        state: address?.state || '',
-        country: address?.country || 'India',
-        postalCode: address?.postalCode || '',
-        affiliationNumber: affiliationNumber || '',
-      });
-
-      // 2c. Provision Default Current Academic Session in shared 'academicsessions' collection
-      const currentYear = new Date().getFullYear();
-      await AcademicSession.create({
-        schoolId: resolvedSchoolId,
-        sessionName: `${currentYear}-${currentYear + 1}`,
-        startDate: new Date(Date.UTC(currentYear, 3, 1)), // April 1st
-        endDate: new Date(Date.UTC(currentYear + 1, 2, 31)), // March 31st
-        isCurrent: true,
-        status: 'active',
-        notes: 'Auto-provisioned initial academic session',
-      });
-    } catch (provisionErr) {
-      console.error(
-        `⚠️ Warning during initial provisioning for ${resolvedSchoolId}:`,
-        provisionErr.message
-      );
-    }
-
-    // Refresh memory cache
-    invalidateSchoolsCache();
-
-    return sendCreated(res, 'School onboarded and provisioned successfully!', {
-      school,
-      tenantDetails: {
-        schoolId: resolvedSchoolId,
-        schoolCode: resolvedCode,
-        adminLogin: (adminEmail || contactEmail).toLowerCase().trim(),
-        sharedCollectionsUsed: ['users', 'settings', 'academicsessions'],
-      },
+    const settings = new Setting({
+      schoolId,
+      schoolName,
+      schoolCode,
+      contactEmail,
+      schoolPhone: body.schoolPhone,
+      affiliationNumber: body.affiliationNumber,
+      addressLine1: address.addressLine1,
+      city: address.city,
+      state: address.state,
+      country: address.country,
+      postalCode: address.postalCode,
     });
-  } catch (err) {
-    return sendError(res, 'Failed to onboard school', 500, err);
+    await settings.save({ session: transaction });
+    const classRange = await initializeSchoolCurriculum(store, body.classRange ?? academicSession);
+    const { sessionName, startDate, endDate, notes } = academicSession;
+    const { session, upcomingSession } = await configureSession(store, { sessionName, startDate, endDate, notes }, { initial: true, createdBy: req.user?.name });
+    await admin.save({ session: transaction });
+    school.primaryAdmin.userId = String(admin._id);
+    await school.save({ session: transaction });
+    return { school, session, upcomingSession, classRange };
+  }, { allowFallback: false });
+
+  invalidateSchoolsCache();
+  return sendCreated(res, 'School onboarded. Current and upcoming sessions are scheduled.', {
+    ...result,
+    tenantDetails: { schoolId, schoolCode, adminLogin: adminEmail },
+  });
+});
+
+export const checkSlugAvailability = handle('Unable to check the school slug.', async (req, res) => {
+  const slug = cleanSlug(req.query.slug);
+  const validFormat = validSlug(slug);
+  const available = validFormat && !(await School.exists({ collectionName: slug }));
+  const message = validFormat
+    ? (available ? 'School slug is available.' : 'School slug is already in use.')
+    : 'Use 3–30 lowercase letters, digits, or underscores.';
+  const data = { slug, validFormat, available, message };
+  return sendSuccess(res, message, data, 200, data);
+});
+
+export const getSchools = handle('Failed to load schools.', async (req, res) => {
+  const status = trim(req.query.status);
+  const search = trim(req.query.search);
+  const filter = {};
+  if (['active', 'suspended', 'provisioning'].includes(status)) {
+    filter.status = { $in: [status, status.toUpperCase()] };
   }
-};
-
-/**
- * Real-time collection name availability check
- *
- * @route GET /api/v1/admin/schools/check-slug?slug=myschool
- */
-export const checkSlugAvailability = async (req, res) => {
-  try {
-    const slug = String(req.query.slug || '')
-      .toLowerCase()
-      .trim();
-
-    if (!isValidCollectionName(slug)) {
-      return sendSuccess(res, undefined, null, 200, {
-        available: false,
-        validFormat: false,
-        message:
-          'Slug must be 3-30 characters with only lowercase letters, numbers, and underscores.',
-      });
-    }
-
-    const count = await School.countDocuments({ collectionName: slug });
-    const available = count === 0;
-
-    return sendSuccess(
-      res,
-      available ? 'Collection name is available!' : 'Collection name is already taken.',
-      {
-        available,
-        validFormat: true,
-        slug,
-        message: available ? 'Collection name is available!' : 'Collection name is already taken.',
-      },
-      200,
-      {
-        available,
-        validFormat: true,
-        slug,
-        message: available ? 'Collection name is available!' : 'Collection name is already taken.',
-      }
-    );
-  } catch (err) {
-    return sendError(res, 'Error checking collection slug', 500, err);
+  if (search) {
+    const match = new RegExp(escapeRegex(search), 'i');
+    filter.$or = ['schoolName', 'collectionName', 'schoolCode', 'contactEmail']
+      .map((key) => ({ [key]: match }));
   }
-};
+  const schools = await School.find(filter).sort({ createdAt: -1 }).lean();
+  const data = { count: schools.length, schools };
+  return sendSuccess(res, undefined, data, 200, data);
+});
 
-/**
- * Retrieve all registered schools
- *
- * @route GET /api/v1/admin/schools
- */
-export const getSchools = async (req, res) => {
-  try {
-    const { search, status } = req.query;
-    const filter = {};
+async function findSchool(id) {
+  requireDatabase();
+  const school = await School.findById(id).lean();
+  if (!school) throw procurementError('School not found.', 404);
+  return school;
+}
 
-    if (status && ['active', 'suspended', 'provisioning'].includes(status)) {
-      filter.status = status;
-    }
+export const getSchoolById = handle('Failed to load school details.', async (req, res) => {
+  const school = await findSchool(req.params.id);
+  const schoolId = school.schoolId || school._id;
+  const store = readProcurement({ schoolId });
+  const [studentsCount, teachersCount, usersCount, allSessions, curriculum] = await Promise.all([
+    Student.countDocuments({ schoolId }),
+    Teacher.countDocuments({ schoolId }),
+    User.countDocuments({ schoolId }),
+    store.find('academicSessions'),
+    schoolClassOptions(store),
+  ]);
+  const classMaster = curriculum.classRange ? [] : await orderedGrades(store);
+  const sessions = sessionsInDateOrder(allSessions);
+  const session = sessions.find((item) => item.isCurrent) || null;
+  const data = { school, stats: { studentsCount, teachersCount, usersCount }, session, sessions, ...curriculum, classMaster };
+  return sendSuccess(res, undefined, data, 200, data);
+});
 
-    if (search && search.trim()) {
-      filter.$or = [
-        { schoolName: { $regex: search.trim(), $options: 'i' } },
-        { collectionName: { $regex: search.trim(), $options: 'i' } },
-        { schoolCode: { $regex: search.trim(), $options: 'i' } },
-        { contactEmail: { $regex: search.trim(), $options: 'i' } },
-      ];
-    }
+export const setSchoolClasses = handle('Failed to save the school class range.', async (req, res) => {
+  const school = await findSchool(req.params.id);
+  const curriculum = await saveSchoolCurriculum({ schoolId: school.schoolId || school._id, body: req.body }, { allowFallback: false });
+  return sendSuccess(res, 'School class range saved.', curriculum);
+});
 
-    const schools = await School.find(filter).sort({ createdAt: -1 }).lean();
+export const updateSchoolSession = handle('Failed to save the academic session.', async (req, res) => {
+  const school = await findSchool(req.params.id);
+  const data = await saveSessionConfiguration({
+    schoolId: school.schoolId || school._id,
+    user: req.user,
+    body: { ...req.body, isCurrent: true },
+  }, { id: req.body?.sessionId, allowFallback: false });
+  return sendSuccess(res, 'Academic session saved.', data);
+});
 
-    return sendSuccess(
-      res,
-      'Schools fetched successfully',
-      {
-        count: schools.length,
-        schools,
-      },
-      200,
-      {
-        count: schools.length,
-        schools,
-      }
-    );
-  } catch (err) {
-    return sendError(res, 'Failed to fetch schools', 500, err);
-  }
-};
+export const updateSchool = handle('Failed to update school profile.', async (req, res) => {
+  const fields = [
+    'schoolName', 'contactEmail', 'schoolPhone', 'alternatePhone', 'address',
+    'affiliationNumber', 'board', 'schoolLogo', 'schoolMotto', 'subscriptionPlan',
+  ];
+  const changes = Object.fromEntries(fields.filter((field) => Object.hasOwn(req.body, field))
+    .map((field) => [field, req.body[field]]));
+  const school = await School.findByIdAndUpdate(req.params.id, { $set: changes }, { new: true, runValidators: true });
+  if (!school) throw procurementError('School not found.', 404);
+  invalidateSchoolsCache();
+  return sendSuccess(res, 'School profile updated.', null, 200, { school });
+});
 
-/**
- * Retrieve a specific school with tenant statistics
- *
- * @route GET /api/v1/admin/schools/:id
- */
-export const getSchoolById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const school = await School.findById(id).lean();
+export const toggleSchoolStatus = handle('Failed to update school status.', async (req, res) => {
+  const { status } = req.body;
+  if (!['active', 'suspended'].includes(status)) throw procurementError('Choose active or suspended.');
+  const school = await School.findByIdAndUpdate(req.params.id, { status }, { new: true });
+  if (!school) throw procurementError('School not found.', 404);
+  invalidateSchoolsCache();
+  return sendSuccess(res, 'School status changed to ' + status + '.', null, 200, { school });
+});
 
-    if (!school) {
-      return sendNotFound(res, 'School not found');
-    }
+export const getCommonProducts = handle('Failed to load common products.', async (_req, res) => {
+  const products = await CommonProduct.find().sort({ createdAt: -1 }).lean();
+  return sendSuccess(res, undefined, { products }, 200, { products });
+});
 
-    const sId = school.schoolId || school._id;
+export const createCommonProduct = handle('Failed to create common product.', async (req, res) => {
+  const product = await CommonProduct.create(req.body);
+  return sendCreated(res, 'Common product created.', { product });
+});
 
-    let stats = {
-      studentsCount: 0,
-      teachersCount: 0,
-      usersCount: 0,
-    };
+export const getCommonCategories = handle('Failed to load common categories.', async (_req, res) => {
+  const categories = await CommonCategory.find().sort({ name: 1 }).lean();
+  return sendSuccess(res, undefined, { categories }, 200, { categories });
+});
 
-    try {
-      const [sCount, tCount, uCount] = await Promise.all([
-        Student.countDocuments({ schoolId: sId }).setOptions({ skipTenantFilter: true }).catch(() => 0),
-        Teacher.countDocuments({ schoolId: sId }).setOptions({ skipTenantFilter: true }).catch(() => 0),
-        User.countDocuments({ schoolId: sId }).setOptions({ skipTenantFilter: true }).catch(() => 0),
-      ]);
-
-      stats = {
-        studentsCount: sCount,
-        teachersCount: tCount,
-        usersCount: uCount,
-      };
-    } catch (_statErr) {
-      // stats optional
-    }
-
-    return sendSuccess(
-      res,
-      'School details fetched',
-      {
-        school,
-        stats,
-      },
-      200,
-      {
-        school,
-        stats,
-      }
-    );
-  } catch (err) {
-    return sendError(res, 'Failed to fetch school details', 500, err);
-  }
-};
-
-/**
- * Update school profile (excluding immutable collectionName)
- *
- * @route PUT /api/v1/admin/schools/:id
- */
-export const updateSchool = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updates = { ...req.body };
-
-    // Explicitly prohibit changing collectionName
-    delete updates.collectionName;
-    delete updates._id;
-
-    const school = await School.findByIdAndUpdate(
-      id,
-      { $set: updates },
-      { new: true, runValidators: true }
-    );
-
-    if (!school) {
-      return sendNotFound(res, 'School not found');
-    }
-
-    invalidateSchoolsCache();
-
-    return sendSuccess(res, 'School profile updated successfully', null, 200, {
-      school,
-    });
-  } catch (err) {
-    return sendError(res, 'Failed to update school', 500, err);
-  }
-};
-
-/**
- * Toggle school active/suspended status
- *
- * @route PATCH /api/v1/admin/schools/:id/status
- */
-export const toggleSchoolStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    if (!['active', 'suspended'].includes(status)) {
-      return sendBadRequest(res, "Status must be 'active' or 'suspended'");
-    }
-
-    const school = await School.findByIdAndUpdate(id, { status }, { new: true });
-
-    if (!school) {
-      return sendNotFound(res, 'School not found');
-    }
-
-    invalidateSchoolsCache();
-
-    return sendSuccess(res, `School status changed to ${status}`, null, 200, { school });
-  } catch (err) {
-    return sendError(res, 'Failed to change school status', 500, err);
-  }
-};
-
-// ─── Common Catalog Controllers ──────────────────────────────────────────────
-
-export const getCommonProducts = async (req, res) => {
-  try {
-    const products = await CommonProduct.find().sort({ createdAt: -1 }).lean();
-    return sendSuccess(res, 'Products fetched', { products }, 200, { products });
-  } catch (err) {
-    return sendError(res, 'Failed to fetch common products', 500, err);
-  }
-};
-
-export const createCommonProduct = async (req, res) => {
-  try {
-    const product = new CommonProduct(req.body);
-    await product.save();
-    return sendCreated(res, 'Common product created', { product });
-  } catch (err) {
-    return sendError(res, 'Failed to create common product', 500, err);
-  }
-};
-
-export const getCommonCategories = async (req, res) => {
-  try {
-    const categories = await CommonCategory.find().sort({ name: 1 }).lean();
-    return sendSuccess(res, 'Categories fetched', { categories }, 200, { categories });
-  } catch (err) {
-    return sendError(res, 'Failed to fetch common categories', 500, err);
-  }
-};
-
-export const createCommonCategory = async (req, res) => {
-  try {
-    const category = new CommonCategory(req.body);
-    await category.save();
-    return sendCreated(res, 'Common category created', { category });
-  } catch (err) {
-    return sendError(res, 'Failed to create common category', 500, err);
-  }
-};
+export const createCommonCategory = handle('Failed to create common category.', async (req, res) => {
+  const category = await CommonCategory.create(req.body);
+  return sendCreated(res, 'Common category created.', { category });
+});

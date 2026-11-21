@@ -29,9 +29,10 @@ const AcademicSessionSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    // Legacy ranges support deriving the school curriculum for existing tenants.
     startClassId: { type: String },
     endClassId: { type: String },
-    classIds: { type: [String], default: [] },
+    classIds: { type: [String], default: undefined },
     setupConfirmedAt: { type: Date },
     previousSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicSession' },
     createdBy: {

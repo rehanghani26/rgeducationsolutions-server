@@ -10,6 +10,7 @@ import {
   activateAcademicSession,
   createAcademicSession,
   deleteAcademicSession,
+  ensureUpcomingAcademicSession,
   getAcademicSessions,
   getActiveSession,
   getSessionClasses,
@@ -30,6 +31,7 @@ router.put("/rollover-settings", protect, sessionAdmin, saveSchedule);
 router.get("/:id/classes", protect, getSessionClasses);
 router.get("/:id/rollover/preview", protect, sessionAdmin, getRolloverPreview);
 router.post("/:id/rollover", protect, sessionAdmin, upgradeSchoolSession);
+router.post("/upcoming", protect, sessionAdmin, ensureUpcomingAcademicSession);
 router.post(
   "/",
   protect,

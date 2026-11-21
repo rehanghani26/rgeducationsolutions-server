@@ -1,4 +1,5 @@
 import { academicGrade, getAcademicScope } from '../utils/academicScope.js';
+import { sectionNamesById } from '../utils/academicClass.js';
 import { readProcurement, writeProcurement } from '../services/procurementStore.js';
 // 2. External packages
 import mongoose from 'mongoose';
@@ -46,12 +47,6 @@ const CLASS_MAP = {
   'cls-10': 'Class 10','cls-11': 'Class 11','cls-12': 'Class 12',
 };
 
-const SECTION_MAP = {
-  'sec-a': 'Section A', 'sec-b': 'Section B', 'sec-c': 'Section C',
-  'sec-d': 'Section D', 'sec-e': 'Section E', 'sec-f': 'Section F',
-  'sec-g': 'Section G',
-};
-
 /**
  * Derives human-readable class name from class code.
  *
@@ -66,7 +61,7 @@ const toClassName = (id) => CLASS_MAP[id] || id || '';
  * @param {string} id - Section code identifier.
  * @returns {string} Human-readable section name.
  */
-const toSectionName = (id) => SECTION_MAP[id] || id || '';
+const toSectionName = (id) => Object.hasOwn(sectionNamesById, id) ? sectionNamesById[id] : id || '';
 
 /**
  * Retrieves paginated classrooms with optional session, class, or section filtering.

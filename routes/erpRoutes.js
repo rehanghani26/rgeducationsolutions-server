@@ -5,7 +5,7 @@ import multer from "multer";
 // 5. Middleware
 import { protect } from "../middleware/auth.js";
 import { authorize } from "../middleware/rbac.js";
-import { getClassMaster, updateClassOrder } from "../controllers/sessionController.js";
+import { getClassMaster, getSchoolClassRange, setSchoolClassRange, updateClassOrder } from "../controllers/sessionController.js";
 import {
   createHostelOccupancy, createTransportAssignment, createTransportRoute, getAcademicReports,
   getHostelOccupancies, getTransportAssignments,
@@ -68,6 +68,8 @@ const upload = multer({
 router.get("/classes", protect, getClasses);
 router.get("/class-master", protect, getClassMaster);
 router.patch("/class-master/:id/order", protect, authorize("super-admin", "school-admin", "principal", "admin"), updateClassOrder);
+router.get("/school-class-range", protect, getSchoolClassRange);
+router.put("/school-class-range", protect, authorize("super-admin", "school-admin", "principal", "admin"), setSchoolClassRange);
 router.post(
   "/classes",
   protect,

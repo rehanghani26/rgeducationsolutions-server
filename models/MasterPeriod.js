@@ -39,6 +39,7 @@ const MasterPeriodSchema = new mongoose.Schema(
     },
     isConfigured: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
+    isDefault: { type: Boolean, default: false },
     createdBy: { type: String, default: 'admin' },
   },
   { timestamps: true, strict: false }

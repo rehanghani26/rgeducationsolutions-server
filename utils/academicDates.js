@@ -24,6 +24,11 @@ export function defaultSessionEnd(day) {
   return addSessionDays(sessionDay(date), -1);
 }
 
+export function shiftedSessionEnd(session, startDate) {
+  const days = (new Date(sessionDay(session.endDate)) - new Date(sessionDay(session.startDate))) / 86_400_000;
+  return addSessionDays(startDate, days);
+}
+
 export function schoolClock(now, timeZone) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,

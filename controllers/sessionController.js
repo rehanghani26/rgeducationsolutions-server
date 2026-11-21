@@ -1,17 +1,18 @@
 ﻿import mongoose from 'mongoose';
 import { checkFallback } from '../config/db.js';
-import School from '../models/School.js';
 import { FallbackDb } from '../services/dbFallback.js';
 import {
-  activeAcademicSession, isConfiguredSession, orderedGrades, readRolloverSettings,
-  saveClassOrder, saveSessionConfiguration, sessionCollections, sessionGrades, writeRolloverSettings,
+  activeAcademicSession, curriculumCollections, followingSessionDates, orderedGrades, readRolloverSettings,
+  saveClassOrder, saveSchoolCurriculum, saveSessionConfiguration, schoolClassOptions, schoolCurriculum, writeRolloverSettings,
+  ensureSchoolUpcomingSession, ensureUpcomingSession, sessionsInDateOrder, updateFollowingSessionDates,
 } from '../services/academicSessionService.js';
 import { getSchool, readProcurement, writeProcurement } from '../services/procurementStore.js';
 import { previewRollover, runRollover } from '../services/sessionRolloverService.js';
-import { procurementError } from '../utils/procurementValues.js';
+import { procurementError, recordId } from '../utils/procurementValues.js';
 import { sendSuccess, sendCreated, sendError } from '../utils/responseUtil.js';
 import tenantContext from '../utils/tenantContext.js';
 import { academicCollections } from '../utils/academicScope.js';
+import { sessionDay } from '../utils/academicDates.js';
 
 const handle = (handler) => async (req, res) => {
   try {
@@ -22,10 +23,16 @@ const handle = (handler) => async (req, res) => {
   }
 };
 
-export const getAcademicSessions = handle(async (req, res) => {
-  const sessions = await readProcurement(req).find('academicSessions');
-  sessions.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+async function sendSessions(req, res) {
+  const sessions = sessionsInDateOrder(await readProcurement(req).find('academicSessions')).reverse();
   return sendSuccess(res, undefined, { sessions }, 200, { sessions });
+}
+
+export const getAcademicSessions = handle(sendSessions);
+
+export const ensureUpcomingAcademicSession = handle(async (req, res) => {
+  await ensureSchoolUpcomingSession(req);
+  return sendSessions(req, res);
 });
 
 export const getActiveSession = handle(async (req, res) => {
@@ -42,55 +49,45 @@ export const updateClassOrder = handle(async (req, res) =>
   sendSuccess(res, 'Class order saved.', { grade: await saveClassOrder(req) })
 );
 
+export const getSchoolClassRange = handle(async (req, res) =>
+  sendSuccess(res, undefined, await schoolClassOptions(readProcurement(req)))
+);
+
+export const setSchoolClassRange = handle(async (req, res) =>
+  sendSuccess(res, 'School class range saved.', await saveSchoolCurriculum(req))
+);
+
 export const getSessionClasses = handle(async (req, res) => {
   const store = readProcurement(req);
   const session = await store.get('academicSessions', req.params.id);
   if (!session) throw procurementError('Academic session not found.', 404);
-  const classes = await sessionGrades(store, session);
-  return sendSuccess(res, undefined, { classes }, 200, { classes });
-});
-
-export async function academicSetupStatus(req) {
-  const store = readProcurement(req);
-  const session = await activeAcademicSession(store);
-  const schoolId = getSchool(req);
-  const onboarded = !checkFallback() && Boolean(await School.exists({ schoolId }));
-  return { session, pending: !isConfiguredSession(session), onboarded };
-}
-
-export const getAcademicSetup = handle(async (req, res) => {
-  const setup = await academicSetupStatus(req);
-  const classes = await orderedGrades(readProcurement(req));
-  return sendSuccess(res, undefined, { ...setup, classes });
-});
-
-export const confirmAcademicSetup = handle(async (req, res) => {
-  const session = await saveSessionConfiguration(req, { id: req.body?.sessionId, confirm: true });
-  return sendSuccess(res, 'Academic session and curriculum saved.', { session }, 200, { session });
+  const data = await schoolClassOptions(store);
+  return sendSuccess(res, undefined, data, 200, { classes: data.classes });
 });
 
 export const createAcademicSession = handle(async (req, res) => {
-  const session = await saveSessionConfiguration(req);
-  return sendCreated(res, 'Academic session created successfully.', { session }, { session });
+  const data = await saveSessionConfiguration(req);
+  return sendCreated(res, 'Academic session created successfully.', data, { session: data.session });
 });
 
 export const updateAcademicSession = handle(async (req, res) => {
-  const session = await saveSessionConfiguration(req, { id: req.params.id });
-  return sendSuccess(res, 'Academic session updated successfully.', { session }, 200, { session });
+  const data = await saveSessionConfiguration(req, { id: req.params.id });
+  return sendSuccess(res, 'Academic session updated successfully.', data, 200, { session: data.session });
 });
 
 export const activateAcademicSession = handle(async (req, res) => {
-  const session = await writeProcurement(req, sessionCollections, async (store) => {
+  const session = await writeProcurement(req, curriculumCollections, async (store) => {
     await store.lockAcademicSettings();
     const current = await activeAcademicSession(store);
     const selected = await store.get('academicSessions', req.params.id);
     if (!selected) throw procurementError('Academic session not found.', 404);
     if (selected.isCurrent) return selected;
     if (current) throw procurementError('Use the whole-school upgrade to switch the active session.', 409);
-    if (!isConfiguredSession(selected) || selected.status !== 'upcoming') {
-      throw procurementError('Only an upcoming session with a confirmed curriculum can be activated.', 409);
-    }
-    return store.update('academicSessions', req.params.id, { status: 'active', isCurrent: true });
+    if (selected.status !== 'upcoming') throw procurementError('Only an upcoming session can be activated.', 409);
+    if (!await schoolCurriculum(store, { persist: true })) throw procurementError('Set the school class range before activating a session.', 409);
+    const session = await store.update('academicSessions', req.params.id, { status: 'active', isCurrent: true });
+    await ensureUpcomingSession(store, session);
+    return session;
   });
   return sendSuccess(res, 'Academic session activated.', { session }, 200, { session });
 });
@@ -98,7 +95,7 @@ export const activateAcademicSession = handle(async (req, res) => {
 export const deleteAcademicSession = handle(async (req, res) => {
   const { id } = req.params;
   const schoolId = getSchool(req);
-  await writeProcurement(req, sessionCollections, async (store) => {
+  const shiftedSessions = await writeProcurement(req, curriculumCollections, async (store) => {
     await store.lockAcademicSettings();
     const session = await store.get('academicSessions', id);
     if (!session) throw procurementError('Academic session not found.', 404);
@@ -123,9 +120,18 @@ export const deleteAcademicSession = handle(async (req, res) => {
         }
       }
     }
+    await schoolCurriculum(store, { persist: true });
+    const schedule = sessionsInDateOrder(await store.find('academicSessions'));
+    const index = schedule.findIndex((item) => String(recordId(item)) === String(recordId(session)));
+    const previous = schedule[index - 1];
+    const changes = previous ? followingSessionDates(schedule.slice(index + 1), sessionDay(previous.endDate)) : [];
     await store.remove('academicSessions', id);
+    const shifted = await updateFollowingSessionDates(store, changes);
+    const current = schedule.find((item) => item.isCurrent);
+    if (current) await ensureUpcomingSession(store, current);
+    return shifted;
   });
-  return sendSuccess(res, 'Academic session deleted.');
+  return sendSuccess(res, 'Academic session deleted.', { shiftedSessions });
 });
 
 export const getSchedule = handle(async (req, res) =>

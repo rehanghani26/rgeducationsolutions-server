@@ -21,6 +21,8 @@ const getJwtRefreshSecret = () =>
   process.env.JWT_REFRESH_SECRET ||
   "super_secret_jwt_refresh_key_ChangeMe";
 
+export const verifyAccessToken = (token) => jwt.verify(token, getJwtSecret());
+
 /**
  * Generates access and refresh JWT tokens containing userId, schoolId, and role.
  *
@@ -80,7 +82,7 @@ export const protect = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, getJwtSecret());
+    const decoded = verifyAccessToken(token);
     const userId = decoded.userId || decoded.id;
 
     if (decoded.role === 'parent') {
