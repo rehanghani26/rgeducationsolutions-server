@@ -8,8 +8,7 @@ const SubjectSchema = new mongoose.Schema({
   },
   code: {
     type: String,
-    required: true,
-    unique: true
+    required: true
   },
   type: {
     type: String,
@@ -26,6 +25,8 @@ const SubjectSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+SubjectSchema.index({ schoolId: 1, code: 1 }, { unique: true });
 
 const Subject = mongoose.models.Subject || mongoose.model('Subject', SubjectSchema);
 export default createDynamicModelProxy('Subject', Subject);

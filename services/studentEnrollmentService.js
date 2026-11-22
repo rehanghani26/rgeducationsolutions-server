@@ -4,10 +4,10 @@ import { academicError, academicGrade, getAcademicScope } from '../utils/academi
 import { recordId as rawRecordId } from '../utils/procurementValues.js';
 import { getSchool, readProcurement, writeProcurement } from './procurementStore.js';
 import { FallbackDb } from './dbFallback.js';
-import { schoolClassOptions } from './academicSessionService.js';
+import { curriculumCollections, schoolClassOptions } from './academicSessionService.js';
 
 const idOf = (record) => String(rawRecordId(record) || '');
-const enrollmentCollections = ['academicSessions', 'students', 'studentSessionHistories', 'classRooms'];
+const enrollmentCollections = [...curriculumCollections, 'students', 'studentSessionHistories', 'classRooms'];
 
 export function studentPlacement(scope, fields) {
   const grade = academicGrade(scope, fields.classId || fields.className || fields.class);
@@ -80,6 +80,12 @@ export async function createEnrolledStudent(req, data) {
   const placement = studentPlacement(scope, data);
   return writeProcurement(req, enrollmentCollections, async (store) => {
     await confirmActiveSession(store, scope);
+    if (await store.one('students', { admissionNumber: data.admissionNumber })) {
+      throw academicError('The admission number was just assigned to another student. Retry this row.', 409);
+    }
+    if (data.email && await store.one('students', { email: data.email })) {
+      throw academicError('This student email is already registered.', 409);
+    }
     const student = await store.create('students', { ...data, ...placement, rollNumber: null });
     const enrollment = await savePlacement(store, scope, student, placement, req.user?.name || 'Administrator');
     return store.update('students', idOf(student), enrollment);

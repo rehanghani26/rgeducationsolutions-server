@@ -4,7 +4,6 @@
  */
 
 import Exam from '../../models/Exam.js';
-import ClassSyllabus from '../../models/ClassSyllabus.js';
 import { checkFallback } from '../../config/db.js';
 import { FallbackDb } from '../../services/dbFallback.js';
 import { logActivity } from '../../utils/activityLogger.js';

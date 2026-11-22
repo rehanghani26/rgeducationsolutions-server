@@ -88,6 +88,8 @@ export async function chatController(req, res) {
       userMessage: message.trim(),
       conversationHistory: history,
       user: req.user,
+      schoolId: req.schoolId,
+      academicSessionId: req.academicSessionId,
       ip: req.ip,
     });
 

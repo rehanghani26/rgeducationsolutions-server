@@ -16,19 +16,13 @@ import { sendBadRequest } from "../utils/responseUtil.js";
 
 // 8. Controllers
 import {
-  addCurriculumMaterial,
-  addCurriculumUnit,
   createBook,
   createClass,
-  createCurriculum,
   createNotice,
-  createSection,
   createSubject,
-  deleteCurriculum,
   deleteNotice,
   getBooks,
   getClasses,
-  getCurriculums,
   getLibraryIssues,
   getNotifications,
   getNotices,
@@ -38,8 +32,6 @@ import {
   getSubjects,
   getTransport,
   issueBook,
-  seedDummies,
-  updateCurriculum,
   updateSettings,
   uploadProfileImage,
 } from "../controllers/erpController.js";
@@ -67,100 +59,23 @@ const upload = multer({
 // Academic Routes
 router.get("/classes", protect, getClasses);
 router.get("/class-master", protect, getClassMaster);
-router.patch("/class-master/:id/order", protect, authorize("super-admin", "school-admin", "principal", "admin"), updateClassOrder);
+router.patch("/class-master/:id/order", protect, authorize("super-admin", "school-admin", "principal", "admin", "director"), updateClassOrder);
 router.get("/school-class-range", protect, getSchoolClassRange);
 router.put("/school-class-range", protect, authorize("super-admin", "school-admin", "principal", "admin"), setSchoolClassRange);
 router.post(
   "/classes",
   protect,
-  authorize("super-admin", "school-admin", "principal"),
+  authorize("super-admin", "school-admin", "principal", "admin", "director"),
   createClass
 );
 router.get("/sections", protect, getSections);
-router.post(
-  "/sections",
-  protect,
-  authorize("super-admin", "school-admin", "principal"),
-  createSection
-);
 router.get("/subjects", protect, getSubjects);
 router.post(
   "/subjects",
   protect,
-  authorize("super-admin", "school-admin", "principal"),
+  authorize("super-admin", "school-admin", "principal", "admin", "director"),
   createSubject
 );
-router.get("/seed-dummies", protect, seedDummies);
-
-// Academic Curriculum & Courses (Assignable by Super Admin, Admin & Class Teachers)
-router.get("/curriculum", protect, getCurriculums);
-router.post(
-  "/curriculum",
-  protect,
-  authorize(
-    "super-admin",
-    "school-admin",
-    "principal",
-    "director",
-    "teacher",
-    "head-teacher",
-    "hod",
-    "coordinator"
-  ),
-  createCurriculum
-);
-router.put(
-  "/curriculum/:id",
-  protect,
-  authorize(
-    "super-admin",
-    "school-admin",
-    "principal",
-    "director",
-    "teacher",
-    "head-teacher",
-    "hod",
-    "coordinator"
-  ),
-  updateCurriculum
-);
-router.delete(
-  "/curriculum/:id",
-  protect,
-  authorize("super-admin", "school-admin", "principal", "director"),
-  deleteCurriculum
-);
-router.post(
-  "/curriculum/:id/units",
-  protect,
-  authorize(
-    "super-admin",
-    "school-admin",
-    "principal",
-    "director",
-    "teacher",
-    "head-teacher",
-    "hod",
-    "coordinator"
-  ),
-  addCurriculumUnit
-);
-router.post(
-  "/curriculum/:id/materials",
-  protect,
-  authorize(
-    "super-admin",
-    "school-admin",
-    "principal",
-    "director",
-    "teacher",
-    "head-teacher",
-    "hod",
-    "coordinator"
-  ),
-  addCurriculumMaterial
-);
-
 // Library Routes
 router.get("/library/books", protect, getBooks);
 router.post(

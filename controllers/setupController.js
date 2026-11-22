@@ -111,7 +111,7 @@ function evaluateFinancePolicies(settings) {
 
 // ─── Main Status Builder ──────────────────────────────────────────────────────
 
-async function buildSetupStatus(req, settings) {
+export async function buildSetupStatus(req, settings, { recordCompletion = true } = {}) {
   const [sessionEval, periodsEval, school] = await Promise.all([
     evaluateAcademicSession(req),
     evaluateMasterPeriods(),
@@ -187,7 +187,7 @@ async function buildSetupStatus(req, settings) {
   const isDismissed = settings?.setupWizard?.dismissed || false;
   const completedAt = settings?.setupWizard?.completedAt || null;
 
-  if (isFullyComplete && !completedAt) {
+  if (recordCompletion && isFullyComplete && !completedAt) {
     try {
       await Setting.findOneAndUpdate(
         {},

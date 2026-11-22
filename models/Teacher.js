@@ -2,6 +2,12 @@ import mongoose from "mongoose";
 import tenantPlugin from "../utils/tenantPlugin.js";
 import { createDynamicModelProxy } from "../utils/tenantContext.js";
 
+const teacherFileSchema = new mongoose.Schema({
+  name: String,
+  mimeType: String,
+  data: String,
+}, { _id: false });
+
 const TeacherSchema = new mongoose.Schema(
   {
     schoolId: {
@@ -62,6 +68,15 @@ const TeacherSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    bloodGroup: { type: String, trim: true, default: "" },
+    emergencyContactName: { type: String, trim: true, default: "" },
+    emergencyContactPhone: { type: String, trim: true, default: "" },
+    emergencyContactRelation: { type: String, trim: true, default: "" },
+    aadhaarNumber: { type: String, trim: true, default: "" },
+    photoName: { type: String, default: "" },
+    aadhaarFileName: { type: String, default: "" },
+    photoFile: { type: teacherFileSchema, select: false },
+    aadhaarFile: { type: teacherFileSchema, select: false },
     joiningDate: {
       type: Date,
       default: Date.now,
@@ -83,6 +98,8 @@ const TeacherSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    employmentType: { type: String, trim: true, default: "" },
+    specialization: { type: String, trim: true, default: "" },
     subjectsAssigned: [
       {
         type: String

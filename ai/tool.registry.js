@@ -30,6 +30,7 @@ import { dashboardToolDefinitions, dashboardToolExecutors } from './tools/dashbo
 import { onlineClassToolDefinitions, onlineClassToolExecutors } from './tools/online-class.tools.js';
 import { sessionToolDefinitions, sessionToolExecutors } from './tools/session.tools.js';
 import { setupToolDefinitions, setupToolExecutors } from './tools/setup.tools.js';
+import { workspaceDefinitions, workspaceExecutors, permitsTool } from './tools/workspace.tools.js';
 
 // ─── Combined Definitions (schema for the AI model) ──────────────────────────
 
@@ -39,6 +40,7 @@ import { setupToolDefinitions, setupToolExecutors } from './tools/setup.tools.js
  * @type {Array<{name: string, description: string, parameters: object}>}
  */
 export const ALL_TOOL_DEFINITIONS = [
+  ...workspaceDefinitions,
   ...studentToolDefinitions,
   ...attendanceToolDefinitions,
   ...teacherToolDefinitions,
@@ -66,6 +68,7 @@ export const ALL_TOOL_DEFINITIONS = [
  * @type {Record<string, Function>}
  */
 const ALL_EXECUTORS = {
+  ...workspaceExecutors,
   ...studentToolExecutors,
   ...attendanceToolExecutors,
   ...teacherToolExecutors,
@@ -122,6 +125,6 @@ export function getRegisteredToolNames() {
  * Get all tool definitions for the AI provider.
  * @returns {Array}
  */
-export function getAllToolDefinitions() {
-  return ALL_TOOL_DEFINITIONS;
+export function getAllToolDefinitions(user) {
+  return ALL_TOOL_DEFINITIONS.filter(({ name }) => permitsTool(name, user));
 }

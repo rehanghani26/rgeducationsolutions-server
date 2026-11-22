@@ -96,6 +96,11 @@ export async function listMasterPeriods(req, type) {
     .sort((left, right) => Number(right.isDefault) - Number(left.isDefault));
 }
 
+export async function listClassTimetables(req, type = 'regular') {
+  const timetables = await readProcurement(req).find('classTimetables', schoolSession());
+  return timetables.filter((timetable) => typeOf(timetable) === type);
+}
+
 function validateWindow(day, label) {
   if (!clock.test(day.schoolStartTime) || !clock.test(day.schoolEndTime) || day.schoolEndTime <= day.schoolStartTime) {
     throw procurementError(label + ' needs a start time and a later end time.');

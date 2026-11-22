@@ -10,6 +10,7 @@ import { FallbackDb } from '../services/dbFallback.js';
 // 7. Utilities
 import { parsePagination, buildSearchFilter, paginateResult, paginateArray } from '../utils/paginateQuery.js';
 import { logActivity, getRecordActivity } from '../utils/activityLogger.js';
+import { academicGrade, getAcademicScope } from '../utils/academicScope.js';
 import {
   sendSuccess,
   sendCreated,
@@ -110,6 +111,14 @@ export const createExam = async (req, res) => {
     if (!name || !term || !date) {
       return sendBadRequest(res, 'Name, term, and date are required');
     }
+    const scope = getAcademicScope();
+    if (scope && Array.isArray(subjectSchedule) && subjectSchedule.some((row) => row.classId)) {
+      const targets = classTargets?.length ? classTargets.map((row) => row.classId) : classIds;
+      const targetIds = new Set((targets || []).map((value) => academicGrade(scope, value).id));
+      if (subjectSchedule.some((row) => row.classId && !targetIds.has(row.classId))) {
+        return sendBadRequest(res, 'Every class-specific subject must belong to a class selected for this exam.');
+      }
+    }
 
     const examData = {
       name, term, date, status: status || 'upcoming',
@@ -138,7 +147,7 @@ export const createExam = async (req, res) => {
 
     return sendCreated(res, 'Exam created', { exam });
   } catch (error) {
-    return sendError(res, error.message || 'Server error', 500, error);
+    return sendError(res, error.message || 'Server error', error.statusCode || 500, error);
   }
 };
 

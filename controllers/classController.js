@@ -183,7 +183,8 @@ export const getClassRoomById = async (req, res) => {
 export const createClassRoom = async (req, res) => {
   try {
     let { classId } = req.body;
-    const { sessionId, sectionId, room, capacity } = req.body;
+    const { sessionId, room, capacity } = req.body;
+    const sectionId = String(req.body.sectionId || '').trim().toLowerCase();
 
     if (!sessionId || !classId || !sectionId) {
       return sendBadRequest(res, 'sessionId, classId and sectionId are required');
@@ -204,7 +205,12 @@ export const createClassRoom = async (req, res) => {
     const grade = scope?.grades.length ? academicGrade(scope, classId) : null;
     if (grade) classId = grade.id;
     const className = grade?.name || toClassName(classId);
-    const sectionName = toSectionName(sectionId);
+    const sectionName = sectionNamesById[sectionId] || String(req.body.sectionName || toSectionName(sectionId)).trim();
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(sectionId) || sectionId.length > 64 || !sectionName || sectionName.length > 64) {
+      return sendBadRequest(res, 'Enter a valid section name.');
+    }
+    const seats = capacity == null || capacity === '' ? 40 : Number(capacity);
+    if (!Number.isInteger(seats) || seats < 1) return sendBadRequest(res, 'Capacity must be a positive whole number.');
     const sec = sectionName.replace(/^Section\s*/i, '');
     const displayName = `${className} – ${sec} (${session.sessionName})`;
 
@@ -217,13 +223,15 @@ export const createClassRoom = async (req, res) => {
       sectionName,
       displayName,
       room: room || '',
-      capacity: capacity || 40,
+      capacity: seats,
       createdBy: req.user?.name || 'admin',
     };
     const classRoom = await writeProcurement(req, ['academicSessions', 'classRooms'], async (db) => {
       await db.lockAcademicSettings();
       const current = await db.get('academicSessions', sessionId);
-      if (!current || current.status === 'completed') throw Object.assign(new Error('Session is read-only.'), { statusCode: 409 });
+      if (!current || current.status === 'completed' || (scope && !current.isCurrent)) {
+        throw Object.assign(new Error('Session is read-only.'), { statusCode: 409 });
+      }
       if (await db.one('classRooms', { sessionId, classId, sectionId })) {
         throw Object.assign(new Error('This class and section already exist in the session.'), { statusCode: 409 });
       }

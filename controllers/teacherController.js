@@ -1,6 +1,3 @@
-// 2. External packages
-import mongoose from "mongoose";
-
 // 3. Configuration
 import { checkFallback } from "../config/db.js";
 
@@ -10,15 +7,20 @@ import User from "../models/User.js";
 
 // 6. Services
 import { FallbackDb } from "../services/dbFallback.js";
+import { getSchool, readProcurement } from "../services/procurementStore.js";
+import {
+  canViewPrivateTeacherDetails, findTeacherProfile, registerTeacher, saveTeacherProfile, teacherProfileResponse,
+} from "../services/teacherProfileService.js";
+import { readTeacherPeriods, summarizeTeacherPeriods } from "../services/teacherTimetableService.js";
 
 // 7. Utilities
 import { getRecordActivity, logActivity } from "../utils/activityLogger.js";
+import { getAcademicScope } from "../utils/academicScope.js";
 import {
-  formatFullName,
   generateSecurePassword,
   isValidObjectId,
-  normalizeEmail,
 } from "../utils/commonUtil.js";
+import { recordId, sendProcurementError } from "../utils/procurementValues.js";
 import {
   buildSearchFilter,
   paginateArray,
@@ -38,122 +40,13 @@ import {
  * @description Controller for faculty teacher operations, credentials sync, and bulk actions.
  */
 
-const DEFAULT_TEACHER_PERMISSIONS = [
-  "dashboard",
-  "attendance",
-  "exam",
-  "marks",
-  "homework",
-  "timetable",
-  "leave",
-  "communication",
-];
-
-const normalizeEmployeeId = (employeeId = "") =>
-  employeeId.trim().toUpperCase();
-
-/**
- * Auto-generates sequential employee ID: TCH-0001
- *
- * @returns {Promise<string>} Next employee ID.
- */
-const getNextEmployeeId = async () => {
-  const prefix = "TCH-";
-  let lastId = "TCH-0000";
-
-  if (checkFallback()) {
-    const teachers = FallbackDb.find("teachers");
-    lastId =
-      teachers
-        .map((teacher) => teacher.employeeId)
-        .filter((id) => /^TCH-\d{4}$/.test(id || ""))
-        .sort()
-        .pop() || lastId;
-  } else {
-    const lastTeacher = await Teacher.findOne({ employeeId: /^TCH-\d{4}$/ })
-      .sort({ employeeId: -1 })
-      .select("employeeId");
-    lastId = lastTeacher?.employeeId || lastId;
-  }
-
-  const next = Number(lastId.replace(prefix, "")) + 1;
-  return `${prefix}${String(next).padStart(4, "0")}`;
-};
-
-/**
- * Normalizes input payload for Teacher creation/update.
- *
- * @param {Record<string, any>} data - Raw input body.
- * @returns {Promise<Record<string, any>>}
- */
-const buildTeacherPayload = async (data) => {
-  const employeeId =
-    normalizeEmployeeId(data.employeeId) || (await getNextEmployeeId());
-  const name = formatFullName(data);
-  const firstName = data.firstName || name.split(" ")[0];
-  const lastName = data.lastName || name.split(" ").slice(1).join(" ") || "-";
-  const email = normalizeEmail(
-    data.email || `${employeeId.toLowerCase()}@school.local`
-  );
-  const role = data.role || "teacher";
-  const permissions =
-    Array.isArray(data.permissions) && data.permissions.length
-      ? data.permissions
-      : DEFAULT_TEACHER_PERMISSIONS;
-
-  return {
-    ...data,
-    firstName,
-    lastName,
-    name,
-    email,
-    employeeId,
-    role,
-    permissions,
-    phone: data.phone || data.contactNumber || "",
-    classesAssigned: data.classesAssigned || data.assignedClasses || [],
-    sectionsAssigned: data.sectionsAssigned || data.assignedSections || [],
-    subjectsAssigned: data.subjectsAssigned || data.assignedSubjects || [],
-    isClassTeacher: Boolean(data.isClassTeacher || data.classTeacher),
-    salary: Number(data.salary) || 0,
-    status: data.status || "active",
-    forcePasswordChange: Boolean(data.forcePasswordChange),
-    twoFactorEnabled: Boolean(data.twoFactorEnabled),
-    loginRestriction: data.loginRestriction || "none",
-  };
-};
-
-/**
- * Synchronizes user authentication account with teacher profile.
- */
-const syncUserFromTeacher = async ({ teacher, password, existingUser }) => {
-  const userData = {
-    username: teacher.employeeId.toLowerCase(),
-    employeeId: teacher.employeeId,
-    email: teacher.email,
-    password,
-    role: teacher.role,
-    permissions: teacher.permissions,
-    name: teacher.name,
-    profileId: teacher._id,
-    isActive: teacher.status === "active",
-    forcePasswordChange: teacher.forcePasswordChange,
-    accountExpiryDate: teacher.accountExpiryDate,
-    loginRestriction: teacher.loginRestriction,
-    twoFactorEnabled: teacher.twoFactorEnabled,
-  };
-
-  if (existingUser) {
-    Object.assign(existingUser, {
-      ...userData,
-      password: existingUser.password,
-    });
-    if (password) existingUser.password = password;
-    return existingUser.save();
-  }
-
-  return User.create(userData);
-};
+async function teacherDirectoryProfiles(req, records) {
+  const schedules = await readTeacherPeriods(req, records);
+  return records.map((teacher) => ({
+    ...teacherProfileResponse(teacher),
+    ...summarizeTeacherPeriods(schedules.get(String(recordId(teacher)))),
+  }));
+}
 
 /**
  * Retrieves paginated list of teachers.
@@ -176,7 +69,7 @@ export const getTeachers = async (req, res) => {
     ];
 
     if (checkFallback()) {
-      const list = FallbackDb.find("teachers");
+      const list = await readProcurement(req).find("teachers");
       const result = paginateArray(list, {
         page,
         limit,
@@ -184,13 +77,11 @@ export const getTeachers = async (req, res) => {
         status,
         searchFields,
       });
-      return sendSuccess(res, undefined, null, 200, {
-        teachers: result.data,
-        ...result,
-      });
+      const teachers = await teacherDirectoryProfiles(req, result.data);
+      return sendSuccess(res, undefined, null, 200, { ...result, data: teachers, teachers });
     }
 
-    const filter = { ...buildSearchFilter(search, searchFields) };
+    const filter = { ...buildSearchFilter(search, searchFields), schoolId: getSchool(req) };
     if (status) filter.status = status;
 
     const sortObj = {};
@@ -199,17 +90,15 @@ export const getTeachers = async (req, res) => {
 
     const [teachers, total] = await Promise.all([
       Teacher.find(filter)
-        .populate("user", "username email role permissions isActive lastLogin")
+        .populate("user", "username email role isActive lastLogin")
         .sort(sortObj)
         .skip(skip)
         .limit(limit),
       Teacher.countDocuments(filter),
     ]);
 
-    return sendSuccess(res, undefined, null, 200, {
-      teachers,
-      ...paginateResult(teachers, total, { page, limit }),
-    });
+    const profiles = await teacherDirectoryProfiles(req, teachers);
+    return sendSuccess(res, undefined, null, 200, { teachers: profiles, ...paginateResult(profiles, total, { page, limit }) });
   } catch (error) {
     console.error("getTeachers error:", error);
     return sendError(res, "Server error", 500);
@@ -224,31 +113,43 @@ export const getTeachers = async (req, res) => {
  */
 export const getTeacherById = async (req, res) => {
   try {
-    const { id } = req.params;
-    let teacher = null;
-
-    if (checkFallback() || !isValidObjectId(id)) {
-      teacher =
-        FallbackDb.findById("teachers", id) ||
-        FallbackDb.findOne("teachers", { employeeId: id });
-      if (teacher?.user) {
-        teacher.userDetails = FallbackDb.findById("users", teacher.user);
-      }
-    } else {
-      teacher = await Teacher.findById(id).populate(
-        "user",
-        "username email role permissions isActive lastLogin loginHistory forcePasswordChange"
-      );
-    }
-
-    if (!teacher) {
-      return sendNotFound(res, "Teacher record not found");
-    }
-
-    return sendSuccess(res, undefined, null, 200, { teacher });
+    const teacher = await findTeacherProfile(req, req.params.id);
+    if (!teacher) return sendNotFound(res, "Teacher record not found");
+    const schedules = await readTeacherPeriods(req, [teacher]);
+    const periods = schedules.get(String(recordId(teacher)));
+    const scope = getAcademicScope();
+    const showPrivate = canViewPrivateTeacherDetails(req, teacher);
+    if (showPrivate) res.set('Cache-Control', 'private, no-store');
+    return sendSuccess(res, undefined, null, 200, {
+      teacher: { ...teacherProfileResponse(teacher, showPrivate), ...summarizeTeacherPeriods(periods) },
+      timetable: {
+        sessionId: scope?.legacy ? 'legacy' : scope?.sessionId || null,
+        sessionName: scope?.session?.sessionName || '',
+        periods,
+      },
+    });
   } catch (error) {
-    console.error("getTeacherById error:", error);
-    return sendError(res, "Server error", 500);
+    return sendProcurementError(res, error);
+  }
+};
+
+export const getTeacherFile = async (req, res) => {
+  try {
+    const { id, kind } = req.params;
+    const field = { photo: 'photoFile', aadhaar: 'aadhaarFile' }[kind];
+    if (!['photo', 'aadhaar'].includes(kind)) return sendNotFound(res, 'Teacher file not found');
+    const teacher = await findTeacherProfile(req, id, field);
+    if (!teacher || !teacher[field] || (kind === 'aadhaar' && !canViewPrivateTeacherDetails(req, teacher))) {
+      return sendNotFound(res, 'Teacher file not found');
+    }
+    const file = teacher[field];
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+    if (kind === 'aadhaar') res.attachment(file.name);
+    res.type(file.mimeType);
+    return res.send(Buffer.from(file.data, 'base64'));
+  } catch (error) {
+    return sendProcurementError(res, error);
   }
 };
 
@@ -260,32 +161,20 @@ export const getTeacherById = async (req, res) => {
  */
 export const getTeacherActivity = async (req, res) => {
   try {
-    const { id } = req.params;
+    const teacher = await findTeacherProfile(req, req.params.id);
+    if (!teacher) return sendNotFound(res, 'Teacher record not found');
     let logs = [];
     try {
-      logs = await getRecordActivity("teachers", id);
-    } catch (_e) {
+      logs = await getRecordActivity("teachers", recordId(teacher));
+    } catch {
       logs = [];
     }
     let loginHistory = [];
-    let teacher = null;
-
-    if (checkFallback() || !isValidObjectId(id)) {
-      teacher =
-        FallbackDb.findById("teachers", id) ||
-        FallbackDb.findOne("teachers", { employeeId: id });
-      if (teacher?.user) {
-        const userObj = FallbackDb.findById("users", teacher.user);
-        loginHistory = userObj?.loginHistory || [];
-      }
-    } else {
-      teacher = await Teacher.findById(id).populate(
-        "user",
-        "loginHistory lastLogin"
-      );
-      if (teacher?.user && typeof teacher.user === "object") {
-        loginHistory = teacher.user.loginHistory || [];
-      }
+    if (teacher.user && canViewPrivateTeacherDetails(req, teacher)) {
+      const user = checkFallback()
+        ? await readProcurement(req).get('users', teacher.user)
+        : await User.findOne({ _id: teacher.user, schoolId: getSchool(req) }).select('loginHistory').lean();
+      loginHistory = user?.loginHistory || [];
     }
 
     return sendSuccess(res, undefined, null, 200, { logs, loginHistory });
@@ -303,234 +192,33 @@ export const getTeacherActivity = async (req, res) => {
  */
 export const createTeacher = async (req, res) => {
   try {
-    const payload = await buildTeacherPayload(req.body);
-    const password = req.body.generateRandomPassword
-      ? generateSecurePassword("Tch@")
-      : req.body.password;
-
-    if (
-      !payload.firstName ||
-      !payload.lastName ||
-      !payload.email ||
-      !payload.phone ||
-      !payload.designation
-    ) {
-      return sendBadRequest(
-        res,
-        "First name, last name, email, phone, and designation are required"
-      );
-    }
-
-    if (!password || password.length < 6) {
-      return sendBadRequest(
-        res,
-        "Password must be at least 6 characters"
-      );
-    }
-
-    if (
-      req.body.confirmPassword !== undefined &&
-      password !== req.body.confirmPassword
-    ) {
-      return sendBadRequest(
-        res,
-        "Password and confirm password do not match"
-      );
-    }
-
-    if (checkFallback()) {
-      const duplicate =
-        FallbackDb.findOne("teachers", { employeeId: payload.employeeId }) ||
-        FallbackDb.findOne("users", { email: payload.email });
-      if (duplicate) {
-        return sendError(
-          res,
-          "Teacher employee ID or email already exists",
-          409
-        );
-      }
-
-      const userRecord = FallbackDb.create("users", {
-        username: payload.employeeId.toLowerCase(),
-        employeeId: payload.employeeId,
-        email: payload.email,
-        password,
-        role: payload.role,
-        permissions: payload.permissions,
-        name: payload.name,
-        isActive: payload.status === "active",
-        forcePasswordChange: payload.forcePasswordChange,
-        accountExpiryDate: payload.accountExpiryDate,
-        loginRestriction: payload.loginRestriction,
-        twoFactorEnabled: payload.twoFactorEnabled,
-      });
-      const teacherRecord = FallbackDb.create("teachers", {
-        ...payload,
-        user: userRecord.id,
-      });
-      FallbackDb.update("users", userRecord.id, {
-        profileId: teacherRecord.id,
-      });
-
-      await logActivity({
-        userId: req.user?._id || req.user?.id,
-        action: "CREATE",
-        module: "teachers",
-        recordId: teacherRecord.id,
-        details: `Created teacher ${payload.name}`,
-        ipAddress: req.ip,
-        userAgent: req.headers["user-agent"],
-      });
-
-      return sendCreated(
-        res,
-        "Teacher and login credentials created successfully",
-        null,
-        {
-          teacher: teacherRecord,
-          accountCreated: {
-            employeeId: payload.employeeId,
-            email: payload.email,
-            temporaryPassword: password,
-          },
-        }
-      );
-    }
-
-    const existingUser = await User.findOne({
-      $or: [
-        { username: payload.employeeId.toLowerCase() },
-        { employeeId: payload.employeeId },
-        { email: payload.email },
-      ],
-    });
-    const existingTeacher = await Teacher.findOne({
-      employeeId: payload.employeeId,
-    });
-    if (existingUser || existingTeacher) {
-      return sendError(
-        res,
-        "Teacher employee ID or email already exists",
-        409
-      );
-    }
-
-    const teacherRecord = await Teacher.create(payload);
-    const userRecord = await syncUserFromTeacher({
-      teacher: teacherRecord,
-      password,
-    });
-    teacherRecord.user = userRecord._id;
-    await teacherRecord.save();
-
+    const { teacher, password } = await registerTeacher(req, req.body, { files: req.files });
     await logActivity({
-      userId: req.user?._id,
-      action: "CREATE",
-      module: "teachers",
-      recordId: teacherRecord._id,
-      details: `Created teacher ${payload.name}`,
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
+      userId: req.user?._id || req.user?.id,
+      action: "CREATE", module: "teachers", recordId: recordId(teacher),
+      details: "Created teacher " + teacher.name, ipAddress: req.ip,
     });
-
-    return sendCreated(
-      res,
-      "Teacher and login credentials created successfully",
-      null,
-      {
-        teacher: teacherRecord,
-        accountCreated: {
-          employeeId: payload.employeeId,
-          email: payload.email,
-          temporaryPassword: password,
-        },
-      }
-    );
+    res.set('Cache-Control', 'private, no-store');
+    return sendCreated(res, "Teacher and login credentials created", null, {
+      teacher: teacherProfileResponse(teacher, true),
+      accountCreated: { employeeId: teacher.employeeId, email: teacher.email, temporaryPassword: password },
+    });
   } catch (error) {
-    console.error("createTeacher error:", error);
-    return sendError(res, error.message || "Server error", 500);
+    return sendProcurementError(res, error);
   }
 };
 
-/**
- * Updates an existing teacher record and propagates details to companion User account.
- *
- * @param {import('express').Request} req - Express request
- * @param {import('express').Response} res - Express response
- */
 export const updateTeacher = async (req, res) => {
   try {
-    const { id } = req.params;
-    const updateData = { ...req.body };
-    delete updateData.password;
-    delete updateData.confirmPassword;
-    if (updateData.email) updateData.email = normalizeEmail(updateData.email);
-    if (updateData.employeeId) {
-      updateData.employeeId = normalizeEmployeeId(updateData.employeeId);
-    }
-    if (updateData.firstName || updateData.lastName) {
-      updateData.name =
-        `${updateData.firstName || ""} ${updateData.lastName || ""}`.trim();
-    }
-
-    let updatedRecord = null;
-
-    if (checkFallback() || !isValidObjectId(id)) {
-      updatedRecord =
-        FallbackDb.update("teachers", id, updateData) ||
-        FallbackDb.findOne("teachers", { employeeId: id });
-      if (updatedRecord?.user) {
-        FallbackDb.update("users", updatedRecord.user, {
-          username: updatedRecord.employeeId.toLowerCase(),
-          employeeId: updatedRecord.employeeId,
-          email: updatedRecord.email,
-          role: updatedRecord.role,
-          permissions: updatedRecord.permissions,
-          name: updatedRecord.name,
-          isActive: updatedRecord.status === "active",
-        });
-      }
-    } else {
-      updatedRecord = await Teacher.findByIdAndUpdate(id, updateData, {
-        new: true,
-      });
-      if (updatedRecord?.user) {
-        await User.findByIdAndUpdate(updatedRecord.user, {
-          username: updatedRecord.employeeId.toLowerCase(),
-          employeeId: updatedRecord.employeeId,
-          email: updatedRecord.email,
-          role: updatedRecord.role,
-          permissions: updatedRecord.permissions,
-          name: updatedRecord.name,
-          isActive: updatedRecord.status === "active",
-          forcePasswordChange: updatedRecord.forcePasswordChange,
-          accountExpiryDate: updatedRecord.accountExpiryDate,
-          loginRestriction: updatedRecord.loginRestriction,
-          twoFactorEnabled: updatedRecord.twoFactorEnabled,
-        });
-      }
-    }
-
-    if (!updatedRecord) {
-      return sendNotFound(res, "Teacher record not found");
-    }
-
+    const teacher = await saveTeacherProfile(req, req.params.id, req.body, req.files);
     await logActivity({
       userId: req.user?._id || req.user?.id,
-      action: "UPDATE",
-      module: "teachers",
-      recordId: id,
-      details: `Updated teacher ${updatedRecord.name}`,
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
+      action: "UPDATE", module: "teachers", recordId: recordId(teacher),
+      details: "Updated teacher " + teacher.name, ipAddress: req.ip,
     });
-
-    return sendSuccess(res, "Teacher updated successfully", null, 200, {
-      teacher: updatedRecord,
-    });
+    return sendSuccess(res, "Teacher updated", null, 200, { teacher: teacherProfileResponse(teacher, true) });
   } catch (error) {
-    console.error("updateTeacher error:", error);
-    return sendError(res, error.message || "Server error", 500);
+    return sendProcurementError(res, error);
   }
 };
 
@@ -552,34 +240,32 @@ export const resetTeacherPassword = async (req, res) => {
       ? generateSecurePassword("Tch@")
       : req.body.password;
 
-    if (!password || password.length < 6) {
+    if (typeof password !== 'string' || password.trim().length < 6) {
       return sendBadRequest(res, "Password must be at least 6 characters");
     }
 
-    const teacher =
-      checkFallback() || !isValidObjectId(id)
-        ? FallbackDb.findById("teachers", id) ||
-          FallbackDb.findOne("teachers", { employeeId: id })
-        : await Teacher.findById(id);
+    const teacher = await findTeacherProfile(req, id);
 
     if (!teacher) {
       return sendNotFound(res, "Teacher record not found");
     }
 
-    if (checkFallback() || !isValidObjectId(teacher.user)) {
+    const forcePasswordChange = Boolean(req.body.forcePasswordChange);
+    if (checkFallback()) {
+      const user = await readProcurement(req).get('users', teacher.user);
+      if (!user) return sendNotFound(res, "Teacher login account not found");
       FallbackDb.update("users", teacher.user, {
-        password,
-        forcePasswordChange: Boolean(req.body.forcePasswordChange),
+        password, tempPassword: password, forcePasswordChange,
       });
     } else {
-      const user = await User.findById(teacher.user);
-      if (user) {
-        user.password = password;
-        user.forcePasswordChange = Boolean(req.body.forcePasswordChange);
-        await user.save();
-      }
+      const user = await User.findOne({ _id: teacher.user, schoolId: getSchool(req) });
+      if (!user) return sendNotFound(res, "Teacher login account not found");
+      user.password = password;
+      user.forcePasswordChange = forcePasswordChange;
+      await user.save();
     }
 
+    res.set('Cache-Control', 'private, no-store');
     return sendSuccess(res, "Teacher password reset successfully", null, 200, {
       account: {
         employeeId: teacher.employeeId,
@@ -708,14 +394,10 @@ export const bulkDeleteTeachers = async (req, res) => {
  */
 export const exportTeachers = async (req, res) => {
   try {
-    let teachers = [];
-    if (checkFallback()) {
-      teachers = FallbackDb.find("teachers");
-    } else {
-      teachers = await Teacher.find().select(
-        "name employeeId designation department classesAssigned status createdAt"
-      );
-    }
+    const records = checkFallback()
+      ? await readProcurement(req).find("teachers")
+      : await Teacher.find({ schoolId: getSchool(req) }).select("name firstName lastName employeeId user designation department status createdAt");
+    const teachers = await teacherDirectoryProfiles(req, records);
 
     const headers = [
       "Name",
@@ -758,147 +440,53 @@ export const exportTeachers = async (req, res) => {
  */
 export const getTeacherCredentials = async (req, res) => {
   try {
-    const { id } = req.params;
-    let teacher = null;
-    let userRecord = null;
-
-    if (checkFallback() || !isValidObjectId(id)) {
-      teacher =
-        FallbackDb.findById("teachers", id) ||
-        FallbackDb.findOne("teachers", { employeeId: id });
-      if (teacher?.user) {
-        userRecord = FallbackDb.findById("users", teacher.user);
-      }
-    } else {
-      teacher = await Teacher.findById(id);
-      if (teacher?.user) {
-        userRecord = await User.findById(teacher.user);
-      }
-    }
-
-    const username = userRecord?.username || teacher?.employeeId || id;
-    const email =
-      userRecord?.email ||
-      teacher?.email ||
-      `${String(username).toLowerCase()}@school.local`;
-
-    let password =
-      userRecord?.tempPassword ||
-      userRecord?.password ||
-      teacher?.tempPassword ||
-      teacher?.password ||
-      "admin";
-
-    if (password.startsWith("$2a$") || password.startsWith("$2b$")) {
-      password = userRecord?.tempPassword || teacher?.tempPassword || "admin";
-    }
-
+    const teacher = await findTeacherProfile(req, req.params.id);
+    if (!teacher) return sendNotFound(res, "Teacher record not found");
+    const userRecord = await readProcurement(req).get('users', teacher.user);
+    if (!userRecord) return sendNotFound(res, "Teacher login account not found");
+    const saved = userRecord.password || '';
+    const password = userRecord.tempPassword || (/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(saved) ? '' : saved);
+    res.set('Cache-Control', 'private, no-store');
     return sendSuccess(res, undefined, null, 200, {
       credentials: {
-        username,
-        email,
-        password,
-        name: teacher?.name || username,
-        employeeId: teacher?.employeeId || username,
+        username: userRecord.username || teacher.employeeId, email: userRecord.email || teacher.email,
+        password, name: teacher.name, employeeId: teacher.employeeId,
       },
     });
   } catch (error) {
-    console.error("getTeacherCredentials error:", error);
-    return sendError(res, "Server error", 500);
+    return sendProcurementError(res, error);
   }
 };
 
-/**
- * Bulk imports teacher records from an array payload.
- *
- * @param {import('express').Request} req - Express request
- * @param {import('express').Response} res - Express response
- */
 export const bulkImportTeachers = async (req, res) => {
-  try {
-    const { teachers } = req.body;
-    if (!Array.isArray(teachers) || teachers.length === 0) {
-      return sendBadRequest(res, "No teacher data provided for import");
+  const { teachers } = req.body || {};
+  if (!Array.isArray(teachers) || !teachers.length) return sendBadRequest(res, "No teacher data provided for import");
+
+  let count = 0;
+  const errors = [];
+  for (const [index, teacher] of teachers.entries()) {
+    try {
+      await registerTeacher(req, teacher, { allowGeneratedPassword: true });
+      count += 1;
+    } catch (error) {
+      let message = 'Could not import this teacher. Check the supplied fields.';
+      if (error.code === 11000) message = 'Teacher employee ID or email already exists.';
+      else if (error.statusCode) message = error.message;
+      errors.push({ index, error: message });
     }
-
-    let successCount = 0;
-    const errors = [];
-
-    for (let i = 0; i < teachers.length; i++) {
-      const raw = teachers[i];
-      try {
-        const payload = await buildTeacherPayload(raw);
-        let password = raw.password;
-        if (!password || password.length < 6) {
-          password = generateSecurePassword("Tch@");
-        }
-
-        if (!payload.name) payload.name = `Teacher ${payload.employeeId}`;
-        if (!payload.phone) payload.phone = "+919876543210";
-
-        let createdTeacher = null;
-        if (checkFallback()) {
-          const user = FallbackDb.create("users", {
-            username: payload.employeeId.toLowerCase(),
-            employeeId: payload.employeeId,
-            email: payload.email,
-            password,
-            tempPassword: password,
-            role: payload.role || "teacher",
-            permissions: payload.permissions,
-            name: payload.name,
-            isActive: true,
-          });
-          createdTeacher = FallbackDb.create("teachers", {
-            ...payload,
-            user: user.id,
-            tempPassword: password,
-          });
-          FallbackDb.update("users", user.id, { profileId: createdTeacher.id });
-        } else {
-          const existing = await Teacher.findOne({
-            employeeId: payload.employeeId,
-          });
-          if (!existing) {
-            const user = await syncUserFromTeacher({
-              teacher: { ...payload, _id: new mongoose.Types.ObjectId() },
-              password,
-            });
-            createdTeacher = await Teacher.create({
-              ...payload,
-              user: user._id,
-              tempPassword: password,
-            });
-            await syncUserFromTeacher({
-              teacher: createdTeacher,
-              password,
-              existingUser: user,
-            });
-          }
-        }
-        successCount++;
-      } catch (err) {
-        errors.push({
-          index: i,
-          name: raw.firstName || raw.name,
-          error: err.message,
-        });
-      }
-    }
-
-    return sendSuccess(
-      res,
-      `Successfully imported ${successCount} out of ${teachers.length} teachers.`,
-      null,
-      200,
-      {
-        count: successCount,
-        total: teachers.length,
-        errors,
-      }
-    );
-  } catch (error) {
-    console.error("bulkImportTeachers error:", error);
-    return sendError(res, "Bulk import failed", 500);
   }
+  await logActivity({
+    userId: req.user?._id || req.user?.id, action: 'BULK', module: 'teachers',
+    details: 'Imported ' + count + ' teachers', metadata: { total: teachers.length, count, errors: errors.length },
+    ipAddress: req.ip,
+  });
+  const report = { count, total: teachers.length, errors };
+  if (!count) {
+    return res.json({
+      success: false, schoolId: getSchool(req),
+      message: "No teachers were imported. Review the row errors.",
+      ...report,
+    });
+  }
+  return sendSuccess(res, "Teacher import completed", null, 200, report);
 };

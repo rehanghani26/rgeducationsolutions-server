@@ -44,7 +44,7 @@ router.get("/:id", protect, getClassRoomById);
 router.post(
   "/",
   protect,
-  authorize("super-admin", "school-admin", "principal", "admin"),
+  authorize("super-admin", "school-admin", "principal", "admin", "director"),
   createClassRoom
 );
 

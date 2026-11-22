@@ -4,23 +4,10 @@
  */
 
 import Setting from '../../models/Setting.js';
-import ClassSyllabus from '../../models/ClassSyllabus.js';
 import { checkFallback } from '../../config/db.js';
 import { FallbackDb } from '../../services/dbFallback.js';
 import { logActivity } from '../../utils/activityLogger.js';
-import { getDefaultCurriculumForClass } from '../../controllers/syllabusController.js';
-
-const normalizeClassId = (raw) => {
-  if (!raw) return '';
-  const str = String(raw).trim().toLowerCase();
-  if (str.includes('nur')) return 'cls-nur';
-  if (str.includes('lkg')) return 'cls-lkg';
-  if (str.includes('ukg')) return 'cls-ukg';
-  if (str.includes('passout')) return 'cls-passout';
-  const num = str.match(/\d+/);
-  if (num) return `cls-${num[0]}`;
-  return str.replace(/\s+/g, '-');
-};
+import { readPublishedSyllabuses } from '../../services/classSyllabusService.js';
 
 export const settingsToolDefinitions = [
   {
@@ -59,45 +46,6 @@ export const settingsToolDefinitions = [
           type: 'string',
           description: 'Class name or level e.g. "Class 1", "Class 10", "Nursery", "Class 12".',
         },
-      },
-      required: ['className'],
-    },
-  },
-  {
-    name: 'updateClassSyllabus',
-    description:
-      'Configure or update prescribed subjects and books for a class syllabus, including textbook name, max marks, and pass marks.',
-    parameters: {
-      type: 'object',
-      properties: {
-        className: { type: 'string', description: 'Target class name e.g. "Class 1", "Class 10" (required).' },
-        subjects: {
-          type: 'array',
-          description: 'List of subjects and their prescribed textbooks.',
-          items: {
-            type: 'object',
-            properties: {
-              subjectName: { type: 'string', description: 'Subject name e.g. "English", "Mathematics" (required).' },
-              bookName: { type: 'string', description: 'Prescribed book name e.g. "Our English", "Math Magic".' },
-              author: { type: 'string', description: 'Book author or publisher.' },
-              maxMarks: { type: 'number', description: 'Maximum marks (default 100).' },
-              passMarks: { type: 'number', description: 'Passing marks (default 35).' },
-            },
-            required: ['subjectName'],
-          },
-        },
-      },
-      required: ['className', 'subjects'],
-    },
-  },
-  {
-    name: 'resetClassSyllabus',
-    description:
-      'Reset a class syllabus to the standard national curriculum default (NCERT/State board standard books and marks).',
-    parameters: {
-      type: 'object',
-      properties: {
-        className: { type: 'string', description: 'Target class to reset e.g. "Class 1", "Class 10".' },
       },
       required: ['className'],
     },
@@ -176,182 +124,8 @@ export const settingsToolExecutors = {
     };
   },
 
-  async getClassSyllabus(args, context) {
-    const { className } = args;
-    const normalized = normalizeClassId(className);
-
-    if (checkFallback()) {
-      const list = FallbackDb.find('syllabus') || [];
-      const found = list.find(
-        (s) =>
-          normalizeClassId(s.classId) === normalized ||
-          String(s.className || '').toLowerCase() === String(className).toLowerCase()
-      );
-
-      if (found) {
-        return {
-          success: true,
-          isDefault: false,
-          className: found.className,
-          academicYear: found.academicYear,
-          subjectCount: (found.subjects || []).length,
-          subjects: (found.subjects || []).map((s) => ({
-            subjectName: s.subjectName,
-            bookName: s.bookName || 'Prescribed Text',
-            author: s.author || '',
-            publisher: s.publisher || '',
-            maxMarks: s.maxMarks || 100,
-            passMarks: s.passMarks || 35,
-          })),
-        };
-      }
-
-      const def = getDefaultCurriculumForClass(className);
-      return {
-        success: true,
-        isDefault: true,
-        className: def.className,
-        academicYear: def.academicYear,
-        subjectCount: def.subjects.length,
-        subjects: def.subjects,
-        note: 'Loaded default standard curriculum. Can be customized using updateClassSyllabus.',
-      };
-    }
-
-    let syllabus = await ClassSyllabus.findOne({
-      $or: [
-        { classId: className },
-        { classId: normalized },
-        { className: new RegExp(`^${className}$`, 'i') },
-      ],
-    });
-
-    if (!syllabus) {
-      const def = getDefaultCurriculumForClass(className);
-      return {
-        success: true,
-        isDefault: true,
-        className: def.className,
-        academicYear: def.academicYear,
-        subjectCount: def.subjects.length,
-        subjects: def.subjects,
-        note: 'Loaded standard default curriculum.',
-      };
-    }
-
-    return {
-      success: true,
-      isDefault: false,
-      className: syllabus.className,
-      academicYear: syllabus.academicYear,
-      subjectCount: (syllabus.subjects || []).length,
-      subjects: (syllabus.subjects || []).map((s) => ({
-        subjectName: s.subjectName,
-        bookName: s.bookName || 'Prescribed Text',
-        author: s.author || '',
-        publisher: s.publisher || '',
-        maxMarks: s.maxMarks || 100,
-        passMarks: s.passMarks || 35,
-      })),
-    };
-  },
-
-  async updateClassSyllabus(args, context) {
-    const { className, subjects = [] } = args;
-    const normalized = normalizeClassId(className);
-
-    const formattedSubjects = subjects.map((s) => ({
-      subjectName: s.subjectName,
-      bookName: s.bookName || '',
-      author: s.author || '',
-      publisher: s.publisher || '',
-      maxMarks: Number(s.maxMarks) || 100,
-      passMarks: Number(s.passMarks) || 35,
-    }));
-
-    const yr = new Date().getFullYear();
-    const payload = {
-      classId: normalized,
-      className: className.trim(),
-      academicYear: `${yr}-${yr + 1}`,
-      description: `Official Curriculum & Books for ${className}`,
-      subjects: formattedSubjects,
-    };
-
-    if (checkFallback()) {
-      const list = FallbackDb.find('syllabus') || [];
-      const existing = list.find(
-        (s) =>
-          normalizeClassId(s.classId) === normalized ||
-          String(s.className || '').toLowerCase() === String(className).toLowerCase()
-      );
-
-      if (existing) {
-        FallbackDb.update('syllabus', existing.id || existing._id, payload);
-      } else {
-        FallbackDb.create('syllabus', payload);
-      }
-    } else {
-      await ClassSyllabus.findOneAndUpdate(
-        { $or: [{ classId: normalized }, { className: new RegExp(`^${className}$`, 'i') }] },
-        payload,
-        { upsert: true, new: true }
-      );
-    }
-
-    await logActivity({
-      userId: context.user?._id || context.user?.id,
-      action: 'UPDATE',
-      module: 'syllabus',
-      details: `AI updated curriculum and books for ${className} with ${formattedSubjects.length} subjects`,
-      ipAddress: context.ip || 'AI',
-    });
-
-    return {
-      success: true,
-      message: `Prescribed syllabus & books for "${className}" saved with ${formattedSubjects.length} subjects.`,
-      subjects: formattedSubjects,
-    };
-  },
-
-  async resetClassSyllabus(args, context) {
-    const { className } = args;
-    const defaultTemplate = getDefaultCurriculumForClass(className);
-    const normalized = normalizeClassId(className);
-
-    if (checkFallback()) {
-      const list = FallbackDb.find('syllabus') || [];
-      const existing = list.find(
-        (s) =>
-          normalizeClassId(s.classId) === normalized ||
-          String(s.className || '').toLowerCase() === String(className).toLowerCase()
-      );
-
-      if (existing) {
-        FallbackDb.update('syllabus', existing.id || existing._id, {
-          subjects: defaultTemplate.subjects,
-        });
-      } else {
-        FallbackDb.create('syllabus', defaultTemplate);
-      }
-    } else {
-      await ClassSyllabus.findOneAndUpdate(
-        { $or: [{ classId: normalized }, { className: new RegExp(`^${className}$`, 'i') }] },
-        {
-          classId: normalized,
-          className: defaultTemplate.className,
-          academicYear: defaultTemplate.academicYear,
-          subjects: defaultTemplate.subjects,
-        },
-        { upsert: true, new: true }
-      );
-    }
-
-    return {
-      success: true,
-      message: `Syllabus for "${defaultTemplate.className}" has been reset to standard curriculum defaults.`,
-      subjectsCount: defaultTemplate.subjects.length,
-      subjects: defaultTemplate.subjects,
-    };
+  async getClassSyllabus({ className }, context) {
+    const { syllabus } = await readPublishedSyllabuses({ user: context.user }, className);
+    return { success: true, syllabus, ...(!syllabus && { message: 'No published syllabus for this class.' }) };
   },
 };

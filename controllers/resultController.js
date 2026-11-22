@@ -55,7 +55,7 @@ const computeResultTotals = (marks) => {
 
   const enrichedMarks = marks.map((m) => {
     const { grade, gradePoint } = subjectGrade(m.obtained, m.maxMarks);
-    const isPassed = m.obtained >= (m.passMarks || Math.floor(m.maxMarks * 0.33));
+    const isPassed = m.obtained >= (m.passMarks ?? Math.floor(m.maxMarks * 0.33));
     if (!isPassed) failedSubjects.push(m.subjectName);
     totalObtained += m.obtained;
     totalMaxMarks += m.maxMarks;

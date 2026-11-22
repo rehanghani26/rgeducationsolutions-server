@@ -5,6 +5,7 @@ import { createDynamicModelProxy } from "../utils/tenantContext.js";
 const SubjectScheduleSchema = new mongoose.Schema(
   {
     subjectId: { type: mongoose.Schema.Types.ObjectId, ref: "Subject" },
+    classId: String,
     subjectName: { type: String, required: true },
     subjectCode: { type: String },
     bookName: { type: String },

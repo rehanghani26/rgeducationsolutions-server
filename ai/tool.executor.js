@@ -15,6 +15,7 @@
 
 import { isToolRegistered, getToolExecutor } from './tool.registry.js';
 import { getAcademicScope } from '../utils/academicScope.js';
+import { permitsTool } from './tools/workspace.tools.js';
 
 /**
  * Execute an AI tool call safely.
@@ -42,6 +43,7 @@ export async function executeTool(toolName, args = {}, context = {}) {
   }
 
   const executor = getToolExecutor(toolName);
+  if (!permitsTool(toolName, context.user)) return { success: false, toolName, error: 'Your role does not have access to this tool.' };
   const scope = getAcademicScope();
   if (scope?.readOnly && !/^(get|list|find|search|export)/i.test(toolName)) {
     return { success: false, toolName, error: 'Select the active academic session before making changes.' };

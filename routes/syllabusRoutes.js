@@ -1,41 +1,40 @@
-// 2. External packages
-import express from 'express';
-
-// 5. Middleware
+﻿import express from 'express';
 import { protect } from '../middleware/auth.js';
-import { authorize } from '../middleware/rbac.js';
-
-// 8. Controllers
+import { sendSuccess } from '../utils/responseUtil.js';
+import { sendProcurementError } from '../utils/procurementValues.js';
 import {
-  getAllSyllabus,
-  getSyllabusByClass,
-  resetClassSyllabus,
-  upsertClassSyllabus,
-} from '../controllers/syllabusController.js';
+  changeSyllabusStatus, copyPublishedSyllabus, readPublishedSyllabuses, readSyllabusDraft, saveSyllabusDraft,
+} from '../services/classSyllabusService.js';
+import {
+  readAcademicWorkspace, readClassroomAcademics, readPersonalAcademics, updateClassroomSubject,
+} from '../services/academicWorkspaceService.js';
 
 const router = express.Router();
+const handle = (work) => async (req, res) => {
+  try {
+    return sendSuccess(res, undefined, await work(req));
+  } catch (error) {
+    return sendProcurementError(res, error);
+  }
+};
 
-const STAFF_ROLES = [
-  'super-admin',
-  'superadmin',
-  'super_admin',
-  'school-admin',
-  'school_admin',
-  'admin',
-  'principal',
-  'head-teacher',
-  'teacher',
-  'director',
-  'hod',
-  'coordinator',
-];
-
-// Any authenticated user can read syllabus
-router.get('/', protect, getAllSyllabus);
-router.get('/:classId', protect, getSyllabusByClass);
-
-// Staff can configure/update class syllabus & reset to standard
-router.put('/:classId', protect, authorize(...STAFF_ROLES), upsertClassSyllabus);
-router.post('/:classId/reset', protect, authorize(...STAFF_ROLES), resetClassSyllabus);
+router.use(protect);
+router.get('/workspace', handle(readAcademicWorkspace));
+router.get('/mine', handle(readPersonalAcademics));
+router.get('/classrooms/:roomId', handle((req) => readClassroomAcademics(req, req.params.roomId)));
+router.put('/classrooms/:roomId/subjects/:subjectId/assignment', handle((req) =>
+  updateClassroomSubject(req, req.params.roomId, req.params.subjectId, 'assignment')));
+router.put('/classrooms/:roomId/subjects/:subjectId/delivery', handle((req) =>
+  updateClassroomSubject(req, req.params.roomId, req.params.subjectId, 'delivery')));
+router.post('/classrooms/:roomId/subjects/:subjectId/request', handle((req) =>
+  updateClassroomSubject(req, req.params.roomId, req.params.subjectId, 'request')));
+router.post('/classrooms/:roomId/subjects/:subjectId/resolve', handle((req) =>
+  updateClassroomSubject(req, req.params.roomId, req.params.subjectId, 'resolve')));
+router.get('/', handle((req) => readPublishedSyllabuses(req)));
+router.get('/:classId/draft', handle((req) => readSyllabusDraft(req, req.params.classId)));
+router.get('/:classId/copy', handle((req) => copyPublishedSyllabus(req, req.params.classId)));
+router.put('/:classId', handle((req) => saveSyllabusDraft(req, req.params.classId)));
+router.post('/:classId/status', handle((req) => changeSyllabusStatus(req, req.params.classId)));
+router.get('/:classId', handle((req) => readPublishedSyllabuses(req, req.params.classId)));
 
 export default router;

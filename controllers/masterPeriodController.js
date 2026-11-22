@@ -1,7 +1,6 @@
 import {
-  defaultMasterPeriod, listMasterPeriods, removeMasterPeriod, saveMasterPeriod, setDefaultMasterPeriod, writePeriodRecords,
+  defaultMasterPeriod, listClassTimetables, listMasterPeriods, removeMasterPeriod, saveMasterPeriod, setDefaultMasterPeriod, writePeriodRecords,
 } from '../services/masterPeriodService.js';
-import { readProcurement } from '../services/procurementStore.js';
 import { classKey, gradeByValue, sectionNamesById } from '../utils/academicClass.js';
 import { academicFields, academicGrade, getAcademicScope } from '../utils/academicScope.js';
 import { procurementError, recordId, recordIds, sendProcurementError } from '../utils/procurementValues.js';
@@ -73,9 +72,7 @@ export const getClassTimetable = handle(async (req, res) => {
   const { classSection, classId, className, scheduleType = 'regular' } = req.query;
   const target = className || classSection;
   const exactSection = Boolean(classSection && /\s[-\u2013\u2014]\s/.test(classSection));
-  const timetables = (await readProcurement(req).find('classTimetables', {
-    sessionId: getAcademicScope()?.sessionId || null,
-  })).filter((item) => matchesType(item, scheduleType));
+  const timetables = await listClassTimetables(req, scheduleType);
 
   if (!target && !classId) return sendData(res, { timetables });
   const timetable = timetables.find((item) => item.classSectionKey === target ||
@@ -96,15 +93,18 @@ async function saveTimetables(req, sectionIds) {
   const scope = getAcademicScope();
   const grade = sectionIds && scope ? academicGrade(scope, classId || target) : null;
   const gradeName = grade?.name || className || target;
-  const destinations = sectionIds ? sectionIds.map((id) => ({
-    classId: grade?.id || classId, className: gradeName, sectionId: id, sectionName: sectionNamesById[id],
-    classSectionKey: gradeName + ' - ' + sectionNamesById[id],
-  })) : [{
-    classSectionKey: classSectionKey || target, classId, className: target, sectionId, sectionName,
-  }];
   const create = Boolean(sectionIds) || createOnly === true;
 
-  return writePeriodRecords(req, ['classTimetables', 'masterPeriods'], async (store, session) => {
+  return writePeriodRecords(req, ['classTimetables', 'masterPeriods', 'classRooms'], async (store, session) => {
+    const rooms = scope ? await store.find('classRooms', session) : [];
+    const findRoom = (id, section) => rooms.find((room) =>
+      room.classId === id && room.sectionId === section && room.status !== 'archived');
+    const destinations = sectionIds ? sectionIds.map((id) => {
+      const gradeId = grade?.id || classId;
+      const name = findRoom(gradeId, id)?.sectionName || (Object.hasOwn(sectionNamesById, id) && sectionNamesById[id]);
+      if (!name) throw procurementError('Choose a section configured for this class and session.');
+      return { classId: gradeId, className: gradeName, sectionId: id, sectionName: name, classSectionKey: gradeName + ' - ' + name };
+    }) : [{ classSectionKey: classSectionKey || target, classId, className: target, sectionId, sectionName }];
     const entries = (await store.find('classTimetables', session)).filter((item) => matchesType(item, scheduleType));
     const matches = destinations.map((destination) => {
       const existing = timetableId
@@ -136,8 +136,12 @@ async function saveTimetables(req, sectionIds) {
         ...destination, classId: destination.classId || saved?.classId || '', scheduleType,
       });
       if (scope) Object.assign(fields, academicFields(scope, 'classTimetables', fields, { creating: !saved }));
+      const room = scheduleType === 'regular' && findRoom(fields.classId || saved?.classId, fields.sectionId || saved?.sectionId);
+      const link = room && (!room.timetableId || (saved && String(room.timetableId) === String(recordId(saved))));
+      if (link) fields.classRoomId = recordId(room);
       const timetable = saved ? await store.update('classTimetables', recordId(saved), fields)
         : await store.create('classTimetables', { ...fields, ...session, createdBy: req.user?.name || 'admin' });
+      if (link) await store.update('classRooms', recordId(room), { timetableId: recordId(timetable) });
       timetables.push(timetable);
     }
     return timetables;
@@ -152,7 +156,7 @@ export const saveClassTimetable = handle(async (req, res) => {
 export const createSectionTimetables = handle(async (req, res) => {
   const { sectionIds } = req.body || {};
   if (!Array.isArray(sectionIds) || sectionIds.length === 0 ||
-      sectionIds.some((id) => typeof id !== 'string' || !Object.hasOwn(sectionNamesById, id))) {
+      sectionIds.some((id) => typeof id !== 'string' || id.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id))) {
     throw procurementError('Choose one or more available sections.');
   }
   if (new Set(sectionIds).size !== sectionIds.length) throw procurementError('Choose each section once.');
@@ -162,16 +166,19 @@ export const createSectionTimetables = handle(async (req, res) => {
 
 export const deleteClassTimetable = handle(async (req, res) => {
   const { id } = req.params;
-  await writePeriodRecords(req, ['classTimetables'], async (store, session) => {
+  await writePeriodRecords(req, ['classTimetables', 'classRooms'], async (store, session) => {
     const entries = await store.find('classTimetables', session);
     const exact = entries.find((entry) => recordIds(entry).includes(id));
-    if (exact) return store.remove('classTimetables', recordId(exact));
-    if (req.query.byId === 'true') throw procurementError('This timetable is no longer available.', 404);
-    for (const entry of entries) {
-      if ([entry.classSectionKey, entry.className, String(entry.classId)].includes(id)) {
-        await store.remove('classTimetables', recordId(entry));
-      }
+    if (!exact && req.query.byId === 'true') throw procurementError('This timetable is no longer available.', 404);
+    const targets = exact ? [exact] : entries.filter((entry) =>
+      [entry.classSectionKey, entry.className, String(entry.classId)].includes(id));
+    if (!targets.length) return;
+    const ids = new Set(targets.map((entry) => String(recordId(entry))));
+    const rooms = session.sessionId ? await store.find('classRooms', session) : [];
+    for (const room of rooms) {
+      if (ids.has(String(room.timetableId))) await store.update('classRooms', recordId(room), { timetableId: null });
     }
+    for (const entry of targets) await store.remove('classTimetables', recordId(entry));
   });
   return sendSuccess(res, 'Class timetable deleted successfully');
 });

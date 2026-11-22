@@ -1,9 +1,11 @@
 // 2. External packages
 import express from "express";
+import multer from "multer";
 
 // 5. Middleware
 import { protect } from "../middleware/auth.js";
 import { authorize } from "../middleware/rbac.js";
+import { sendBadRequest } from "../utils/responseUtil.js";
 
 // 8. Controllers
 import {
@@ -22,12 +24,33 @@ import {
   getTeacherActivity,
   getTeacherById,
   getTeacherCredentials,
+  getTeacherFile,
   getTeachers,
   resetTeacherPassword,
   updateTeacher,
 } from "../controllers/teacherController.js";
 
 const router = express.Router();
+const manageTeachers = authorize("super-admin", "school-admin", "principal");
+const uploadProfileFiles = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024, files: 2, fields: 1, fieldSize: 64 * 1024 },
+}).fields([{ name: 'photo', maxCount: 1 }, { name: 'aadhaar', maxCount: 1 }]);
+
+function readTeacherProfile(req, res, next) {
+  if (!req.is('multipart/form-data')) return next();
+  uploadProfileFiles(req, res, (error) => {
+    if (error) {
+      return sendBadRequest(res, error.code === 'LIMIT_FILE_SIZE' ? 'Each teacher file must be 1 MB or smaller.' : 'Could not read the teacher files.');
+    }
+    try {
+      req.body = JSON.parse(req.body.profile || '');
+    } catch {
+      return sendBadRequest(res, 'Provide the teacher profile with the files.');
+    }
+    return next();
+  });
+}
 
 /**
  * @route   GET /api/v1/teachers/export/csv
@@ -94,6 +117,7 @@ router.get(
 );
 
 router.get("/:id/activity", protect, getTeacherActivity);
+router.get("/:id/files/:kind", protect, getTeacherFile);
 router.get("/:id", protect, getTeacherById);
 router.post(
   "/bulk-delete",
@@ -104,13 +128,15 @@ router.post(
 router.post(
   "/",
   protect,
-  authorize("super-admin", "school-admin", "principal"),
+  manageTeachers,
+  readTeacherProfile,
   createTeacher
 );
 router.put(
   "/:id",
   protect,
-  authorize("super-admin", "school-admin", "principal"),
+  manageTeachers,
+  readTeacherProfile,
   updateTeacher
 );
 router.patch(

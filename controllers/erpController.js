@@ -9,7 +9,6 @@ import { uploadToS3, generateS3Key, getPresignedUrl, resolveFileUrl } from '../c
 // 4. Models
 import Book from '../models/Book.js';
 import ClassRoom from '../models/ClassRoom.js';
-import Curriculum from '../models/Curriculum.js';
 import Leave from '../models/Leave.js';
 import Library from '../models/Library.js';
 import Notice from '../models/Notice.js';
@@ -150,87 +149,31 @@ export const createClass = async (req, res) => {
 };
 
 /**
- * Create a new section for a class.
- *
- * @route POST /api/erp/sections
- */
-export const createSection = async (req, res) => {
-  try {
-    const { name, classId, className, room, capacity, enrolled, classTeacher } = req.body;
-    if (!name) {
-      return sendBadRequest(res, 'Section Name is required');
-    }
-
-    if (checkFallback()) {
-      const record = FallbackDb.create('sections', {
-        name,
-        classId: classId || 'c1',
-        className: className || 'Grade 10',
-        room: room || 'Block A - Room 201',
-        capacity: Number(capacity) || 35,
-        enrolled: Number(enrolled) || 0,
-        classTeacher: classTeacher || 'Unassigned'
-      });
-      return res.status(201).json({ success: true, message: 'Section created successfully', section: record });
-    }
-
-    const newSection = await Section.create({
-      name,
-      classId: classId || undefined,
-      room,
-      capacity: Number(capacity) || 35,
-      enrolled: Number(enrolled) || 0
-    });
-
-    return res.status(201).json({ success: true, message: 'Section created successfully', section: newSection });
-  } catch (err) {
-    return sendError(res, err.message || 'Server error creating section', 500, err);
-  }
-};
-
-/**
  * Register a new academic subject.
  *
  * @route POST /api/erp/subjects
  */
 export const createSubject = async (req, res) => {
   try {
-    const { name, code, type, credits, teacher } = req.body;
-    if (!name || !code) {
-      return sendBadRequest(res, 'Subject Name and Registry Code are required');
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const code = typeof req.body.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+    const type = req.body.type || 'theory';
+    if (!name || name.length > 100 || !/^[A-Z0-9][A-Z0-9_-]{0,29}$/.test(code)) {
+      return sendBadRequest(res, 'Enter a subject name and a code of up to 30 letters, numbers, hyphens, or underscores.');
     }
-
-    if (checkFallback()) {
-      const existing = FallbackDb.findOne('subjects', { code });
-      if (existing) {
-        return sendBadRequest(res, 'Subject code already exists');
+    if (!['theory', 'practical'].includes(type)) return sendBadRequest(res, 'Choose theory or practical.');
+    const subject = await writeProcurement(req, ['subjects'], async (store) => {
+      await store.lockAcademicSettings();
+      const subjects = await store.find('subjects');
+      if (subjects.some((entry) => String(entry.code).trim().toUpperCase() === code)) {
+        throw academicError('This subject code is already in use.', 409);
       }
-      const record = FallbackDb.create('subjects', {
-        name,
-        code,
-        type: type || 'theory',
-        credits: Number(credits) || 3,
-        teacher: teacher || 'Unassigned'
-      });
-      return res.status(201).json({ success: true, message: 'Subject created successfully', subject: record });
-    }
-
-    const existingSub = await Subject.findOne({ code });
-    if (existingSub) {
-      return sendBadRequest(res, 'Subject code already exists');
-    }
-
-    const newSubject = await Subject.create({
-      name,
-      code,
-      type: type || 'theory',
-      credits: Number(credits) || 3,
-      teacher: teacher || 'Unassigned'
+      return store.create('subjects', { name, code, type });
     });
-
-    return res.status(201).json({ success: true, message: 'Subject created successfully', subject: newSubject });
-  } catch (err) {
-    return sendError(res, err.message || 'Server error creating subject', 500, err);
+    return res.status(201).json({ success: true, message: 'Subject created successfully', subject });
+  } catch (error) {
+    if (error.code === 11000) return sendError(res, 'This subject code is already in use.', 409);
+    return sendError(res, error.message || 'Unable to create subject.', error.statusCode || 500);
   }
 };
 
@@ -712,18 +655,6 @@ export const uploadProfileImage = async (req, res) => {
 };
 
 /**
- * Seed initial sample dummy teachers, students, parents, and classes.
- *
- * @route POST /api/erp/seed-dummies
- */
-export const seedDummies = async (req, res) => {
-  return res.status(200).json({
-    success: true,
-    message: 'Seed dummy data generation is disabled.'
-  });
-};
-
-/**
  * Retrieve public active notices.
  *
  * @route GET /api/erp/notices
@@ -937,263 +868,6 @@ export const getApplicantLeaves = async (req, res) => {
       history: list,
       activeLeaveNow: list.find((l) => l.status === 'approved')
     });
-  } catch (err) {
-    return sendError(res, err.message, 500, err);
-  }
-};
-
-/**
- * Retrieve academic curriculums with optional class and section filters.
- *
- * @route GET /api/erp/curriculums
- */
-export const getCurriculums = async (req, res) => {
-  try {
-    const { className, sectionName } = req.query;
-    let curriculums = [];
-
-    if (checkFallback()) {
-      curriculums = FallbackDb.find('curriculums') || [];
-      if (className && className !== 'All') {
-        const numMatch = className.match(/\d+/)?.[0];
-        curriculums = curriculums.filter((c) => {
-          if (!c.className) return true;
-          if (numMatch && c.className.includes(numMatch)) return true;
-          return c.className.toLowerCase().includes(className.toLowerCase());
-        });
-      }
-      if (sectionName && sectionName !== 'All' && sectionName !== 'All Sections') {
-        curriculums = curriculums.filter((c) => {
-          if (!c.sectionName || c.sectionName === 'All Sections') return true;
-          return c.sectionName.toLowerCase() === sectionName.toLowerCase();
-        });
-      }
-    } else {
-      const query = {};
-      if (className && className !== 'All') {
-        const numMatch = className.match(/\d+/)?.[0];
-        if (numMatch) {
-          query.className = new RegExp(numMatch, 'i');
-        } else {
-          query.className = new RegExp(className.trim(), 'i');
-        }
-      }
-      if (sectionName && sectionName !== 'All' && sectionName !== 'All Sections') {
-        query.$or = [
-          { sectionName: new RegExp(`^${sectionName.trim()}$`, 'i') },
-          { sectionName: 'All Sections' },
-          { sectionName: { $exists: false } },
-          { sectionName: '' },
-          { sectionName: null }
-        ];
-      }
-
-      curriculums = await Curriculum.find(query).sort({ createdAt: -1 });
-    }
-
-    return res.status(200).json({
-      success: true,
-      count: curriculums.length,
-      curriculums: curriculums || []
-    });
-  } catch (err) {
-    return sendError(res, err.message || 'Server error fetching curriculum', 500, err);
-  }
-};
-
-/**
- * Assign and create a new curriculum course record.
- *
- * @route POST /api/erp/curriculums
- */
-export const createCurriculum = async (req, res) => {
-  try {
-    const userRole = (req.user?.role || '').toLowerCase().replace(/_/g, '-');
-    const isPrivileged = ['super-admin', 'superadmin', 'school-admin', 'admin', 'principal', 'director'].includes(userRole);
-    const isTeacher = ['teacher', 'head-teacher', 'hod', 'coordinator'].includes(userRole);
-
-    if (!isPrivileged && !isTeacher) {
-      return sendForbidden(res, 'Permission denied. Only Administrators, Principals, and Class Teachers can assign curriculum & courses.');
-    }
-
-    const {
-      className,
-      sectionName,
-      name,
-      code,
-      type,
-      credits,
-      teacher,
-      teacherRole,
-      room,
-      schedule,
-      progress,
-      currentChapter,
-      units,
-      materials
-    } = req.body;
-
-    if (!name || !code) {
-      return sendBadRequest(res, 'Subject Name and Course Code are required');
-    }
-
-    const payload = {
-      className: className || 'Class 10',
-      sectionName: sectionName || 'All Sections',
-      name: name.trim(),
-      code: code.trim().toUpperCase(),
-      type: type || 'theory',
-      credits: Number(credits) || 4,
-      teacher: teacher || req.user.name || 'Assigned Faculty',
-      teacherRole: teacherRole || (isTeacher ? 'Class Teacher' : 'Subject Lecturer'),
-      room: room || 'Room 101',
-      schedule: schedule || 'Mon, Wed, Fri (08:00 AM)',
-      progress: Number(progress) || 0,
-      currentChapter: currentChapter || '',
-      assignedBy: req.user.name || 'Administration',
-      assignedByRole: userRole,
-      units: Array.isArray(units) ? units : [],
-      materials: Array.isArray(materials) ? materials : []
-    };
-
-    let record;
-    if (checkFallback()) {
-      record = FallbackDb.create('curriculums', payload);
-    } else {
-      record = await Curriculum.create(payload);
-    }
-
-    return res.status(201).json({
-      success: true,
-      message: 'Academic Curriculum & Course assigned successfully',
-      curriculum: record
-    });
-  } catch (err) {
-    return sendError(res, err.message || 'Failed to assign curriculum', 500, err);
-  }
-};
-
-/**
- * Update an existing academic curriculum.
- *
- * @route PUT /api/erp/curriculums/:id
- */
-export const updateCurriculum = async (req, res) => {
-  try {
-    const { id } = req.params;
-    let updated;
-
-    if (checkFallback()) {
-      updated = FallbackDb.update('curriculums', id, req.body);
-    } else {
-      updated = await Curriculum.findByIdAndUpdate(id, req.body, { new: true, runValidators: true });
-    }
-
-    if (!updated) {
-      return sendNotFound(res, 'Curriculum record not found');
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Curriculum updated successfully',
-      curriculum: updated
-    });
-  } catch (err) {
-    return sendError(res, err.message || 'Failed to update curriculum', 500, err);
-  }
-};
-
-/**
- * Delete a curriculum course record.
- *
- * @route DELETE /api/erp/curriculums/:id
- */
-export const deleteCurriculum = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (checkFallback()) {
-      FallbackDb.delete('curriculums', id);
-    } else {
-      await Curriculum.findByIdAndDelete(id);
-    }
-
-    return sendSuccess(res, 'Curriculum course removed successfully');
-  } catch (err) {
-    return sendError(res, err.message || 'Failed to delete curriculum', 500, err);
-  }
-};
-
-/**
- * Add a syllabus chapter / unit to a curriculum.
- *
- * @route POST /api/erp/curriculums/:id/units
- */
-export const addCurriculumUnit = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { title, status, duration } = req.body;
-
-    if (!title) {
-      return sendBadRequest(res, 'Unit title is required');
-    }
-
-    const newUnit = {
-      id: Date.now(),
-      title,
-      status: status || 'upcoming',
-      duration: duration || '2 weeks'
-    };
-
-    if (checkFallback()) {
-      const cur = FallbackDb.findOne('curriculums', { id });
-      if (cur) {
-        cur.units = [...(cur.units || []), newUnit];
-        FallbackDb.update('curriculums', id, cur);
-      }
-    } else {
-      await Curriculum.findByIdAndUpdate(id, { $push: { units: newUnit } });
-    }
-
-    return res.status(200).json({ success: true, message: 'Unit added successfully', unit: newUnit });
-  } catch (err) {
-    return sendError(res, err.message, 500, err);
-  }
-};
-
-/**
- * Attach study material to a curriculum.
- *
- * @route POST /api/erp/curriculums/:id/materials
- */
-export const addCurriculumMaterial = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, type, size, url } = req.body;
-
-    if (!name) {
-      return sendBadRequest(res, 'Material name is required');
-    }
-
-    const newMat = {
-      name,
-      type: type || 'PDF',
-      size: size || '2.5 MB',
-      url: url || '',
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    };
-
-    if (checkFallback()) {
-      const cur = FallbackDb.findOne('curriculums', { id });
-      if (cur) {
-        cur.materials = [...(cur.materials || []), newMat];
-        FallbackDb.update('curriculums', id, cur);
-      }
-    } else {
-      await Curriculum.findByIdAndUpdate(id, { $push: { materials: newMat } });
-    }
-
-    return res.status(200).json({ success: true, message: 'Study material added successfully', material: newMat });
   } catch (err) {
     return sendError(res, err.message, 500, err);
   }

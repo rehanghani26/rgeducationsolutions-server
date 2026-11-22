@@ -29,6 +29,8 @@ export async function processAiChat({
   userMessage,
   conversationHistory = [],
   user,
+  schoolId,
+  academicSessionId,
   ip,
 }) {
   if (!userMessage?.trim()) {
@@ -52,8 +54,8 @@ export async function processAiChat({
 
   const currentDate = getCurrentDate();
   const systemPrompt = buildSystemPrompt(user, currentDate, activeSession);
-  const toolDefinitions = getAllToolDefinitions();
-  const context = { user, ip };
+  const toolDefinitions = getAllToolDefinitions(user);
+  const context = { user, schoolId: schoolId || user?.schoolId, academicSessionId, ip };
 
   // Build messages array for the model
   // Limit history to last N messages to control cost

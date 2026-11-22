@@ -26,9 +26,11 @@ import User from '../models/User.js';
 
 // 6. Services
 import { FallbackDb } from '../services/dbFallback.js';
+import { getSchool, readProcurement } from '../services/procurementStore.js';
 import { createEnrolledStudent, findScopedEnrollment, scopedStudentRoster, updateEnrolledStudent } from '../services/studentEnrollmentService.js';
 import { gradeByValue } from '../utils/academicClass.js';
 import { academicError, getAcademicScope } from '../utils/academicScope.js';
+import tenantContext from '../utils/tenantContext.js';
 import { sendStudentOtpEmail } from '../services/emailService.js';
 
 // 7. Utilities
@@ -74,7 +76,7 @@ const generateParentPassword = () =>
  *
  * @returns {Promise<string>} Next unique sequential admission number.
  */
-const getNextAdmissionNumber = async () => {
+const getNextAdmissionNumber = async (req) => {
   const year = new Date().getFullYear();
   const prefix = `STD-${year}-`;
   const pattern = new RegExp(`^STD-${year}-\\d{4}$`);
@@ -82,7 +84,7 @@ const getNextAdmissionNumber = async () => {
   let lastNum = 0;
 
   if (checkFallback()) {
-    const nums = FallbackDb.find('students')
+    const nums = (await readProcurement(req).find('students'))
       .map((s) => s.admissionNumber)
       .filter((id) => pattern.test(id || ''))
       .map((id) => Number(id.replace(prefix, '')))
@@ -240,8 +242,8 @@ const resolveSection = (val) => {
  * @param {Object} data - Raw request payload.
  * @returns {Promise<Object>} Normalized student model payload.
  */
-const buildStudentPayload = async (data) => {
-  const admissionNumber = await getNextAdmissionNumber();
+const buildStudentPayload = async (data, req) => {
+  const admissionNumber = await getNextAdmissionNumber(req);
 
   const matchedClass = resolveClass(data.classId || data.class || data.className);
   const matchedSection = resolveSection(data.section || data.sectionId || data.sectionName);
@@ -358,12 +360,14 @@ const createOrLinkParent = async (payload, studentId, studentPassword) => {
   let parentAccount = null;
 
   if (checkFallback()) {
-    let parent =
-      FallbackDb.findOne('parents', { phone: payload.parentContact }) ||
-      (payload.parentEmail ? FallbackDb.findOne('parents', { email: parentEmail }) : null);
+    const schoolId = getSchool({ schoolId: tenantContext.getSchoolId() });
+    const parents = FallbackDb.find('parents').filter((record) => getSchool(record) === schoolId);
+    let parent = parents.find((record) => record.phone === payload.parentContact) ||
+      (payload.parentEmail ? parents.find((record) => record.email === parentEmail) : null);
 
     if (!parent) {
       parent = FallbackDb.create('parents', {
+        schoolId,
         name: payload.parentName,
         phone: payload.parentContact,
         email: parentEmail,
@@ -966,7 +970,7 @@ export const createStudent = async (req, res) => {
     if (req.body.isLegacyStudent !== undefined && !isStudentLegacyValue(req.body.isLegacyStudent)) {
       return sendBadRequest(res, 'Legacy student must be true or false');
     }
-    const payload = await buildStudentPayload(req.body);
+    const payload = await buildStudentPayload(req.body, req);
     let password = req.body.password;
     if (!password || password.length < 6) {
       password = generateRandomPassword();
@@ -1569,7 +1573,7 @@ export const getStudentCredentials = async (req, res) => {
  */
 export const bulkImportStudents = async (req, res) => {
   try {
-    const { students } = req.body;
+    const { students } = req.body || {};
     if (!Array.isArray(students) || students.length === 0) {
       return sendBadRequest(res, 'No student data provided for import');
     }
@@ -1578,18 +1582,17 @@ export const bulkImportStudents = async (req, res) => {
     const errors = [];
 
     const useFallback = checkFallback();
-    // Use the same active-session fallback as the registration page.
-    let activeSession = null;
-    try {
+    const store = readProcurement(req);
+    const school = getSchool(req);
+    let activeSession = getAcademicScope()?.session;
+    if (!activeSession) {
       if (useFallback) {
-        const sessions = FallbackDb.find('academicSessions');
+        const sessions = await store.find('academicSessions');
         activeSession = sessions.find((session) => session.isCurrent) || sessions[0];
       } else {
         activeSession = await AcademicSession.findOne({ isCurrent: true }).lean()
           || await AcademicSession.findOne().sort({ startDate: -1 }).lean();
       }
-    } catch (_e) {
-      // Non-blocking
     }
 
     const activeSessionId = activeSession?._id || activeSession?.id;
@@ -1616,11 +1619,12 @@ export const bulkImportStudents = async (req, res) => {
 
         const payload = await buildStudentPayload({
           ...raw,
-          academicYear: raw.academicYear || activeSession?.sessionName,
-          sessionId: raw.sessionId || activeSessionId,
-        });
+          academicYear: activeSession?.sessionName || raw.academicYear,
+          sessionId: activeSessionId || raw.sessionId,
+        }, req);
         const conflictingEmail = useFallback
-          ? FallbackDb.findOne('students', { email: payload.email }) || FallbackDb.findOne('users', { email: payload.email })
+          ? await store.one('students', { email: payload.email }) ||
+            FallbackDb.find('users').some((record) => getSchool(record) === school && record.email === payload.email)
           : await Student.exists({ email: payload.email }) || await User.exists({ email: payload.email });
         if (conflictingEmail) {
           throw new Error('This student email is already registered.');

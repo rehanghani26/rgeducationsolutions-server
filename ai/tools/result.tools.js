@@ -10,7 +10,7 @@ import Student from '../../models/Student.js';
 import { checkFallback } from '../../config/db.js';
 import { FallbackDb } from '../../services/dbFallback.js';
 import { logActivity } from '../../utils/activityLogger.js';
-import { getDefaultCurriculumForClass } from '../../controllers/syllabusController.js';
+import { readPublishedSyllabuses } from '../../services/classSyllabusService.js';
 
 export const resultToolDefinitions = [
   {
@@ -539,14 +539,15 @@ export const resultToolExecutors = {
     const baseClass = targetClassStr.split(/\s*[-–—|]\s*/)[0].trim();
 
     if (!subjects.length) {
-      const def = getDefaultCurriculumForClass(baseClass || 'Class 12');
-      subjects = (def.subjects || []).map((s) => ({
+      const { syllabus } = await readPublishedSyllabuses({ user: context.user }, baseClass);
+      subjects = (syllabus?.subjects || []).map((s) => ({
         subjectName: s.subjectName,
         subjectCode: s.subjectCode || '',
         bookName: s.bookName || '',
         maxMarks: Number(s.maxMarks) || 100,
         passMarks: Number(s.passMarks) || 33,
       }));
+      if (!subjects.length) return { success: false, error: 'Configure the exam subjects or publish the class syllabus first.' };
     }
 
     let studentList = [];

@@ -5,15 +5,22 @@ import Book from '../models/Book.js';
 import BudgetAllocation from '../models/BudgetAllocation.js';
 import Class from '../models/Class.js';
 import ClassRoom from '../models/ClassRoom.js';
+import ClassSyllabus from '../models/ClassSyllabus.js';
 import ClassTimetable from '../models/ClassTimetable.js';
+import Curriculum from '../models/Curriculum.js';
 import Fee from '../models/Fee.js';
 import Library from '../models/Library.js';
 import MasterPeriod from '../models/MasterPeriod.js';
+import Parent from '../models/Parent.js';
+import Result from '../models/Result.js';
 import SchoolCurriculum from '../models/SchoolCurriculum.js';
 import SessionRollover from '../models/SessionRollover.js';
 import Setting from '../models/Setting.js';
 import Student from '../models/Student.js';
 import StudentSessionHistory from '../models/StudentSessionHistory.js';
+import Subject from '../models/Subject.js';
+import Teacher from '../models/Teacher.js';
+import User from '../models/User.js';
 import Inventory from '../models/Inventory.js';
 import InventoryIssuance from '../models/InventoryIssuance.js';
 import InventoryPurchase from '../models/InventoryPurchase.js';
@@ -35,13 +42,20 @@ const models = {
   classes: Class,
   classRooms: ClassRoom,
   classTimetables: ClassTimetable,
+  curriculums: Curriculum,
   fees: Fee,
   library: Library,
   masterPeriods: MasterPeriod,
+  parents: Parent,
+  results: Result,
   schoolCurricula: SchoolCurriculum,
   sessionRollovers: SessionRollover,
   students: Student,
   studentSessionHistories: StudentSessionHistory,
+  subjects: Subject,
+  syllabus: ClassSyllabus,
+  teachers: Teacher,
+  users: User,
 };
 
 const LEGACY_SCHOOL = 'IQRA_P01001';
