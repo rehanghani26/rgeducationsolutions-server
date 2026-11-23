@@ -17,16 +17,65 @@ export const workspaceDefinitions = [
   definition('getRoleAccess', 'Read effective role permissions and view scope. School administrators can look up an institutional role.', { role: { type: 'string' } }),
   definition('getSchoolSetupOverview', 'Current school profile, calendar, bell schedule, grading rules and classroom timetable configuration status.'),
 ];
-const administrators = new Set(['admin', 'super-admin', 'superadmin', 'school-admin']);
+const managers = new Set(['super-admin', 'superadmin', 'school-admin', 'admin', 'principal', 'director']);
+const faculty = new Set(['teacher', 'head-teacher', 'hod', 'coordinator']);
+
 export function permitsTool(name, user) {
   const role = roleOf({ user });
   if (!role) return false;
   if (name === 'getMyAcademicPlan') return ['student', 'parent'].includes(role);
   if (name === 'getRoleAccess') return true;
-  if (administrators.has(role)) return true;
+  if (managers.has(role)) return true;
+  if (faculty.has(role)) {
+    // Faculty can access student tools, attendance, exams, results, homework, timetable, leaves, etc.
+    const managerOnlyTools = new Set([
+      'getCurrentBudgetAllocation',
+      'getSchoolSetupOverview',
+      'runSetupStep1_SchoolProfile',
+      'runSetupStep2_AcademicSession',
+      'runSetupStep3_MasterPeriods',
+      'runSetupStep4_AcademicRules',
+      'runSetupStep5_FinancePolicies',
+      'deleteStudent',
+      'deleteTeacher',
+      'deleteAcademicSession',
+    ]);
+    return !managerOnlyTools.has(name);
+  }
   if (name === 'getCurrentBudgetAllocation') return ['accountant', 'principal'].includes(role);
   if (name === 'getAcademicWorkspace') return ['teacher', 'head-teacher', 'hod', 'coordinator', 'principal', 'director'].includes(role);
-  return name === 'getSchoolSetupOverview' && role === 'principal';
+  if (name === 'getSchoolSetupOverview') return managers.has(role);
+
+  // Student and parent portal permissions
+  if (['student', 'parent'].includes(role)) {
+    const studentPermittedTools = new Set([
+      'getStudents',
+      'getStudentById',
+      'getStudentIdCard',
+      'getStudentComprehensiveReport',
+      'getStudentLeaves',
+      'applyStudentLeave',
+      'getStudentAttendance',
+      'getStudentAttendanceRecord',
+      'getStudentFee',
+      'getStudentFeeLedger',
+      'getStudentMarksheet',
+      'getStudentAcademicReport',
+      'getStudentTimetableSchedule',
+      'getStudentHomework',
+      'getStudentDocuments',
+      'getStudentTransport',
+      'getStudentLibrary',
+      'getStudentMedicalProfile',
+      'getStudentAnalytics',
+      'getMyAcademicPlan',
+      'getRoleAccess',
+    ]);
+    return studentPermittedTools.has(name);
+  }
+
+  // Allow general read tools by default
+  return /^(get|list|find|search|export|view)/i.test(name);
 }
 export const workspaceExecutors = {
   async getAcademicWorkspace({ roomId }, context) {
