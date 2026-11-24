@@ -6,6 +6,8 @@
 import { getProvider, getFallbackProvider } from './providers/index.js';
 import { getAllToolDefinitions } from './tool.registry.js';
 import { executeTool } from './tool.executor.js';
+import { parseTextToolCalls } from './tool.parser.js';
+import { validateSchoolQuery } from './tools/validate.tool.js';
 import { buildSystemPrompt, getCurrentDate } from './system.prompt.js';
 import AcademicSession from '../models/AcademicSession.js';
 import { checkFallback } from '../config/db.js';
@@ -35,6 +37,16 @@ export async function processAiChat({
 }) {
   if (!userMessage?.trim()) {
     throw new Error("User message cannot be empty.");
+  }
+
+  // ── Guardrail: Validate School ERP Domain Relevance ───────────────────────
+  const validation = validateSchoolQuery(userMessage);
+  if (!validation.isValid) {
+    return {
+      reply: validation.response,
+      toolCalls: [],
+      usage: null,
+    };
   }
 
   let activeSession = null;
@@ -76,6 +88,19 @@ export async function processAiChat({
   let response = await callProviderWithFallback(messages, toolDefinitions);
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    // If provider returned text, check if the text contains explicit tool calls (for reasoning/text-only models)
+    if (response.type === "text" && response.text) {
+      const parsedCalls = parseTextToolCalls(response.text);
+      if (parsedCalls.length > 0) {
+        response = {
+          type: "tool_calls",
+          toolCalls: parsedCalls,
+          rawMessage: response.rawMessage,
+          usage: response.usage,
+        };
+      }
+    }
+
     if (response.type !== "tool_calls" || !response.toolCalls?.length) {
       break; // Model returned text — done
     }
@@ -99,7 +124,7 @@ export async function processAiChat({
     // Append tool call turn (assistant)
     messages.push({
       role: "assistant",
-      content: null,
+      content: response.rawMessage?.content || null,
       tool_calls: response.toolCalls.map((tc) => ({
         id: tc.id,
         type: "function",
@@ -135,13 +160,83 @@ export async function processAiChat({
     } catch (_) {}
   }
 
-  // At this point response.type should be 'text'
-  const replyText =
-    response.type === "text"
-      ? response.text
-      : toolCallLog.length > 0
-      ? `Completed ${toolCallLog.length} operation(s) successfully.`
-      : "I was unable to complete your request. Please try again.";
+  // Ensure replyText is human-readable and not a raw dangling tool call JSON string
+  let replyText = "";
+  if (response.type === "text" && response.text) {
+    let danglingCalls = parseTextToolCalls(response.text);
+
+    // Safety net: check if the text is a raw unparsed tool call JSON
+    if (
+      danglingCalls.length === 0 &&
+      /^\s*\{[\s\S]*"(?:tool|action|name|function)"\s*:[\s\S]*\}\s*$/i.test(response.text.trim())
+    ) {
+      try {
+        const parsed = JSON.parse(response.text.trim());
+        const candidate = parsed.tool || parsed.name || parsed.action || parsed.function;
+        if (candidate) {
+          danglingCalls = [
+            {
+              id: `fallback_${Date.now()}`,
+              name: candidate,
+              arguments: parsed.arguments || parsed.parameters || parsed.args || {},
+            },
+          ];
+        }
+      } catch (_) {}
+    }
+
+    if (danglingCalls.length > 0) {
+      // Execute any dangling calls if not executed yet in the agentic loop
+      for (const dc of danglingCalls) {
+        const result = await executeTool(dc.name, dc.arguments, context);
+        toolCallLog.push({
+          tool: dc.name,
+          status: result.success !== false ? "success" : "error",
+          durationMs: result.durationMs,
+          args: dc.arguments,
+          data: result,
+        });
+      }
+
+      // Synthesize a clean human-readable reply based on the tool executed
+      const firstCall = toolCallLog[0];
+      const tool = firstCall?.tool || "";
+      if (tool === "getStudents") {
+        const studentCount =
+          firstCall.data?.total ||
+          firstCall.data?.count ||
+          (Array.isArray(firstCall.data?.students) ? firstCall.data.students.length : 0);
+        replyText = `There are currently **${studentCount} students** enrolled in our school across all classes and sections.`;
+      } else if (tool === "getAttendanceByDate") {
+        const s = firstCall.data?.summary || {};
+        replyText = `Attendance for **${firstCall.args?.date || "today"}**: **${s.attendanceRate || "—"}%** attendance rate (${s.totalPresent ?? "—"} present, ${s.totalAbsent ?? "—"} absent out of ${s.totalStudents ?? "—"} total students).`;
+      } else if (tool === "getFeeSummary") {
+        const f = firstCall.data?.summary || {};
+        replyText = `Fee summary: Total collections **₹${f.totalCollected || "0"}** with pending dues of **₹${f.totalPending || "0"}**.`;
+      } else {
+        replyText = `Successfully retrieved data for **${tool}**.`;
+      }
+    } else {
+      replyText = response.text;
+    }
+  } else if (toolCallLog.length > 0) {
+    const firstCall = toolCallLog[0];
+    const tool = firstCall?.tool || "";
+    if (tool === "getStudents") {
+      const studentCount =
+        firstCall.data?.total ||
+        firstCall.data?.count ||
+        (Array.isArray(firstCall.data?.students) ? firstCall.data.students.length : 0);
+      replyText = `There are currently **${studentCount} students** enrolled in our school across all classes and sections.`;
+    } else if (tool === "getAttendanceByDate") {
+      const s = firstCall.data?.summary || {};
+      replyText = `Attendance for **${firstCall.args?.date || "today"}**: **${s.attendanceRate || "—"}%** attendance rate (${s.totalPresent ?? "—"} present, ${s.totalAbsent ?? "—"} absent out of ${s.totalStudents ?? "—"} total students).`;
+    } else {
+      replyText = `Completed ${toolCallLog.length} operation(s) successfully.`;
+    }
+  } else {
+    replyText = "I was unable to complete your request. Please try again.";
+  }
 
   return {
     reply: replyText,
@@ -168,20 +263,33 @@ async function callProviderWithFallback(messages, tools) {
     );
 
     const fallback = getFallbackProvider();
-    if (!fallback) throw primaryError;
-
-    console.warn(`[AI] Attempting failover to ${fallback.name}...`);
-    try {
-      return await fallback.generateWithTools(messages, tools);
-    } catch (fallbackError) {
-      console.error(
-        `[AI] Fallback provider (${fallback.name}) also failed:`,
-        fallbackError.message
-      );
-      throw new Error(
-        `AI service unavailable. Primary (${provider.name}): ${primaryError.message}. Fallback (${fallback.name}): ${fallbackError.message}`
-      );
+    if (fallback) {
+      console.warn(`[AI] Attempting failover to ${fallback.name}...`);
+      try {
+        return await fallback.generateWithTools(messages, tools);
+      } catch (fallbackError) {
+        console.error(
+          `[AI] Fallback provider (${fallback.name}) also failed:`,
+          fallbackError.message
+        );
+      }
     }
+
+    // Ultimate safety net: If neither primary nor fallback was Groq, try Groq directly
+    if (provider.name !== "Groq" && fallback?.name !== "Groq" && process.env.GROQ_API_KEY) {
+      try {
+        console.warn(`[AI] Attempting safety net failover to Groq...`);
+        const { GroqProvider } = await import("./providers/groq.provider.js");
+        const groq = new GroqProvider();
+        return await groq.generateWithTools(messages, tools);
+      } catch (groqError) {
+        console.error(`[AI] Safety net Groq also failed:`, groqError.message);
+      }
+    }
+
+    throw new Error(
+      `AI service temporarily unavailable (${provider.name}: ${primaryError.message})`
+    );
   }
 }
 

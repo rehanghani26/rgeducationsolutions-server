@@ -14,8 +14,14 @@ export function getProvider() {
 }
 
 export function getFallbackProvider() {
-  const primary = process.env.AI_PROVIDER || "groq";
-  const fallback = process.env.AI_FALLBACK_PROVIDER || "gemini";
+  const primary = (process.env.AI_PROVIDER || "groq").toLowerCase();
+  let fallback = (process.env.AI_FALLBACK_PROVIDER || "").toLowerCase();
+
+  // If fallback is not set or points to gemini without a valid AIza key, safely use groq or nvidia
+  const hasValidGeminiKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.startsWith("AIzaSy"));
+  if (!fallback || fallback === "gemini" && !hasValidGeminiKey) {
+    fallback = primary === "groq" ? "nvidia" : "groq";
+  }
 
   // No fallback if same as primary or explicitly disabled
   if (!fallback || fallback === "none" || fallback === primary) {

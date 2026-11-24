@@ -30,6 +30,7 @@ import { dashboardToolDefinitions, dashboardToolExecutors } from './tools/dashbo
 import { onlineClassToolDefinitions, onlineClassToolExecutors } from './tools/online-class.tools.js';
 import { sessionToolDefinitions, sessionToolExecutors } from './tools/session.tools.js';
 import { setupToolDefinitions, setupToolExecutors } from './tools/setup.tools.js';
+import { validationToolDefinitions, validationToolExecutors } from './tools/validate.tool.js';
 import { workspaceDefinitions, workspaceExecutors, permitsTool } from './tools/workspace.tools.js';
 
 // ─── Combined Definitions (schema for the AI model) ──────────────────────────
@@ -59,6 +60,7 @@ export const ALL_TOOL_DEFINITIONS = [
   ...dashboardToolDefinitions,
   ...onlineClassToolDefinitions,
   ...setupToolDefinitions,
+  ...validationToolDefinitions,
 ];
 
 // ─── Combined Executors (implementation functions) ────────────────────────────
@@ -87,7 +89,27 @@ const ALL_EXECUTORS = {
   ...dashboardToolExecutors,
   ...onlineClassToolExecutors,
   ...setupToolExecutors,
+  ...validationToolExecutors,
 };
+
+// ─── Tool Aliases & Name Resolver ─────────────────────────────────────────────
+export const TOOL_ALIASES = {
+  getDailyAttendanceSummary: "getAttendanceByDate",
+  getDailyAttendance: "getAttendanceByDate",
+  getTodayAttendance: "getAttendanceByDate",
+  getAllStudents: "getStudents",
+  listStudents: "getStudents",
+  getAllTeachers: "getTeachers",
+  listTeachers: "getTeachers",
+  getFeeDetails: "getFeeSummary",
+  getFeeReport: "getFeeSummary",
+};
+
+export function resolveToolName(toolName) {
+  if (!toolName) return "";
+  const trimmed = String(toolName).trim();
+  return TOOL_ALIASES[trimmed] || trimmed;
+}
 
 // Build a Set of approved tool names for O(1) lookup
 const APPROVED_TOOLS = new Set(Object.keys(ALL_EXECUTORS));
@@ -95,22 +117,26 @@ const APPROVED_TOOLS = new Set(Object.keys(ALL_EXECUTORS));
 // ─── Registry API ─────────────────────────────────────────────────────────────
 
 /**
- * Check if a tool name is registered and safe to execute.
+ * Check if a tool name is registered and safe to execute (supports aliases).
  * @param {string} toolName
  * @returns {boolean}
  */
 export function isToolRegistered(toolName) {
-  return APPROVED_TOOLS.has(toolName);
+  if (!toolName) return false;
+  const resolved = resolveToolName(toolName);
+  return APPROVED_TOOLS.has(resolved);
 }
 
 /**
- * Get the executor function for a registered tool.
+ * Get the executor function for a registered tool (supports aliases).
  * Returns null if the tool is not registered.
  * @param {string} toolName
  * @returns {Function|null}
  */
 export function getToolExecutor(toolName) {
-  return ALL_EXECUTORS[toolName] || null;
+  if (!toolName) return null;
+  const resolved = resolveToolName(toolName);
+  return ALL_EXECUTORS[resolved] || null;
 }
 
 /**

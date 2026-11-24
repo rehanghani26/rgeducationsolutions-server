@@ -24,7 +24,7 @@ export function permitsTool(name, user) {
   const role = roleOf({ user });
   if (!role) return false;
   if (name === 'getMyAcademicPlan') return ['student', 'parent'].includes(role);
-  if (name === 'getRoleAccess') return true;
+  if (name === 'getRoleAccess' || name === 'validateQueryRelevance') return true;
   if (managers.has(role)) return true;
   if (faculty.has(role)) {
     // Faculty can access student tools, attendance, exams, results, homework, timetable, leaves, etc.

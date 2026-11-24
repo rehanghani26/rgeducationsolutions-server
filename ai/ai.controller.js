@@ -111,23 +111,20 @@ export async function chatController(req, res) {
     );
 
     // ── Provider-specific friendly errors ─────────────────────────────────────
-    let statusCode = 500;
     const isDev = process.env.NODE_ENV !== "production";
     let userMessage = isDev
-      ? `AI Error: ${error.message}`
-      : "The AI assistant is temporarily unavailable. Please try again.";
+      ? `AI Assistant Notice: ${error.message}`
+      : "The AI assistant is temporarily busy or unavailable. Please try again.";
 
     const msg = error.message || "";
 
     if (
-      msg.includes("API Key") ||
-      msg.includes("api_key") ||
+      msg.includes("API Key not valid") ||
+      msg.includes("Invalid API key") ||
       msg.includes("API_KEY_INVALID") ||
       msg.includes("PERMISSION_DENIED") ||
-      msg.includes("Invalid API key") ||
-      msg.includes("401")
+      (msg.includes("API key") && (msg.includes("invalid") || msg.includes("expired")))
     ) {
-      statusCode = 503;
       userMessage =
         "AI provider API key is invalid or expired. Please update the API key in the server .env file.";
     } else if (
@@ -135,7 +132,6 @@ export async function chatController(req, res) {
       msg.toLowerCase().includes("quota") ||
       msg.includes("429")
     ) {
-      statusCode = 429;
       userMessage =
         "AI rate limit reached. Please wait a moment and try again.";
     } else if (
@@ -143,22 +139,22 @@ export async function chatController(req, res) {
       msg.includes("ETIMEDOUT") ||
       msg.includes("ECONNRESET")
     ) {
-      statusCode = 504;
       userMessage = "The AI request timed out. Please try again.";
-    } else if (msg.includes("unavailable") || msg.includes("503")) {
-      statusCode = 503;
+    } else if (msg.includes("unavailable") || msg.includes("503") || msg.includes("410")) {
       userMessage =
-        msg.length < 300 ? msg : "AI service is temporarily unavailable.";
+        msg.length < 300 ? msg : "AI service is temporarily unavailable. Please try again.";
     } else if (msg.includes("is not set")) {
-      statusCode = 503;
       userMessage = `AI configuration error: ${msg}`;
     }
 
-    return res.status(statusCode).json({
+    // Always respond with HTTP 200 so the chat interface displays the assistant bubble gracefully
+    // and never crashes the whole ERP into an offline maintenance screen!
+    return res.status(200).json({
       success: false,
       reply: userMessage,
       message: userMessage,
       toolCalls: [],
+      isError: true,
     });
   }
 }

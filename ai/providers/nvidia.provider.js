@@ -1,6 +1,9 @@
 // 2. External packages
 import OpenAI from "openai";
 
+// 7. Utilities
+import { parseTextToolCalls } from "../tool.parser.js";
+
 // 8. Base Provider
 import { AIProvider } from "./base.provider.js";
 
@@ -19,10 +22,10 @@ export const MODEL_LLAMA_3_1_8B  = "meta/llama-3.1-8b-instruct";                
 // 👉 Change ONLY this one variable to switch models everywhere automatically!
 // ════════════════════════════════════════════════════════════════════════════════
 export const SELECTED_MODEL = MODEL_NVIDIA_3_5;
-// export const SELECTED_MODEL = MODEL_NVIDIA_3;
-// export const SELECTED_MODEL = MODEL_LLAMA_3_3_70B;
-// export const SELECTED_MODEL = MODEL_LLAMA_3_1_70B;
 // export const SELECTED_MODEL = MODEL_NEMOTRON_70B;
+// export const SELECTED_MODEL = MODEL_LLAMA_3_3_70B;
+// export const SELECTED_MODEL = MODEL_NVIDIA_3;
+// export const SELECTED_MODEL = MODEL_LLAMA_3_1_70B;
 // export const SELECTED_MODEL = MODEL_LLAMA_3_1_8B;
 
 export const DEFAULT_MODEL = SELECTED_MODEL;
@@ -122,13 +125,12 @@ export function getModelProfile(modelName = SELECTED_MODEL) {
   };
 }
 
-// Fallback candidates if active model returns 404
+// Fallback candidates if active model returns 404 or 410
 const RELIABLE_NVIDIA_MODELS = [
   MODEL_NVIDIA_3_5,
-  MODEL_NVIDIA_3,
-  MODEL_LLAMA_3_3_70B,
-  MODEL_LLAMA_3_1_70B,
   MODEL_NEMOTRON_70B,
+  MODEL_NVIDIA_3,
+  MODEL_LLAMA_3_1_70B,
   MODEL_LLAMA_3_1_8B,
 ];
 
@@ -190,19 +192,18 @@ export class NvidiaProvider extends AIProvider {
 
     const requestParams = {
       model: targetModel,
-      messages: sanitizeMessages(messages),
+      messages: profile.supportsTools
+        ? sanitizeMessages(messages)
+        : sanitizeMessagesWithoutTools(messages),
       temperature: options.temperature ?? profile.temperature,
       max_tokens: options.maxTokens ?? profile.max_tokens,
       top_p: options.topP ?? profile.top_p,
     };
 
     // Attach thinking/reasoning parameters if the model supports it
-    if (profile.isReasoning) {
-      requestParams.reasoning_budget =
-        options.reasoningBudget ?? profile.reasoning_budget ?? 16384;
+    if (profile.isReasoning && profile.chat_template_kwargs) {
       requestParams.chat_template_kwargs =
-        options.chat_template_kwargs ??
-        profile.chat_template_kwargs ?? { enable_thinking: true };
+        options.chat_template_kwargs ?? profile.chat_template_kwargs;
     }
 
     if (nvidiaTools.length > 0) {
@@ -217,14 +218,23 @@ export class NvidiaProvider extends AIProvider {
     } catch (err) {
       const errLower = (err.message || "").toLowerCase();
 
-      // If the model returns 404, try other candidate models in the list
+      // Clean off reasoning/thinking parameters in case the API rejected them
+      delete requestParams.reasoning_budget;
+      delete requestParams.chat_template_kwargs;
+
+      // If the model returns 404, 410 (Gone), 400, or not found, try other candidate models in the list
       if (
         err.status === 404 ||
+        err.status === 410 ||
+        err.status === 400 ||
         errLower.includes("404") ||
-        errLower.includes("not found")
+        errLower.includes("410") ||
+        errLower.includes("400") ||
+        errLower.includes("not found") ||
+        errLower.includes("gone")
       ) {
         console.warn(
-          `[NVIDIA Provider] Model "${requestParams.model}" returned 404. Retrying with fallback models...`
+          `[NVIDIA Provider] Model "${requestParams.model}" returned ${err.status || "unavailable"}. Retrying with fallback models...`
         );
         const candidates = RELIABLE_NVIDIA_MODELS.filter(
           (m) => m !== requestParams.model
@@ -237,6 +247,9 @@ export class NvidiaProvider extends AIProvider {
             if (!candProfile.supportsTools) {
               delete requestParams.tools;
               delete requestParams.tool_choice;
+              requestParams.messages = sanitizeMessagesWithoutTools(messages);
+            } else {
+              requestParams.messages = sanitizeMessages(messages);
             }
             completionData = await this._callApi(requestParams);
             this.model = candidate;
@@ -262,7 +275,9 @@ export class NvidiaProvider extends AIProvider {
           delete requestParams.tools;
           delete requestParams.tool_choice;
           requestParams.messages = sanitizeMessagesWithoutTools(messages);
-          completionData = await this._callApi(requestParams);
+          try {
+            completionData = await this._callApi(requestParams);
+          } catch {}
         }
       }
 
@@ -294,10 +309,22 @@ export class NvidiaProvider extends AIProvider {
       };
     }
 
+    // Check if plain text output contains an explicit tool invocation (e.g. reasoning/text models)
+    const textContent = message?.content || "";
+    const parsedTextCalls = parseTextToolCalls(textContent);
+    if (parsedTextCalls.length > 0) {
+      return {
+        type: "tool_calls",
+        toolCalls: parsedTextCalls,
+        rawMessage: message,
+        usage: completionData.usage,
+      };
+    }
+
     // Plain text response with reasoning support
     return {
       type: "text",
-      text: message?.content || "",
+      text: textContent,
       reasoning: message?.reasoning_content || "",
       usage: completionData.usage,
     };
@@ -317,7 +344,9 @@ export class NvidiaProvider extends AIProvider {
 
     const requestParams = {
       model: targetModel,
-      messages: sanitizeMessages(messages),
+      messages: profile.supportsTools
+        ? sanitizeMessages(messages)
+        : sanitizeMessagesWithoutTools(messages),
       temperature: options.temperature ?? profile.temperature,
       top_p: options.topP ?? profile.top_p,
       max_tokens: options.maxTokens ?? profile.max_tokens,
@@ -433,7 +462,8 @@ function safeParseJson(str) {
 
 function sanitizeMessages(messages) {
   return messages.map((m) => {
-    const msg = { role: m.role };
+    const role = m.role === "model" ? "assistant" : m.role;
+    const msg = { role };
     if (m.content !== undefined) msg.content = m.content;
     if (m.tool_calls) msg.tool_calls = m.tool_calls;
     if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
