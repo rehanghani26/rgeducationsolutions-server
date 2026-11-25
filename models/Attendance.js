@@ -8,6 +8,11 @@ const AttendanceSchema = new mongoose.Schema({
     required: true,
     default: Date.now
   },
+  // Calendar date key in YYYY-MM-DD (school calendar day) for timezone-safe duplicate checks
+  attendanceDateKey: {
+    type: String,
+    index: true,
+  },
   // Attendance Date: The specific calendar date for which the attendance applies (past date or today)
   attendanceDate: {
     type: Date,
@@ -46,6 +51,8 @@ const AttendanceSchema = new mongoose.Schema({
   present: Number,
   absent: Number,
   late: Number,
+  leave: Number,
+  halfDay: Number,
   students: [{
     studentId: String,
     name: String,
@@ -61,6 +68,7 @@ const AttendanceSchema = new mongoose.Schema({
 // Non-unique index for fast filtering (allows multiple sections and updates)
 AttendanceSchema.index({ date: 1, classId: 1, sectionId: 1 }, { sparse: true });
 AttendanceSchema.index({ attendanceDate: 1, classId: 1 }, { sparse: true });
+AttendanceSchema.index({ attendanceDateKey: 1, type: 1, classId: 1, sectionId: 1 }, { sparse: true });
 AttendanceSchema.index({ attendanceTakenDate: 1 });
 
 AttendanceSchema.plugin(academicRecordPlugin, { collection: 'attendance' });

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Student from '../models/Student.js';
 import { checkFallback } from '../config/db.js';
 import { academicError, academicGrade, getAcademicScope } from '../utils/academicScope.js';
@@ -145,6 +146,8 @@ export async function scopedStudentRoster(req, { personal = true } = {}) {
 
 export async function findScopedEnrollment(req, studentId) {
   const scope = getAcademicScope();
-  if (!scope || scope.legacy) return null;
-  return readProcurement(req).one('studentSessionHistories', { studentId: String(studentId), sessionId: scope.sessionId });
+  if (!scope || scope.legacy || !studentId) return null;
+  const id = String(studentId).trim();
+  if (!id || (!checkFallback() && !mongoose.isObjectIdOrHexString(id))) return null;
+  return readProcurement(req).one('studentSessionHistories', { studentId: id, sessionId: scope.sessionId });
 }

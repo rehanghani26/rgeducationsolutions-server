@@ -139,12 +139,16 @@ export function buildSystemPrompt(user, currentDate, activeSession = null) {
 - Update teacher records
 - Delete teacher records (requires confirmation)
 
-### 📋 Attendance
-- View attendance by date, class, section
-- Get today's / yesterday's attendance
-- Attendance statistics and trends
-- Low-attendance alerts (students below threshold)
-- Weekly and monthly attendance reports
+### 📋 Attendance (Students, Staff & Real-World Validations)
+- **Daily Completion & Pending Sections** (\`getAttendanceStatus\`): Check which classes/sections or staff departments have been marked vs pending for any date, including future/Sunday/out-of-session flags.
+- **Daily Register Lookup** (\`getAttendanceByDate\`): View today's/yesterday's/any date's student OR teacher attendance, filter by class & section or department, and list absent, late, half-day, and approved-leave members.
+- **Period Analytics & Comparisons** (\`getAttendanceStats\`): Monthly or custom date-range KPIs and class-section comparisons across all 5 statuses (**Present**, **Absent**, **Late**, **Half Day**, **Leave**).
+- **Individual & Personal Attendance** (\`getStudentAttendance\`, \`getStudentAttendanceRecord\`, \`getMyAttendanceSummary\`): Real student logs, streaks, and signed-in user's own attendance records.
+- **Low-Attendance & Consecutive Absence Alerts** (\`getLowAttendanceStudents\`): Identify students below any threshold % (default 75%) or absent multiple days in a row.
+- **Mark or Update Attendance** (\`markAttendance\`, \`updateAttendanceRecord\`):
+  - Auto-loads active enrolled roster + approved leaves, blocks future/out-of-session dates, and **strictly prevents marking the same class-section or department twice in one day**.
+  - Always preview first with \`confirm: false\` so the user reviews counts/exceptions (and any Sunday warning), then call with \`confirm: true\` once they confirm.
+  - To modify an already-taken sheet, NEVER create a duplicate — use \`updateAttendanceRecord\`.
 
 ### 💰 Fees & Finance
 - Overall fee collection summary
@@ -327,8 +331,8 @@ Remember: You have real access to live school data. Use it confidently and accur
  * Get yesterday's date in YYYY-MM-DD format.
  */
 function getPreviousDay(today) {
-  const d = new Date(today);
-  d.setDate(d.getDate() - 1);
+  const d = new Date(`${today}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().split('T')[0];
 }
 
@@ -336,8 +340,8 @@ function getPreviousDay(today) {
  * Get tomorrow's date in YYYY-MM-DD format.
  */
 function getNextDay(today) {
-  const d = new Date(today);
-  d.setDate(d.getDate() + 1);
+  const d = new Date(`${today}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().split('T')[0];
 }
 
@@ -345,10 +349,10 @@ function getNextDay(today) {
  * Get the Monday of the current week.
  */
 function getWeekStart(today) {
-  const d = new Date(today);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  d.setDate(diff);
+  const d = new Date(`${today}T00:00:00.000Z`);
+  const day = d.getUTCDay();
+  const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
+  d.setUTCDate(diff);
   return d.toISOString().split('T')[0];
 }
 
@@ -356,8 +360,8 @@ function getWeekStart(today) {
  * Get the Sunday of the current week.
  */
 function getWeekEnd(today) {
-  const d = new Date(getWeekStart(today));
-  d.setDate(d.getDate() + 6);
+  const d = new Date(`${getWeekStart(today)}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 6);
   return d.toISOString().split('T')[0];
 }
 

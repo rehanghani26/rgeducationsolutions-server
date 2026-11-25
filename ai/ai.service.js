@@ -209,7 +209,12 @@ export async function processAiChat({
         replyText = `There are currently **${studentCount} students** enrolled in our school across all classes and sections.`;
       } else if (tool === "getAttendanceByDate") {
         const s = firstCall.data?.summary || {};
-        replyText = `Attendance for **${firstCall.args?.date || "today"}**: **${s.attendanceRate || "—"}%** attendance rate (${s.totalPresent ?? "—"} present, ${s.totalAbsent ?? "—"} absent out of ${s.totalStudents ?? "—"} total students).`;
+        replyText = `Attendance for **${firstCall.data?.date || firstCall.args?.date || "today"}**: **${s.attendanceRate || "0%"}** attendance rate (${s.present ?? 0} present, ${s.absent ?? 0} absent, ${s.late ?? 0} late, ${s.leave ?? 0} leave out of ${s.totalStudents ?? 0} total).`;
+      } else if (tool === "getAttendanceStatus") {
+        const s = firstCall.data?.summary || {};
+        replyText = `Daily attendance status for **${firstCall.data?.date || "today"}**: **${s.markedCount ?? 0}** of **${s.totalConfigured ?? 0}** marked (${s.pendingCount ?? 0} pending, ${s.completionPercentage ?? 0}% complete).`;
+      } else if (tool === "markAttendance" || tool === "updateAttendanceRecord") {
+        replyText = firstCall.data?.message || firstCall.data?.error || "Attendance request processed.";
       } else if (tool === "getFeeSummary") {
         const f = firstCall.data?.summary || {};
         replyText = `Fee summary: Total collections **₹${f.totalCollected || "0"}** with pending dues of **₹${f.totalPending || "0"}**.`;
@@ -230,9 +235,12 @@ export async function processAiChat({
       replyText = `There are currently **${studentCount} students** enrolled in our school across all classes and sections.`;
     } else if (tool === "getAttendanceByDate") {
       const s = firstCall.data?.summary || {};
-      replyText = `Attendance for **${firstCall.args?.date || "today"}**: **${s.attendanceRate || "—"}%** attendance rate (${s.totalPresent ?? "—"} present, ${s.totalAbsent ?? "—"} absent out of ${s.totalStudents ?? "—"} total students).`;
+      replyText = `Attendance for **${firstCall.data?.date || firstCall.args?.date || "today"}**: **${s.attendanceRate || "0%"}** attendance rate (${s.present ?? 0} present, ${s.absent ?? 0} absent, ${s.late ?? 0} late, ${s.leave ?? 0} leave out of ${s.totalStudents ?? 0} total).`;
+    } else if (tool === "getAttendanceStatus") {
+      const s = firstCall.data?.summary || {};
+      replyText = `Daily attendance status for **${firstCall.data?.date || "today"}**: **${s.markedCount ?? 0}** of **${s.totalConfigured ?? 0}** marked (${s.pendingCount ?? 0} pending).`;
     } else {
-      replyText = `Completed ${toolCallLog.length} operation(s) successfully.`;
+      replyText = firstCall.data?.message || firstCall.data?.error || `Completed ${toolCallLog.length} operation(s) successfully.`;
     }
   } else {
     replyText = "I was unable to complete your request. Please try again.";

@@ -19,12 +19,18 @@ export const workspaceDefinitions = [
 ];
 const managers = new Set(['super-admin', 'superadmin', 'school-admin', 'admin', 'principal', 'director']);
 const faculty = new Set(['teacher', 'head-teacher', 'hod', 'coordinator']);
+const attendanceWriters = new Set([...managers, 'teacher', 'head-teacher']);
+const attendanceReaders = new Set([...managers, ...faculty, 'tg', 'counselor', 'councellor']);
 
 export function permitsTool(name, user) {
   const role = roleOf({ user });
   if (!role) return false;
   if (name === 'getMyAcademicPlan') return ['student', 'parent'].includes(role);
-  if (name === 'getRoleAccess' || name === 'validateQueryRelevance') return true;
+  if (name === 'getMyAttendanceSummary' || name === 'getRoleAccess' || name === 'validateQueryRelevance') return true;
+  if (name === 'markAttendance' || name === 'updateAttendanceRecord') return attendanceWriters.has(role);
+  if (['getAttendanceStatus', 'getAttendanceByDate', 'getAttendanceStats', 'getLowAttendanceStudents'].includes(name)) {
+    return attendanceReaders.has(role);
+  }
   if (managers.has(role)) return true;
   if (faculty.has(role)) {
     // Faculty can access student tools, attendance, exams, results, homework, timetable, leaves, etc.
@@ -57,6 +63,7 @@ export function permitsTool(name, user) {
       'applyStudentLeave',
       'getStudentAttendance',
       'getStudentAttendanceRecord',
+      'getMyAttendanceSummary',
       'getStudentFee',
       'getStudentFeeLedger',
       'getStudentMarksheet',

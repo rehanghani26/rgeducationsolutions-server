@@ -11,8 +11,10 @@ import {
   getAttendanceById,
   getAttendanceRecords,
   getAttendanceStats,
+  getAttendanceStatusOverview,
   getMyAttendance,
   getStudentAttendance,
+  updateAttendance,
 } from "../controllers/attendanceController.js";
 
 const router = express.Router();
@@ -39,6 +41,13 @@ router.get("/student", protect, getStudentAttendance);
 router.get("/student/:studentId", protect, getStudentAttendance);
 
 /**
+ * @route   GET /api/v1/attendance/status
+ * @desc    Check daily attendance availability and class-section completion overview
+ * @access  Private
+ */
+router.get("/status", protect, getAttendanceStatusOverview);
+
+/**
  * @route   GET /api/v1/attendance/stats
  * @desc    Get institution-wide attendance statistics
  * @access  Private
@@ -61,7 +70,7 @@ router.get("/:id", protect, getAttendanceById);
 
 /**
  * @route   POST /api/v1/attendance
- * @desc    Submit or update daily attendance roster
+ * @desc    Submit daily attendance roster (disallows duplicates for same day/class/section)
  * @access  Private (Admin / Teacher)
  */
 router.post(
@@ -75,6 +84,37 @@ router.post(
     "head-teacher"
   ),
   createAttendance
+);
+
+/**
+ * @route   PUT /api/v1/attendance/:id
+ * @desc    Update an existing daily attendance record
+ * @access  Private (Admin / Teacher)
+ */
+router.put(
+  "/:id",
+  protect,
+  authorize(
+    "super-admin",
+    "school-admin",
+    "principal",
+    "teacher",
+    "head-teacher"
+  ),
+  updateAttendance
+);
+
+router.patch(
+  "/:id",
+  protect,
+  authorize(
+    "super-admin",
+    "school-admin",
+    "principal",
+    "teacher",
+    "head-teacher"
+  ),
+  updateAttendance
 );
 
 export default router;

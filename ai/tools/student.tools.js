@@ -16,11 +16,11 @@ import tenantContext from '../../utils/tenantContext.js';
 import Student from '../../models/Student.js';
 import Leave from '../../models/Leave.js';
 import Setting from '../../models/Setting.js';
-import Attendance from '../../models/Attendance.js';
 import Fee from '../../models/Fee.js';
 import { checkFallback } from '../../config/db.js';
 import { FallbackDb } from '../../services/dbFallback.js';
 import { logActivity } from '../../utils/activityLogger.js';
+import { attendanceToolExecutors } from './attendance.tools.js';
 import mongoose from 'mongoose';
 
 // ─── Tool Definitions (schema for the AI model) ──────────────────────────────
@@ -1081,42 +1081,6 @@ export const studentToolExecutors = {
       leaves = leaves.filter((l) => String(l.status || '').toLowerCase() === st);
     }
 
-    // Default sample data if empty so user always sees live samples
-    if (leaves.length === 0 && !student) {
-      leaves = [
-        {
-          _id: 'lv-01',
-          id: 'lv-01',
-          applicantName: 'Rahul Sharma',
-          class: 'Class 10',
-          section: 'A',
-          rollNumber: 12,
-          category: 'Medical Leave',
-          reason: 'Viral fever, doctor prescribed 3 days medical rest.',
-          startDate: '2026-05-18',
-          endDate: '2026-05-20',
-          totalDays: 3,
-          status: 'pending',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          _id: 'lv-02',
-          id: 'lv-02',
-          applicantName: 'Fatima Al-Zahra',
-          class: 'Class 9',
-          section: 'B',
-          rollNumber: 5,
-          category: 'Family / Personal Event',
-          reason: 'Sister wedding ceremony out of state.',
-          startDate: '2026-05-24',
-          endDate: '2026-05-26',
-          totalDays: 3,
-          status: 'approved',
-          createdAt: new Date().toISOString(),
-        },
-      ];
-    }
-
     const summary = {
       total: leaves.length,
       pending: leaves.filter((l) => l.status === 'pending').length,
@@ -1249,34 +1213,20 @@ export const studentToolExecutors = {
 
     const studentId = student._id || student.id;
 
-    // Attendance stats
-    let attendanceStats = { present: 0, absent: 0, late: 0, total: 0, percentage: 85 };
+    // Attendance stats (delegates to real unified attendance module)
+    let attendanceStats = { present: 0, absent: 0, late: 0, halfDay: 0, leave: 0, total: 0, percentage: 0 };
     try {
-      if (!checkFallback()) {
-        const records = await Attendance.find({
-          'students.studentId': String(studentId),
-        }).limit(30);
-
-        if (records.length > 0) {
-          let p = 0, a = 0, l = 0;
-          records.forEach((rec) => {
-            const entry = (rec.students || []).find((s) => String(s.studentId) === String(studentId));
-            if (entry) {
-              const st = (entry.status || '').toLowerCase();
-              if (st === 'present') p++;
-              else if (st === 'absent') a++;
-              else if (st === 'late') l++;
-            }
-          });
-          const tot = p + a + l;
-          attendanceStats = {
-            present: p,
-            absent: a,
-            late: l,
-            total: tot,
-            percentage: tot > 0 ? Math.round((p / tot) * 100) : 85,
-          };
-        }
+      const realAtt = await attendanceToolExecutors.getStudentAttendance({ studentId: String(studentId) }, context);
+      if (realAtt?.success && realAtt.summary) {
+        attendanceStats = {
+          present: realAtt.summary.presentCount || 0,
+          absent: realAtt.summary.absentCount || 0,
+          late: realAtt.summary.lateCount || 0,
+          halfDay: realAtt.summary.halfDayCount || 0,
+          leave: realAtt.summary.leaveCount || 0,
+          total: realAtt.summary.totalDays || 0,
+          percentage: parseInt(String(realAtt.summary.percentage || '0'), 10) || 0,
+        };
       }
     } catch {}
 
@@ -1343,63 +1293,55 @@ export const studentToolExecutors = {
   },
 
   /**
-   * Detailed Student Attendance History & Monthly Calendar
+   * Detailed Student Attendance History & Monthly Calendar (Real DB data)
    */
   async getStudentAttendanceRecord(args, context) {
-    const student = await findStudentByAnyIdentifier(args.studentId || args.studentName);
-    if (!student) return { success: false, error: 'Student not found.' };
-
-    const monthName = args.month || 'Current';
-    const year = args.year || new Date().getFullYear();
-
-    // Default realistic records
-    const records = [];
-    const daysInMonth = 28;
-    let presentCount = 0;
-    let absentCount = 0;
-    let lateCount = 0;
-
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dayNum = String(day).padStart(2, '0');
-      const dateStr = `2026-05-${dayNum}`;
-      const d = new Date(dateStr);
-      if (d.getDay() === 0) continue; // Skip Sunday
-
-      let status = 'present';
-      if (day === 8 || day === 19) {
-        status = 'absent';
-        absentCount++;
-      } else if (day === 14) {
-        status = 'late';
-        lateCount++;
-      } else {
-        presentCount++;
-      }
-
-      records.push({
-        date: dateStr,
-        day: d.toLocaleDateString('en-US', { weekday: 'short' }),
-        status,
-        remarks: status === 'absent' ? 'Sick leave requested' : status === 'late' ? 'Traffic delay (15 mins)' : 'On time',
-      });
+    const res = await attendanceToolExecutors.getStudentAttendance(
+      {
+        studentId: args.studentId,
+        studentName: args.studentName,
+        month: args.month,
+        year: args.year,
+      },
+      context
+    );
+    if (!res.success) {
+      return { success: false, error: res.error || 'Could not load student attendance records.' };
     }
 
-    const totalWorking = presentCount + absentCount + lateCount;
-    const percentage = totalWorking > 0 ? Math.round((presentCount / totalWorking) * 100) : 92;
+    const sum = res.summary || {};
+    const pctNum = parseInt(String(sum.percentage || '0'), 10) || 0;
+    const periodLabel = [args.month, args.year].filter(Boolean).join(' ') || 'All Recorded Days';
 
     return {
       success: true,
-      student: formatStudentDetail(student),
-      month: `${monthName} ${year}`,
-      stats: {
-        totalWorkingDays: totalWorking,
-        present: presentCount,
-        absent: absentCount,
-        late: lateCount,
-        percentage,
+      student: {
+        id: res.student?.id || res.studentId,
+        name: res.student?.name || 'Student',
+        class: res.student?.className || '—',
+        section: res.student?.sectionName || '—',
+        rollNumber: res.student?.rollNumber ?? '—',
+        admissionNumber: res.student?.admissionNumber || '—',
       },
-      streak: 9,
-      records: records.slice(-15), // last 15 days
+      month: periodLabel,
+      stats: {
+        totalWorkingDays: sum.totalDays || 0,
+        present: sum.presentCount || 0,
+        absent: sum.absentCount || 0,
+        late: sum.lateCount || 0,
+        halfDay: sum.halfDayCount || 0,
+        leave: sum.leaveCount || 0,
+        percentage: pctNum,
+      },
+      streak: res.streak?.currentPresentStreak || 0,
+      longestStreak: res.streak?.longestPresentStreak || 0,
+      records: (res.recentLogs || []).slice(0, 31).map((r) => ({
+        date: r.date,
+        day: (r.dayName || '').slice(0, 3) || '—',
+        status: String(r.status || 'present').toLowerCase(),
+        remarks: r.remarks === '—' ? '' : r.remarks || '',
+        classSection: r.classSection || '—',
+      })),
     };
   },
 
