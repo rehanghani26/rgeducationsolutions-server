@@ -1,7 +1,6 @@
 import { checkFallback } from '../config/db.js';
 import Attendance from '../models/Attendance.js';
 import Fee from '../models/Fee.js';
-import HostelOccupancy from '../models/HostelOccupancy.js';
 import Result from '../models/Result.js';
 import Transport from '../models/Transport.js';
 import TransportAssignment from '../models/TransportAssignment.js';
@@ -78,23 +77,6 @@ export const createTransportAssignment = handle(async (req, res) => {
   }
   const assignment = checkFallback() ? FallbackDb.create('transportAssignments', record) : await TransportAssignment.create(record);
   return sendCreated(res, 'Transport assignment saved.', { assignment });
-});
-
-export const getHostelOccupancies = handle(async (req, res) =>
-  sendSuccess(res, undefined, { occupancies: await rows(req, HostelOccupancy, 'hostelOccupancies', ownStudent(req)) })
-);
-
-export const createHostelOccupancy = handle(async (req, res) => {
-  const student = await assignmentStudent(req);
-  const block = clean(req.body.block), room = clean(req.body.room), bed = clean(req.body.bed);
-  if (!block || !room || !bed) throw academicError('Enter a hostel block, room, and bed.');
-  const record = { ...student, block, room, bed };
-  if (checkFallback() && (FallbackDb.findOne('hostelOccupancies', { block, room, bed }) ||
-    FallbackDb.findOne('hostelOccupancies', { studentId: student.studentId }))) {
-    throw academicError('This student or bed is already assigned for the session.', 409);
-  }
-  const occupancy = checkFallback() ? FallbackDb.create('hostelOccupancies', record) : await HostelOccupancy.create(record);
-  return sendCreated(res, 'Hostel occupancy saved.', { occupancy });
 });
 
 export const getAcademicReports = handle(async (req, res) => {

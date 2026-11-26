@@ -144,10 +144,10 @@ export async function scopedStudentRoster(req, { personal = true } = {}) {
   });
 }
 
-export async function findScopedEnrollment(req, studentId) {
+export async function findScopedEnrollment(req, studentId, store = readProcurement(req)) {
   const scope = getAcademicScope();
   if (!scope || scope.legacy || !studentId) return null;
   const id = String(studentId).trim();
   if (!id || (!checkFallback() && !mongoose.isObjectIdOrHexString(id))) return null;
-  return readProcurement(req).one('studentSessionHistories', { studentId: id, sessionId: scope.sessionId });
+  return store.one('studentSessionHistories', { studentId: id, sessionId: scope.sessionId });
 }

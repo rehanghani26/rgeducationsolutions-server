@@ -7,9 +7,9 @@ import { protect } from "../middleware/auth.js";
 import { authorize } from "../middleware/rbac.js";
 import { getClassMaster, getSchoolClassRange, setSchoolClassRange, updateClassOrder } from "../controllers/sessionController.js";
 import {
-  createHostelOccupancy, createTransportAssignment, createTransportRoute, getAcademicReports,
-  getHostelOccupancies, getTransportAssignments,
+  createTransportAssignment, createTransportRoute, getAcademicReports, getTransportAssignments,
 } from "../controllers/sessionOperationsController.js";
+import * as hostel from "../controllers/hostelController.js";
 
 // 7. Utilities
 import { sendBadRequest } from "../utils/responseUtil.js";
@@ -98,8 +98,25 @@ const operationsAdmin = authorize("super-admin", "school-admin", "admin", "princ
 router.post("/transport", protect, operationsAdmin, createTransportRoute);
 router.get("/transport/assignments", protect, getTransportAssignments);
 router.post("/transport/assignments", protect, operationsAdmin, createTransportAssignment);
-router.get("/hostel/occupancies", protect, getHostelOccupancies);
-router.post("/hostel/occupancies", protect, operationsAdmin, createHostelOccupancy);
+router.get("/hostel/access", protect, hostel.access);
+router.get("/hostel/workspace", protect, hostel.workspace);
+router.post("/hostel/hostels", protect, hostel.hostelSave);
+router.put("/hostel/hostels/:id", protect, hostel.hostelSave);
+router.get("/hostel/hostels/history", protect, hostel.history);
+router.get("/hostel/hostels/:id/history", protect, hostel.history);
+router.post("/hostel/rooms", protect, hostel.roomSave);
+router.put("/hostel/rooms/:id", protect, hostel.roomSave);
+router.post("/hostel/rooms/:id/assignments", protect, hostel.assignRoom);
+router.get("/hostel/students", protect, hostel.students);
+router.get("/hostel/students/:studentId/available-beds", protect, hostel.availableBeds);
+router.get("/hostel/students/:studentId", protect, hostel.studentAllocation);
+router.get("/hostel/occupancies", protect, hostel.occupancies);
+router.post("/hostel/occupancies", protect, hostel.assign);
+// The "check-in" and "release" transitions are temporarily disabled.
+for (const action of ["leave", "transfer", "continue"]) {
+  router.patch(`/hostel/occupancies/:id/${action}`, protect, hostel.transition(action));
+}
+router.patch("/hostel/legacy/:id", protect, hostel.reviewLegacy);
 router.get("/reports/academic", protect, authorize("super-admin", "school-admin", "admin", "principal", "accountant"), getAcademicReports);
 
 // Notification Routes

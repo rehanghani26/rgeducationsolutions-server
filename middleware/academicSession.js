@@ -8,6 +8,7 @@ const adminRoles = new Set(['super-admin', 'superadmin', 'school-admin', 'admin'
 
 export async function resolveAcademicScope(req) {
   const path = (req.originalUrl || req.url || '').split('?')[0].replace(/^\/api(?:\/v1)?(?=\/)/, '');
+  if (/^\/erp\/hostel\/(?:access|hostels)(?:\/|$)/.test(path)) return null;
   const teacherRead = ['GET', 'HEAD'].includes(req.method) && teacherReads.test(path);
   if (!modulePaths.test(path) && !teacherRead) return null;
   const explicit = /^\/classes\/session\/([^/]+)$/.exec(path)?.[1] || req.query?.sessionId;
@@ -29,7 +30,8 @@ export async function resolveAcademicScope(req) {
   req.academicSession = session;
   req.academicSessionId = sessionId;
   const readOnly = !session.isCurrent;
-  const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && path !== '/ai/chat';
+  const historicalHostelReview = req.method === 'PATCH' && /^\/erp\/hostel\/legacy\/[^/]+$/.test(path);
+  const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && path !== '/ai/chat' && !historicalHostelReview;
   if (readOnly && mutation) {
     throw academicError('Select the active academic session to make changes.', 409);
   }

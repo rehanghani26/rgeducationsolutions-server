@@ -20,7 +20,7 @@ import { sendForbidden, sendUnauthorized } from "../utils/responseUtil.js";
 /**
  * Helper to normalize role strings
  */
-const normalizeRole = (r) => {
+export const normalizeRole = (r) => {
   if (!r) return "";
   const clean = String(r).trim().toLowerCase().replace(/_/g, "-");
   if (clean === "superadmin") return "super-admin";

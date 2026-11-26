@@ -1,5 +1,6 @@
 import { createEnrolledStudent, scopedStudentRoster, updateEnrolledStudent } from '../../services/studentEnrollmentService.js';
 import { getAcademicScope } from '../../utils/academicScope.js';
+import { studentHostel } from '../../services/hostelService.js';
 import tenantContext from '../../utils/tenantContext.js';
 /**
  * @file student.tools.js
@@ -1748,27 +1749,8 @@ export const studentToolExecutors = {
    * Student Hostel / Dormitory Allocation
    */
   async getStudentHostel(args, context) {
-    const student = await findStudentByAnyIdentifier(args.studentId || args.studentName);
-    if (!student) return { success: false, error: 'Student not found.' };
-
-    return {
-      success: true,
-      student: formatStudentDetail(student),
-      hostel: {
-        isHosteller: true,
-        blockName: 'Vivekananda Scholars Hall (Block A)',
-        roomNumber: 'A-204',
-        bedNumber: 'Bed 02',
-        roomType: 'Twin Sharing (Air Conditioned)',
-        wardenName: 'Prof. Ramesh Narayan',
-        wardenContact: '9876540099',
-        curfewTime: '08:30 PM',
-        messPreference: 'North Indian Vegetarian',
-        roommates: [
-          { name: 'Karan Mehra', class: student.class || 'Class 10', section: 'A' },
-        ],
-      },
-    };
+    const { student, allocation } = await studentHostel(context, { identifier: args.studentId || args.studentName });
+    return { success: true, student, hostel: { allocation } };
   },
 
   /**

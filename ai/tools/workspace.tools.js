@@ -72,6 +72,7 @@ export function permitsTool(name, user) {
       'getStudentHomework',
       'getStudentDocuments',
       'getStudentTransport',
+      'getStudentHostel',
       'getStudentLibrary',
       'getStudentMedicalProfile',
       'getStudentAnalytics',
